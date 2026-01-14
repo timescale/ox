@@ -1,5 +1,22 @@
 # conductor
 
+Install:
+
+```
+git clone git@github.com:timescale/conductor.git
+cd conductor
+bun link
+```
+
+Usage:
+
+
+```
+cd myproject
+conductor branch "Add a way for users to mark books as their favorite."
+```
+
+
 ## Demo Workflow
 
 Run `conductor branch "<prompt>"` and conductor will:
