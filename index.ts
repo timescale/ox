@@ -407,7 +407,9 @@ async function startContainer(
       -v ${worktreePath}:/app \
       -w /app \
       conductor-sandbox \
-      claude -p --dangerously-skip-permissions ${prompt}`.quiet();
+      claude -p --dangerously-skip-permissions \
+        --append-system-prompt "Use the \`gp\` command to push your commits to the current branch (no arguments needed). Use the \`gh\` command to create a PR." \
+        "${prompt}"`;
     return result.stdout.toString().trim();
   } catch (err) {
     throw formatShellError(err as ShellError);

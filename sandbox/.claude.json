@@ -1,0 +1,17 @@
+{
+  "numStartups": 1,
+  "installMethod": "native",
+  "autoUpdates": false,
+  "hasCompletedOnboarding": true,
+  "bypassPermissionsModeAccepted": true,
+  "projects": {
+    "/app": {
+      "allowedTools": [],
+      "mcpContextUris": [],
+      "mcpServers": {},
+      "enabledMcpjsonServers": [],
+      "disabledMcpjsonServers": [],
+      "hasTrustDialogAccepted": true
+    }
+  }
+}

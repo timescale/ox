@@ -339,6 +339,10 @@ RUN curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | tee /etc/apt/tru
   && apt-get install -y ngrok \
   && rm -rf /var/lib/apt/lists/*
 
+# Helper script to git push via https
+COPY gp.sh /usr/local/bin/gp
+RUN chmod +x /usr/local/bin/gp
+
 # ============================================================================
 # NON-ROOT USER SETUP
 # ============================================================================
@@ -364,6 +368,7 @@ RUN cp -r /root/.bun /home/${USER_NAME}/.bun \
 # Install claude code as non-root user
 USER ${USER_NAME}
 RUN curl -fsSL https://claude.ai/install.sh | bash
+COPY .claude.json /home/${USER_NAME}/.claude.json
 
 # ============================================================================
 # ENVIRONMENT CONFIGURATION
@@ -379,6 +384,10 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/home/${USER_NAME}/.cache/ms-playwright
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium
 ENV CHROME_BIN=/usr/local/bin/chromium
+
+RUN  git config --global user.email "conductor@tigerdata.com" \
+  && git config --global user.name "Conductor Agent"
+
 
 # Create working directory
 WORKDIR /app
