@@ -1,15 +1,18 @@
 {
   "name": "conductor",
   "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "bin": {
-    "conductor": "./index.ts"
-  },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "bin": {
+    "conductor": "./index.ts"
+  },
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "commander": "^14.0.2"
   }
 }
