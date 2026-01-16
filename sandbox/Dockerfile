@@ -369,6 +369,10 @@ COPY .claude.json /home/${USER_NAME}/.claude.json
 # tiger CLI
 RUN curl -fsSL https://cli.tigerdata.com | sh
 
+# opencode
+RUN curl -fsSL https://opencode.ai/install | bash
+RUN ln -s /home/${USER_NAME}/.opencode/bin/opencode /home/${USER_NAME}/.local/bin/opencode
+
 
 # ============================================================================
 # ENVIRONMENT CONFIGURATION
