@@ -2,21 +2,21 @@
 // Docker Container Service
 // ============================================================================
 
-import { formatShellError, type ShellError } from "../utils";
-import type { RepoInfo } from "./git";
+import { formatShellError, type ShellError } from '../utils';
+import type { RepoInfo } from './git';
 
 export async function startContainer(
   branchName: string,
   prompt: string,
   repoInfo: RepoInfo,
-  envVars?: Record<string, string>
+  envVars?: Record<string, string>,
 ): Promise<string> {
-  const conductorEnvPath = ".conductor/.env";
+  const conductorEnvPath = '.conductor/.env';
   const conductorEnvFile = Bun.file(conductorEnvPath);
 
   // Create empty .conductor/.env if it doesn't exist
   if (!(await conductorEnvFile.exists())) {
-    await Bun.write(conductorEnvPath, "");
+    await Bun.write(conductorEnvPath, '');
   }
 
   const containerName = `conductor-${branchName}`;
@@ -24,7 +24,7 @@ export async function startContainer(
   // Build env var arguments for docker run
   const envArgs: string[] = [];
   for (const [key, value] of Object.entries(envVars ?? {})) {
-    envArgs.push("-e", `${key}=${value}`);
+    envArgs.push('-e', `${key}=${value}`);
   }
 
   // Build the startup script that:

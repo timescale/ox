@@ -2,7 +2,7 @@
 // Git & Branch Name Services
 // ============================================================================
 
-import { formatShellError, type ShellError } from "../utils";
+import { formatShellError, type ShellError } from '../utils';
 
 export interface RepoInfo {
   owner: string;
@@ -23,13 +23,15 @@ export async function getRepoInfo(): Promise<RepoInfo> {
   // https://github.com/owner/repo.git
   // git@github.com:owner/repo.git
   let repoPath = remoteUrl;
-  repoPath = repoPath.replace(/^https:\/\/github\.com\//, "");
-  repoPath = repoPath.replace(/^git@github\.com:/, "");
-  repoPath = repoPath.replace(/\.git$/, "");
+  repoPath = repoPath.replace(/^https:\/\/github\.com\//, '');
+  repoPath = repoPath.replace(/^git@github\.com:/, '');
+  repoPath = repoPath.replace(/\.git$/, '');
 
-  const parts = repoPath.split("/");
+  const parts = repoPath.split('/');
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    throw new Error(`Unable to parse GitHub repository from remote URL: ${remoteUrl}`);
+    throw new Error(
+      `Unable to parse GitHub repository from remote URL: ${remoteUrl}`,
+    );
   }
 
   return {
@@ -45,7 +47,7 @@ function isValidBranchName(name: string): boolean {
   if (name.length === 0 || name.length > 50) return false;
   if (!/^[a-z][a-z0-9-]*[a-z0-9]$/.test(name) && !/^[a-z]$/.test(name))
     return false;
-  if (name.includes("--")) return false; // No double hyphens
+  if (name.includes('--')) return false; // No double hyphens
   return true;
 }
 
@@ -54,8 +56,8 @@ async function getExistingBranches(): Promise<string[]> {
     const result = await Bun.$`git branch --list`.quiet();
     return result.stdout
       .toString()
-      .split("\n")
-      .map((line) => line.replace(/^\*?\s*/, "").trim())
+      .split('\n')
+      .map((line) => line.replace(/^\*?\s*/, '').trim())
       .filter(Boolean);
   } catch (err) {
     throw formatShellError(err as ShellError);
@@ -79,10 +81,10 @@ async function getExistingContainers(): Promise<string[]> {
     const result = await Bun.$`docker ps -a --format {{.Names}}`.quiet();
     return result.stdout
       .toString()
-      .split("\n")
+      .split('\n')
       .map((name) => name.trim())
       .filter(Boolean)
-      .map((name) => name.replace(/^conductor-/, "")); // Normalize to branch name format
+      .map((name) => name.replace(/^conductor-/, '')); // Normalize to branch name format
   } catch {
     // Docker not available, return empty array
     return [];
@@ -91,7 +93,7 @@ async function getExistingContainers(): Promise<string[]> {
 
 export async function generateBranchName(
   prompt: string,
-  maxRetries: number = 3
+  maxRetries: number = 3,
 ): Promise<string> {
   // Gather all existing names to avoid conflicts
   const [existingBranches, existingServices, existingContainers] =
@@ -107,7 +109,7 @@ export async function generateBranchName(
     ...existingContainers,
   ]);
 
-  let lastAttempt = "";
+  let lastAttempt = '';
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let claudePrompt = `Generate a git branch name for the following task: ${prompt}
@@ -121,7 +123,7 @@ Requirements:
 
     if (allExistingNames.size > 0) {
       claudePrompt += `\n\nIMPORTANT: Do NOT use any of these names (they already exist):
-${[...allExistingNames].join(", ")}`;
+${[...allExistingNames].join(', ')}`;
     }
 
     if (lastAttempt) {
@@ -138,11 +140,11 @@ ${[...allExistingNames].join(", ")}`;
     const branchName = result.trim().toLowerCase();
 
     // Clean up any quotes or extra whitespace
-    const cleaned = branchName.replace(/['"]/g, "").trim();
+    const cleaned = branchName.replace(/['"]/g, '').trim();
 
     if (!isValidBranchName(cleaned)) {
       console.log(
-        `  Attempt ${attempt}: '${cleaned}' is not a valid branch name`
+        `  Attempt ${attempt}: '${cleaned}' is not a valid branch name`,
       );
       lastAttempt = cleaned;
       continue;
@@ -158,5 +160,7 @@ ${[...allExistingNames].join(", ")}`;
     return cleaned;
   }
 
-  throw new Error(`Failed to generate valid branch name after ${maxRetries} attempts`);
+  throw new Error(
+    `Failed to generate valid branch name after ${maxRetries} attempts`,
+  );
 }
