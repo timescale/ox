@@ -13,13 +13,15 @@ export interface StartContainerOptions {
   repoInfo: RepoInfo;
   agent: AgentType;
   detach: boolean;
+  interactive: boolean;
   envVars?: Record<string, string>;
 }
 
 export async function startContainer(
   options: StartContainerOptions,
 ): Promise<string | null> {
-  const { branchName, prompt, repoInfo, agent, detach, envVars } = options;
+  const { branchName, prompt, repoInfo, agent, detach, interactive, envVars } =
+    options;
 
   const conductorEnvPath = '.conductor/.env';
   const conductorEnvFile = Bun.file(conductorEnvPath);
@@ -37,11 +39,11 @@ export async function startContainer(
     envArgs.push('-e', `${key}=${value}`);
   }
 
-  // Build the agent command based on the selected agent type
+  // Build the agent command based on the selected agent type and mode
   const agentCommand =
     agent === 'claude'
-      ? `claude -p --dangerously-skip-permissions`
-      : `opencode run`;
+      ? `claude${interactive ? '' : ' -p'} --dangerously-skip-permissions`
+      : `opencode ${interactive ? '--prompt' : 'run'}`;
 
   // Build the startup script that:
   // 1. Clones the repo using gh

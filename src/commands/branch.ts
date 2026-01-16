@@ -17,6 +17,7 @@ interface BranchOptions {
   dbFork: boolean;
   agent: AgentType;
   detach: boolean;
+  interactive: boolean;
 }
 
 function printSummary(
@@ -46,6 +47,12 @@ async function branchAction(
   prompt: string,
   options: BranchOptions,
 ): Promise<void> {
+  // Validate mutually exclusive options
+  if (options.detach && options.interactive) {
+    console.error('Error: --detach and --interactive are mutually exclusive');
+    process.exit(1);
+  }
+
   // Step 1: Get repo info
   console.log('Getting repository info...');
   const repoInfo = await getRepoInfo();
@@ -77,6 +84,7 @@ async function branchAction(
     repoInfo,
     agent: options.agent,
     detach: options.detach,
+    interactive: options.interactive,
     envVars: forkResult?.envVars,
   });
 
@@ -84,6 +92,9 @@ async function branchAction(
     console.log(`  Container started: ${containerId?.substring(0, 12)}`);
     // Summary only shown in detached mode
     printSummary(branchName, repoInfo, forkResult);
+  } else if (options.interactive) {
+    // Interactive mode exited
+    console.log(`\n${options.agent} session ended.`);
   }
 }
 
@@ -99,4 +110,5 @@ export const branchCommand = new Command('branch')
   .option('--no-db-fork', 'Skip the database fork step')
   .option('-a, --agent <type>', 'Agent to use: claude or opencode', 'opencode')
   .option('-d, --detach', 'Run container in background (detached mode)')
+  .option('-i, --interactive', 'Run agent in full TUI mode')
   .action(branchAction);
