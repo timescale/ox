@@ -1,15 +1,23 @@
 {
   "name": "conductor",
   "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "bin": {
-    "conductor": "./index.ts"
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "bun x @biomejs/biome check"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.3.11",
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "bin": {
+    "conductor": "./index.ts"
+  },
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "commander": "^14.0.2"
   }
 }

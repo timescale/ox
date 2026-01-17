@@ -314,11 +314,11 @@ RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --d
 # Helm
 RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# Docker CLI (for Docker-in-Docker scenarios)
+# Docker (daemon + CLI for Docker-in-Docker scenarios)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
   && apt-get update \
-  && apt-get install -y docker-ce-cli docker-compose-plugin \
+  && apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
   && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -339,22 +339,62 @@ RUN curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | tee /etc/apt/tru
   && apt-get install -y ngrok \
   && rm -rf /var/lib/apt/lists/*
 
-# claude code
+# ============================================================================
+# NON-ROOT USER SETUP
+# ============================================================================
+
+# Create non-root user (required for claude --dangerously-skip-permissions)
+ARG USER_NAME=agent
+ARG USER_UID=10000
+ARG USER_GID=10000
+
+RUN groupadd --gid ${USER_GID} ${USER_NAME} \
+  && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USER_NAME} \
+  && mkdir -p /home/${USER_NAME}/.local/bin \
+  && mkdir -p /home/${USER_NAME}/.cache
+
+# Copy tools installed in root's home to agent's home
+RUN cp -r /root/.bun /home/${USER_NAME}/.bun \
+  && cp -r /root/.cargo /home/${USER_NAME}/.cargo \
+  && cp -r /root/.rustup /home/${USER_NAME}/.rustup \
+  && cp -r /root/go /home/${USER_NAME}/go \
+  && cp -r /root/.cache/ms-playwright /home/${USER_NAME}/.cache/ms-playwright \
+  && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}
+
+# Install claude code as non-root user
+USER ${USER_NAME}
 RUN curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/root/.local/bin:$PATH"
+COPY .claude.json /home/${USER_NAME}/.claude.json
+
+# tiger CLI
+RUN curl -fsSL https://cli.tigerdata.com | sh
+
+# opencode
+RUN curl -fsSL https://opencode.ai/install | bash
+RUN ln -s /home/${USER_NAME}/.opencode/bin/opencode /home/${USER_NAME}/.local/bin/opencode
+
 
 # ============================================================================
 # ENVIRONMENT CONFIGURATION
 # ============================================================================
 
-# Create working directory
-WORKDIR /workspace
+ENV HOME=/home/${USER_NAME}
+ENV PATH="/home/${USER_NAME}/.local/bin:/home/${USER_NAME}/.bun/bin:/home/${USER_NAME}/.cargo/bin:/home/${USER_NAME}/go/bin:/usr/local/go/bin:$PATH"
+ENV BUN_INSTALL="/home/${USER_NAME}/.bun"
+ENV GOPATH="/home/${USER_NAME}/go"
 
 # Environment variables for browser automation
-ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/${USER_NAME}/.cache/ms-playwright
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium
 ENV CHROME_BIN=/usr/local/bin/chromium
+
+RUN  git config --global user.email "conductor@tigerdata.com" \
+  && git config --global user.name "Conductor Agent"
+
+
+# Create working directory
+WORKDIR /work
 
 # Default command
 CMD ["/bin/bash"]
