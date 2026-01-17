@@ -4,7 +4,11 @@
 
 import { Command } from 'commander';
 import { type ForkResult, forkDatabase } from '../services/db';
-import { type AgentType, startContainer } from '../services/docker';
+import {
+  type AgentType,
+  ensureDockerImage,
+  startContainer,
+} from '../services/docker';
 import {
   generateBranchName,
   getRepoInfo,
@@ -76,7 +80,10 @@ async function branchAction(
     console.log(`  Database fork created: ${forkResult.name}`);
   }
 
-  // Step 5: Start container (repo will be cloned inside container)
+  // Step 5: Ensure Docker image exists (build if missing)
+  await ensureDockerImage();
+
+  // Step 6: Start container (repo will be cloned inside container)
   console.log(`Starting agent container (using ${options.agent})...`);
   const containerId = await startContainer({
     branchName,

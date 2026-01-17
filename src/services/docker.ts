@@ -4,8 +4,56 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+// Import the Dockerfile as text - Bun's bundler embeds this in the binary
+import SANDBOX_DOCKERFILE from '../../sandbox/Dockerfile' with { type: 'text' };
 import { formatShellError, type ShellError } from '../utils';
 import type { RepoInfo } from './git';
+
+const DOCKER_IMAGE_NAME = 'conductor-sandbox';
+
+// ============================================================================
+// Docker Image Management
+// ============================================================================
+
+async function dockerImageExists(): Promise<boolean> {
+  try {
+    await Bun.$`docker image inspect ${DOCKER_IMAGE_NAME}`.quiet();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function buildDockerImage(): Promise<void> {
+  // Use Bun.spawn to pipe the Dockerfile content to docker build
+  const proc = Bun.spawn(['docker', 'build', '-t', DOCKER_IMAGE_NAME, '-'], {
+    stdin: Buffer.from(SANDBOX_DOCKERFILE),
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+
+  const exitCode = await proc.exited;
+
+  if (exitCode !== 0) {
+    throw new Error(`Docker build failed with exit code ${exitCode}`);
+  }
+}
+
+export async function ensureDockerImage(): Promise<void> {
+  if (await dockerImageExists()) {
+    return;
+  }
+
+  console.log(
+    'Building conductor-sandbox Docker image (this may take a while)...',
+  );
+  await buildDockerImage();
+  console.log('  Docker image built successfully');
+}
+
+// ============================================================================
+// Container Management
+// ============================================================================
 
 export type AgentType = 'claude' | 'opencode';
 
