@@ -364,7 +364,25 @@ RUN cp -r /root/.bun /home/${USER_NAME}/.bun \
 # Install claude code as non-root user
 USER ${USER_NAME}
 RUN curl -fsSL https://claude.ai/install.sh | bash
-COPY .claude.json /home/${USER_NAME}/.claude.json
+RUN cat <<'EOF' > /home/${USER_NAME}/.claude.json
+{
+  "numStartups": 1,
+  "installMethod": "native",
+  "autoUpdates": false,
+  "hasCompletedOnboarding": true,
+  "bypassPermissionsModeAccepted": true,
+  "projects": {
+    "/app": {
+      "allowedTools": [],
+      "mcpContextUris": [],
+      "mcpServers": {},
+      "enabledMcpjsonServers": [],
+      "disabledMcpjsonServers": [],
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
+EOF
 
 # tiger CLI
 RUN curl -fsSL https://cli.tigerdata.com | sh
