@@ -91,7 +91,12 @@ function ServiceSelector({
           onChange={handleChange}
           onSelect={handleSelect}
           showScrollIndicator
-          style={{ marginTop: 1, flexShrink: 1, flexGrow: 1, maxHeight: options.length * 2 }}
+          style={{
+            marginTop: 1,
+            flexShrink: 1,
+            flexGrow: 1,
+            maxHeight: options.length * 2,
+          }}
         />
       </box>
     </box>
