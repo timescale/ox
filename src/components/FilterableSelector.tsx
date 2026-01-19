@@ -1,72 +1,15 @@
-import type { ScrollBoxRenderable, SelectOption } from '@opentui/core';
+import type { ScrollBoxRenderable } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { useEffect, useRef, useState } from 'react';
+import {
+  type BaseSelectorProps,
+  getOptionValue,
+  LINES_PER_ITEM,
+  ListItem,
+  scrollToIndex,
+} from './SelectorCommon.tsx';
 
-export interface FilterableSelectorProps {
-  title: string;
-  description: string;
-  options: SelectOption[];
-  initialIndex: number;
-  showBack?: boolean;
-  onSelect: (value: string | null) => void;
-  onCancel: () => void;
-  onBack?: () => void;
-}
-
-interface ListItemProps {
-  option: SelectOption;
-  isSelected: boolean;
-  isHovered: boolean;
-  onMouseDown: () => void;
-  onMouseOver: () => void;
-}
-
-function ListItem({
-  option,
-  isSelected,
-  isHovered,
-  onMouseDown,
-  onMouseOver,
-}: ListItemProps) {
-  // Selected takes priority, then hovered, then default
-  const bgColor = isSelected ? '#0066cc' : isHovered ? '#333344' : undefined;
-  const textColor = isSelected ? '#ffffff' : undefined;
-  const descColor = isSelected ? '#cccccc' : '#888888';
-  const arrow = isSelected ? '>' : ' ';
-
-  return (
-    <box
-      onMouseDown={onMouseDown}
-      onMouseOver={onMouseOver}
-      style={{
-        flexDirection: 'column',
-        backgroundColor: bgColor,
-        paddingLeft: 1,
-      }}
-    >
-      <text style={{ fg: textColor }}>{`${arrow} ${option.name}`}</text>
-      <text style={{ fg: descColor }}>{`  ${option.description}`}</text>
-    </box>
-  );
-}
-
-const LINES_PER_ITEM = 2; // Each item has name + description
-
-// Scroll to center the given index in the viewport
-const scrollToIndex = (
-  scrollbox: ScrollBoxRenderable | null,
-  index: number,
-) => {
-  if (!scrollbox) return;
-  const viewportHeight = scrollbox.viewport?.height ?? 1;
-  const itemY = index * LINES_PER_ITEM;
-  // Center the item in the viewport
-  const targetScrollY = Math.max(
-    0,
-    itemY - Math.floor(viewportHeight / 2) + LINES_PER_ITEM / 2,
-  );
-  scrollbox.scrollTo({ x: 0, y: targetScrollY });
-};
+export type FilterableSelectorProps = BaseSelectorProps;
 
 export function FilterableSelector({
   title,
@@ -148,7 +91,7 @@ export function FilterableSelector({
     if (key.name === 'return' && filteredOptions.length > 0) {
       const option = filteredOptions[clampedIndex];
       if (option) {
-        onSelect(option.value === '__null__' ? null : (option.value as string));
+        onSelect(getOptionValue(option));
       }
       return;
     }
@@ -164,7 +107,7 @@ export function FilterableSelector({
   const handleItemClick = (index: number) => {
     const option = filteredOptions[index];
     if (option) {
-      onSelect(option.value === '__null__' ? null : (option.value as string));
+      onSelect(getOptionValue(option));
     }
   };
 

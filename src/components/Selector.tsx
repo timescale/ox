@@ -1,73 +1,15 @@
-import type { ScrollBoxRenderable, SelectOption } from '@opentui/core';
+import type { ScrollBoxRenderable } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { useEffect, useRef, useState } from 'react';
+import {
+  type BaseSelectorProps,
+  getOptionValue,
+  LINES_PER_ITEM,
+  ListItem,
+  scrollToIndex,
+} from './SelectorCommon.tsx';
 
-export interface SelectorProps {
-  title: string;
-  description: string;
-  options: SelectOption[];
-  initialIndex: number;
-  showBack?: boolean;
-  onSelect: (value: string | null) => void;
-  onCancel: () => void;
-  onBack?: () => void;
-}
-
-interface ListItemProps {
-  option: SelectOption;
-  isSelected: boolean;
-  isHovered: boolean;
-  onMouseDown: () => void;
-  onMouseOver: () => void;
-}
-
-function ListItem({
-  option,
-  isSelected,
-  isHovered,
-  onMouseDown,
-  onMouseOver,
-}: ListItemProps) {
-  // Selected takes priority, then hovered, then default
-  const bgColor = isSelected ? '#0066cc' : isHovered ? '#333344' : undefined;
-  const textColor = isSelected ? '#ffffff' : undefined;
-  const descColor = isSelected ? '#cccccc' : '#888888';
-  const arrow = isSelected ? '>' : ' ';
-
-  return (
-    <box
-      onMouseDown={onMouseDown}
-      onMouseOver={onMouseOver}
-      style={{
-        flexDirection: 'column',
-        backgroundColor: bgColor,
-        paddingLeft: 1,
-      }}
-    >
-      <text style={{ fg: textColor }}>{`${arrow} ${option.name}`}</text>
-      <text style={{ fg: descColor }}>{`  ${option.description}`}</text>
-    </box>
-  );
-}
-
-const LINES_PER_ITEM = 2; // Each item has name + description
-const MAX_VISIBLE_HEIGHT = 20; // Max height of scrollbox in lines
-
-// Scroll to center the given index in the viewport
-const scrollToIndex = (
-  scrollbox: ScrollBoxRenderable | null,
-  index: number,
-) => {
-  if (!scrollbox) return;
-  const viewportHeight = scrollbox.viewport?.height ?? MAX_VISIBLE_HEIGHT;
-  const itemY = index * LINES_PER_ITEM;
-  // Center the item in the viewport
-  const targetScrollY = Math.max(
-    0,
-    itemY - Math.floor(viewportHeight / 2) + LINES_PER_ITEM / 2,
-  );
-  scrollbox.scrollTo({ x: 0, y: targetScrollY });
-};
+export type SelectorProps = BaseSelectorProps;
 
 export function Selector({
   title,
@@ -122,7 +64,7 @@ export function Selector({
     if (key.name === 'return' && options.length > 0) {
       const option = options[selectedIndex];
       if (option) {
-        onSelect(option.value === '__null__' ? null : (option.value as string));
+        onSelect(getOptionValue(option));
       }
     }
   });
@@ -130,7 +72,7 @@ export function Selector({
   const handleItemClick = (index: number) => {
     const option = options[index];
     if (option) {
-      onSelect(option.value === '__null__' ? null : (option.value as string));
+      onSelect(getOptionValue(option));
     }
   };
 
@@ -141,6 +83,10 @@ export function Selector({
   const handleMouseOut = () => {
     setHoveredIndex(null);
   };
+
+  const helpText = showBack
+    ? 'Use arrows to navigate, Enter/click to select, b/Backspace to go back, Esc to cancel'
+    : 'Use arrows to navigate, Enter/click to select, Esc to cancel';
 
   return (
     <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
@@ -154,12 +100,8 @@ export function Selector({
           flexGrow: 1,
         }}
       >
-        <text>{description}</text>
-        <text style={{ fg: '#888888' }}>
-          {showBack
-            ? 'Use arrows to navigate, Enter/click to select, b/Backspace to go back, Esc to cancel'
-            : 'Use arrows to navigate, Enter/click to select, Esc to cancel'}
-        </text>
+        <text style={{ height: 1 }}>{description}</text>
+        <text style={{ height: 1, fg: '#888888' }}>{helpText}</text>
 
         <scrollbox
           ref={scrollboxRef}
