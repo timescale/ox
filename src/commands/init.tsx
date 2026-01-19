@@ -214,7 +214,7 @@ function WizardSteps({ data, onComplete }: WizardStepsProps) {
     ];
 
     if (isInstalling) {
-      return <Loading onCancel={handleCancel} />;
+      return <Loading title="Installing opencode" onCancel={handleCancel} />;
     }
 
     return (
@@ -230,12 +230,12 @@ function WizardSteps({ data, onComplete }: WizardStepsProps) {
             return;
           }
 
-          // Install opencode
+          // Install opencode and fetch models before hiding loading screen
           setIsInstalling(true);
           const result = await installOpencode();
-          setIsInstalling(false);
 
           if (!result.success) {
+            setIsInstalling(false);
             onComplete({
               type: 'error',
               message: `Failed to install opencode: ${result.error}`,
@@ -243,10 +243,11 @@ function WizardSteps({ data, onComplete }: WizardStepsProps) {
             return;
           }
 
-          // Refresh opencode models after installation
+          // Refresh opencode models after installation (still showing loading)
           const models = await getModelsForAgent('opencode');
           setOpencodeModels([...models]);
           setOpencodeInstalled(true);
+          setIsInstalling(false);
 
           if (models.length === 0) {
             onComplete({

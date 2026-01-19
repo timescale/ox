@@ -39,7 +39,7 @@ export function Loading({
           flexGrow: 1,
         }}
       >
-        <text>Loading{dots}</text>
+        <text>{title}{dots}</text>
         <text style={{ fg: '#888888', marginTop: 1 }}>{message}</text>
         <text style={{ fg: '#555555', marginTop: 1 }}>Press Esc to cancel</text>
       </box>
