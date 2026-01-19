@@ -21,16 +21,70 @@ import { listServices, type TigerService } from '../services/tiger';
 // Types
 // ============================================================================
 
-type Step = 'service' | 'agent' | 'model' | 'loading';
+type Step = 'loading' | 'service' | 'agent' | 'model';
 
 type WizardResult =
   | { type: 'completed'; config: ConductorConfig }
-  | { type: 'cancelled' };
+  | { type: 'cancelled' }
+  | { type: 'error'; message: string };
 
 interface ModelOption {
   id: string;
   name: string;
   description: string;
+}
+
+interface PrefetchedModels {
+  claude: ModelOption[];
+  opencode: ModelOption[];
+}
+
+interface LoadedData {
+  services: TigerService[];
+  models: PrefetchedModels;
+  initialConfig: ConductorConfig;
+}
+
+// ============================================================================
+// Loading Component
+// ============================================================================
+
+function Loading({ onCancel }: { onCancel: () => void }) {
+  const [dots, setDots] = useState('');
+
+  useKeyboard((key) => {
+    if (key.name === 'escape') {
+      onCancel();
+    }
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots((d) => (d.length >= 3 ? '' : `${d}.`));
+    }, 300);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
+      <box
+        title="Configure Conductor"
+        style={{
+          border: true,
+          borderStyle: 'single',
+          padding: 1,
+          flexDirection: 'column',
+          flexGrow: 1,
+        }}
+      >
+        <text>Loading{dots}</text>
+        <text style={{ fg: '#888888', marginTop: 1 }}>
+          Fetching services and models
+        </text>
+        <text style={{ fg: '#555555', marginTop: 1 }}>Press Esc to cancel</text>
+      </box>
+    </box>
+  );
 }
 
 // ============================================================================
@@ -120,56 +174,18 @@ function Selector({
 }
 
 // ============================================================================
-// Loading Component
+// Wizard Steps Component
 // ============================================================================
 
-function Loading({ message }: { message: string }) {
-  const [dots, setDots] = useState('');
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setDots((d) => (d.length >= 3 ? '' : `${d}.`));
-    }, 300);
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
-      <box
-        title="Configure Conductor"
-        style={{
-          border: true,
-          borderStyle: 'single',
-          padding: 1,
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          flexGrow: 1,
-        }}
-      >
-        <text>
-          {message}
-          {dots}
-        </text>
-      </box>
-    </box>
-  );
-}
-
-// ============================================================================
-// Wizard App Component
-// ============================================================================
-
-interface WizardProps {
-  services: TigerService[];
-  initialConfig: ConductorConfig;
+interface WizardStepsProps {
+  data: LoadedData;
   onComplete: (result: WizardResult) => void;
 }
 
-function Wizard({ services, initialConfig, onComplete }: WizardProps) {
-  const [step, setStep] = useState<Step>('service');
+function WizardSteps({ data, onComplete }: WizardStepsProps) {
+  const { services, models: prefetchedModels, initialConfig } = data;
+  const [step, setStep] = useState<'service' | 'agent' | 'model'>('service');
   const [config, setConfig] = useState<ConductorConfig>({ ...initialConfig });
-  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
 
   // Build service options
   const serviceOptions: SelectOption[] = [
@@ -203,12 +219,18 @@ function Wizard({ services, initialConfig, onComplete }: WizardProps) {
     ? agentOptions.findIndex((opt) => opt.value === config.agent)
     : 0;
 
-  // Build model options (when available)
-  const modelSelectOptions: SelectOption[] = modelOptions.map((model) => ({
-    name: model.name,
-    description: model.description,
-    value: model.id,
-  }));
+  // Get model options for current agent from prefetched data
+  const currentModelOptions = config.agent
+    ? prefetchedModels[config.agent]
+    : [];
+
+  const modelSelectOptions: SelectOption[] = currentModelOptions.map(
+    (model) => ({
+      name: model.name,
+      description: model.description,
+      value: model.id,
+    }),
+  );
 
   const modelInitialIndex = config.model
     ? modelSelectOptions.findIndex((opt) => opt.value === config.model)
@@ -217,21 +239,6 @@ function Wizard({ services, initialConfig, onComplete }: WizardProps) {
           ? opt.value === 'sonnet'
           : opt.value === 'anthropic/claude-sonnet-4-5',
       );
-
-  // Load models when entering model step
-  useEffect(() => {
-    if (step === 'loading' && config.agent) {
-      getModelsForAgent(config.agent).then((models) => {
-        if (models.length === 0) {
-          // No models available, complete the wizard
-          onComplete({ type: 'completed', config });
-        } else {
-          setModelOptions([...models]);
-          setStep('model');
-        }
-      });
-    }
-  }, [step, config, onComplete]);
 
   const handleCancel = () => {
     onComplete({ type: 'cancelled' });
@@ -264,23 +271,29 @@ function Wizard({ services, initialConfig, onComplete }: WizardProps) {
         showBack
         onSelect={(value) => {
           const newAgent = value as AgentType;
+          const models = prefetchedModels[newAgent];
+
+          // If no models for this agent, complete wizard immediately
+          if (models.length === 0) {
+            onComplete({
+              type: 'completed',
+              config: { ...config, agent: newAgent, model: undefined },
+            });
+            return;
+          }
+
           setConfig((c) => ({
             ...c,
             agent: newAgent,
             // Clear model if agent changed
             model: c.agent !== newAgent ? undefined : c.model,
           }));
-          setModelOptions([]); // Reset model options
-          setStep('loading'); // Show loading while fetching models
+          setStep('model');
         }}
         onCancel={handleCancel}
         onBack={() => setStep('service')}
       />
     );
-  }
-
-  if (step === 'loading') {
-    return <Loading message="Loading models" />;
   }
 
   if (step === 'model') {
@@ -305,88 +318,93 @@ function Wizard({ services, initialConfig, onComplete }: WizardProps) {
 }
 
 // ============================================================================
+// Main App Component (handles loading -> wizard transition)
+// ============================================================================
+
+interface AppProps {
+  onComplete: (result: WizardResult) => void;
+}
+
+function App({ onComplete }: AppProps) {
+  const [step, setStep] = useState<Step>('loading');
+  const [loadedData, setLoadedData] = useState<LoadedData | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadData() {
+      try {
+        // Load config and data in parallel
+        const [
+          localConfig,
+          homeConfig,
+          services,
+          claudeModels,
+          opencodeModels,
+        ] = await Promise.all([
+          readLocalConfig(),
+          readHomeConfig(),
+          listServices(),
+          getModelsForAgent('claude'),
+          getModelsForAgent('opencode'),
+        ]);
+
+        if (cancelled) return;
+
+        const initialConfig = mergeConfig(localConfig, homeConfig);
+
+        setLoadedData({
+          services,
+          models: {
+            claude: [...claudeModels],
+            opencode: [...opencodeModels],
+          },
+          initialConfig,
+        });
+        setStep('service');
+      } catch (err) {
+        if (cancelled) return;
+        onComplete({
+          type: 'error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    loadData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onComplete]);
+
+  if (step === 'loading') {
+    return <Loading onCancel={() => onComplete({ type: 'cancelled' })} />;
+  }
+
+  if (loadedData) {
+    return <WizardSteps data={loadedData} onComplete={onComplete} />;
+  }
+
+  return null;
+}
+
+// ============================================================================
 // Main Init Action
 // ============================================================================
 
 async function initAction(): Promise<void> {
-  // Check for existing config (local and home)
-  const [localConfig, homeConfig] = await Promise.all([
-    readLocalConfig(),
-    readHomeConfig(),
-  ]);
-
-  // Show current configuration with source indicators
-  const hasLocalConfig = localConfig && Object.keys(localConfig).length > 0;
-  const hasHomeConfig = homeConfig && Object.keys(homeConfig).length > 0;
-
-  if (hasLocalConfig || hasHomeConfig) {
-    console.log('Current configuration:');
-
-    // Display each config key with its source
-    const configKeys: Array<{
-      key: keyof ConductorConfig;
-      label: string;
-      format?: (v: unknown) => string;
-    }> = [
-      {
-        key: 'tigerServiceId',
-        label: 'Service',
-        format: (v) => (v === null ? '(None)' : String(v)),
-      },
-      { key: 'agent', label: 'Agent' },
-      { key: 'model', label: 'Model' },
-    ];
-
-    for (const { key, label, format = String } of configKeys) {
-      const localVal = localConfig?.[key];
-      const homeVal = homeConfig?.[key];
-      if (localVal !== undefined) {
-        console.log(`  ${label}: ${format(localVal)} (local)`);
-      } else if (homeVal !== undefined) {
-        console.log(`  ${label}: ${format(homeVal)} (global)`);
-      }
-    }
-    console.log('');
-  }
-
-  // Merge configs for initial values (local takes precedence)
-  const existingConfig = mergeConfig(localConfig, homeConfig);
-
-  // Fetch available services
-  console.log('Fetching Tiger services...');
-  let services: TigerService[];
-  try {
-    services = await listServices();
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : err}`);
-    process.exit(1);
-  }
-
-  if (services.length === 0) {
-    console.log('No Tiger services found.');
-    console.log(
-      'Create a service at https://console.cloud.timescale.com or use the tiger CLI.',
-    );
-    console.log('You can still configure conductor to skip database forks.\n');
-  }
-
   // Create promise for wizard completion
   let resolveWizard: (result: WizardResult) => void;
   const wizardPromise = new Promise<WizardResult>((resolve) => {
     resolveWizard = resolve;
   });
 
-  // Render the wizard with a single renderer instance
+  // Start the TUI immediately
   const renderer = await createCliRenderer({ exitOnCtrlC: true });
   const root = createRoot(renderer);
 
-  root.render(
-    <Wizard
-      services={services}
-      initialConfig={existingConfig}
-      onComplete={(result) => resolveWizard(result)}
-    />,
-  );
+  root.render(<App onComplete={(result) => resolveWizard(result)} />);
 
   // Wait for wizard to complete
   const result = await wizardPromise;
@@ -397,6 +415,11 @@ async function initAction(): Promise<void> {
   if (result.type === 'cancelled') {
     console.log('\nCancelled. No changes made.');
     return;
+  }
+
+  if (result.type === 'error') {
+    console.error(`\nError: ${result.message}`);
+    process.exit(1);
   }
 
   // Write the config
@@ -411,8 +434,7 @@ async function initAction(): Promise<void> {
   if (config.tigerServiceId === null) {
     console.log('  Database: (None) - forks will be skipped by default');
   } else if (config.tigerServiceId) {
-    const svc = services.find((s) => s.service_id === config.tigerServiceId);
-    console.log(`  Database: ${svc?.name ?? config.tigerServiceId}`);
+    console.log(`  Database: ${config.tigerServiceId}`);
   }
 
   console.log(`  Agent: ${config.agent}`);
