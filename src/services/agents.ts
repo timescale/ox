@@ -41,6 +41,37 @@ export const AGENTS: AgentInfo[] = [
 ];
 
 /**
+ * Check if opencode is installed and available in PATH
+ */
+export async function isOpencodeInstalled(): Promise<boolean> {
+  try {
+    await Bun.$`which opencode`.quiet();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Install opencode using the recommended method
+ */
+export async function installOpencode(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  try {
+    // Use bun to install opencode globally
+    await Bun.$`curl -fsSL https://opencode.ai/install | bash`.quiet();
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
  * Get available models for opencode from the CLI
  */
 export async function getOpencodeModels(): Promise<string[]> {

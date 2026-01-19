@@ -9,7 +9,12 @@ import { useEffect, useState } from 'react';
 import { FilterableSelector } from '../components/FilterableSelector';
 import { Loading } from '../components/Loading';
 import { Selector } from '../components/Selector';
-import { AGENTS, getModelsForAgent } from '../services/agents';
+import {
+  AGENTS,
+  getModelsForAgent,
+  installOpencode,
+  isOpencodeInstalled,
+} from '../services/agents';
 import {
   type AgentType,
   type ConductorConfig,
@@ -24,7 +29,7 @@ import { listServices, type TigerService } from '../services/tiger';
 // Types
 // ============================================================================
 
-type Step = 'loading' | 'service' | 'agent' | 'model';
+type Step = 'loading' | 'service' | 'agent' | 'install-opencode' | 'model';
 
 type WizardResult =
   | { type: 'completed'; config: ConductorConfig }
@@ -46,6 +51,7 @@ interface LoadedData {
   services: TigerService[];
   models: PrefetchedModels;
   initialConfig: ConductorConfig;
+  opencodeInstalled: boolean;
 }
 
 // ============================================================================
@@ -59,8 +65,17 @@ interface WizardStepsProps {
 
 function WizardSteps({ data, onComplete }: WizardStepsProps) {
   const { services, models: prefetchedModels, initialConfig } = data;
-  const [step, setStep] = useState<'service' | 'agent' | 'model'>('service');
+  const [step, setStep] = useState<
+    'service' | 'agent' | 'install-opencode' | 'model'
+  >('service');
   const [config, setConfig] = useState<ConductorConfig>({ ...initialConfig });
+  const [opencodeInstalled, setOpencodeInstalled] = useState(
+    data.opencodeInstalled,
+  );
+  const [opencodeModels, setOpencodeModels] = useState(
+    prefetchedModels.opencode,
+  );
+  const [isInstalling, setIsInstalling] = useState(false);
 
   // Build service options
   const serviceOptions: SelectOption[] = [
@@ -94,9 +109,11 @@ function WizardSteps({ data, onComplete }: WizardStepsProps) {
     ? agentOptions.findIndex((opt) => opt.value === config.agent)
     : 0;
 
-  // Get model options for current agent from prefetched data
+  // Get model options for current agent
   const currentModelOptions = config.agent
-    ? prefetchedModels[config.agent]
+    ? config.agent === 'opencode'
+      ? opencodeModels
+      : prefetchedModels[config.agent]
     : [];
 
   const modelSelectOptions: SelectOption[] = currentModelOptions.map(
@@ -146,7 +163,18 @@ function WizardSteps({ data, onComplete }: WizardStepsProps) {
         showBack
         onSelect={(value) => {
           const newAgent = value as AgentType;
-          const models = prefetchedModels[newAgent];
+
+          // If opencode is selected but not installed, show install prompt
+          if (newAgent === 'opencode' && !opencodeInstalled) {
+            setConfig((c) => ({ ...c, agent: newAgent }));
+            setStep('install-opencode');
+            return;
+          }
+
+          const models =
+            newAgent === 'opencode'
+              ? opencodeModels
+              : prefetchedModels[newAgent];
 
           // If no models for this agent, complete wizard immediately
           if (models.length === 0) {
@@ -167,6 +195,71 @@ function WizardSteps({ data, onComplete }: WizardStepsProps) {
         }}
         onCancel={handleCancel}
         onBack={() => setStep('service')}
+      />
+    );
+  }
+
+  if (step === 'install-opencode') {
+    const installOptions: SelectOption[] = [
+      {
+        name: 'Install OpenCode',
+        description: 'Install opencode globally using bun',
+        value: 'install',
+      },
+      {
+        name: 'Choose Different Agent',
+        description: 'Go back and select a different agent',
+        value: 'back',
+      },
+    ];
+
+    if (isInstalling) {
+      return <Loading onCancel={handleCancel} />;
+    }
+
+    return (
+      <Selector
+        title="OpenCode Not Found"
+        description="OpenCode is not installed. Would you like to install it?"
+        options={installOptions}
+        initialIndex={0}
+        showBack
+        onSelect={async (value) => {
+          if (value === 'back') {
+            setStep('agent');
+            return;
+          }
+
+          // Install opencode
+          setIsInstalling(true);
+          const result = await installOpencode();
+          setIsInstalling(false);
+
+          if (!result.success) {
+            onComplete({
+              type: 'error',
+              message: `Failed to install opencode: ${result.error}`,
+            });
+            return;
+          }
+
+          // Refresh opencode models after installation
+          const models = await getModelsForAgent('opencode');
+          setOpencodeModels([...models]);
+          setOpencodeInstalled(true);
+
+          if (models.length === 0) {
+            onComplete({
+              type: 'completed',
+              config: { ...config, model: undefined },
+            });
+            return;
+          }
+
+          setStep('model');
+        }}
+        onCancel={handleCancel}
+        onBack={() => setStep('agent')}
       />
     );
   }
@@ -233,14 +326,19 @@ function App({ onComplete }: AppProps) {
           homeConfig,
           services,
           claudeModels,
-          opencodeModels,
+          opencodeInstalled,
         ] = await Promise.all([
           readLocalConfig(),
           readHomeConfig(),
           listServices(),
           getModelsForAgent('claude'),
-          getModelsForAgent('opencode'),
+          isOpencodeInstalled(),
         ]);
+
+        // Only fetch opencode models if it's installed
+        const opencodeModels = opencodeInstalled
+          ? await getModelsForAgent('opencode')
+          : [];
 
         if (cancelled) return;
 
@@ -253,6 +351,7 @@ function App({ onComplete }: AppProps) {
             opencode: [...opencodeModels],
           },
           initialConfig,
+          opencodeInstalled,
         });
         setStep('service');
       } catch (err) {
