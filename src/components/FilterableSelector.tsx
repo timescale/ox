@@ -62,12 +62,17 @@ export function FilterableSelector({
   }, []);
 
   useKeyboard((key) => {
+    // Esc goes back if possible, otherwise cancels
     if (key.name === 'escape') {
-      onCancel();
+      if (showBack && onBack) {
+        onBack();
+      } else {
+        onCancel();
+      }
       return;
     }
 
-    // Back navigation - use Tab when filter is empty
+    // Tab also goes back when filter is empty
     if (showBack && onBack && key.name === 'tab' && filterText === '') {
       onBack();
       return;
@@ -120,7 +125,7 @@ export function FilterableSelector({
   };
 
   const helpText = showBack
-    ? 'Type to filter, arrows to navigate, Enter/click to select, Tab (empty) to go back, Esc to cancel'
+    ? 'Type to filter, arrows to navigate, Enter/click to select, Esc to go back'
     : 'Type to filter, arrows to navigate, Enter/click to select, Esc to cancel';
 
   return (

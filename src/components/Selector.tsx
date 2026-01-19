@@ -45,9 +45,15 @@ export function Selector({
   }, [initialIndex]);
 
   useKeyboard((key) => {
+    // Esc goes back if possible, otherwise cancels
     if (key.name === 'escape') {
-      onCancel();
+      if (showBack && onBack) {
+        onBack();
+      } else {
+        onCancel();
+      }
     }
+    // Backspace/b also goes back
     if (showBack && onBack && (key.name === 'backspace' || key.name === 'b')) {
       onBack();
     }
@@ -85,8 +91,8 @@ export function Selector({
   };
 
   const helpText = showBack
-    ? 'Use arrows to navigate, Enter/click to select, b/Backspace to go back, Esc to cancel'
-    : 'Use arrows to navigate, Enter/click to select, Esc to cancel';
+    ? 'Arrows to navigate, Enter/click to select, Esc to go back'
+    : 'Arrows to navigate, Enter/click to select, Esc to cancel';
 
   return (
     <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
