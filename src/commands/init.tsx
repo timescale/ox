@@ -6,6 +6,7 @@ import { createCliRenderer, type SelectOption } from '@opentui/core';
 import { createRoot } from '@opentui/react';
 import { Command } from 'commander';
 import { useEffect, useMemo, useState } from 'react';
+import { DockerSetup } from '../components/DockerSetup';
 import { FilterableSelector } from '../components/FilterableSelector';
 import { Loading } from '../components/Loading';
 import { Selector } from '../components/Selector';
@@ -72,8 +73,8 @@ function App({ onComplete }: AppProps) {
   );
 
   const [step, setStep] = useState<
-    'service' | 'agent' | 'install-opencode' | 'model'
-  >('service');
+    'docker' | 'service' | 'agent' | 'install-opencode' | 'model'
+  >('docker');
   const [config, setConfig] = useState<ConductorConfig | null>(null);
 
   // Async data - null means still loading
@@ -121,7 +122,29 @@ function App({ onComplete }: AppProps) {
     onComplete({ type: 'cancelled' });
   };
 
-  // ---- Step 1: Service Selection ----
+  // ---- Step 1: Docker Setup ----
+  if (step === 'docker') {
+    return (
+      <DockerSetup
+        title="Step 1/4: Docker Setup"
+        onComplete={(result) => {
+          if (result.type === 'cancelled') {
+            onComplete({ type: 'cancelled' });
+          } else if (result.type === 'error') {
+            onComplete({
+              type: 'error',
+              message: result.error ?? 'Docker setup failed',
+            });
+          } else {
+            setStep('service');
+          }
+        }}
+        showBack={false}
+      />
+    );
+  }
+
+  // ---- Step 2: Service Selection ----
   if (step === 'service') {
     // Need config and services
     if (config === null || services === null) {
@@ -152,21 +175,22 @@ function App({ onComplete }: AppProps) {
 
     return (
       <Selector
-        title="Step 1/3: Database Service"
+        title="Step 2/4: Database Service"
         description="Select a Tiger service to use as the default parent for database forks."
         options={serviceOptions}
         initialIndex={initialIndex >= 0 ? initialIndex : 0}
-        showBack={false}
+        showBack
         onSelect={(value) => {
           setConfig((c) => (c ? { ...c, tigerServiceId: value } : c));
           setStep('agent');
         }}
         onCancel={handleCancel}
+        onBack={() => setStep('docker')}
       />
     );
   }
 
-  // ---- Step 2: Agent Selection ----
+  // ---- Step 3: Agent Selection ----
   if (step === 'agent') {
     // Need opencodeInstalled to know whether to show install prompt
     if (opencodeInstalled === null) {
@@ -185,7 +209,7 @@ function App({ onComplete }: AppProps) {
 
     return (
       <Selector
-        title="Step 2/3: Default Agent"
+        title="Step 3/4: Default Agent"
         description="Select the default coding agent to use."
         options={agentOptions}
         initialIndex={initialIndex >= 0 ? initialIndex : 0}
@@ -226,7 +250,7 @@ function App({ onComplete }: AppProps) {
     );
   }
 
-  // ---- Step 2.5: Install OpenCode ----
+  // ---- Step 3.5: Install OpenCode ----
   if (step === 'install-opencode') {
     if (isInstalling) {
       return <Loading title="Installing opencode" onCancel={handleCancel} />;
@@ -292,7 +316,7 @@ function App({ onComplete }: AppProps) {
     );
   }
 
-  // ---- Step 3: Model Selection ----
+  // ---- Step 4: Model Selection ----
   if (step === 'model') {
     const currentModels =
       config?.agent === 'opencode' ? opencodeModels : claudeModels;
@@ -329,7 +353,7 @@ function App({ onComplete }: AppProps) {
     if (config?.agent === 'opencode') {
       return (
         <FilterableSelector
-          title={`Step 3/3: Default Model (${config.agent})`}
+          title={`Step 4/4: Default Model (${config.agent})`}
           description={`Select the default model for ${config.agent}.`}
           options={modelOptions}
           initialIndex={initialIndex >= 0 ? initialIndex : 0}
@@ -343,7 +367,7 @@ function App({ onComplete }: AppProps) {
 
     return (
       <Selector
-        title={`Step 3/3: Default Model (${config?.agent})`}
+        title={`Step 4/4: Default Model (${config?.agent})`}
         description={`Select the default model for ${config?.agent}.`}
         options={modelOptions}
         initialIndex={initialIndex >= 0 ? initialIndex : 0}

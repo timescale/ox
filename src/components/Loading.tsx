@@ -9,7 +9,7 @@ export interface LoadingProps {
 
 export function Loading({
   title = 'Loading',
-  message = 'Please wait...',
+  message = 'Please wait',
   onCancel,
 }: LoadingProps) {
   const [dots, setDots] = useState('');
@@ -39,11 +39,10 @@ export function Loading({
           flexGrow: 1,
         }}
       >
-        <text>
-          {title}
+        <text style={{ fg: '#888888' }}>
+          {message}
           {dots}
         </text>
-        <text style={{ fg: '#888888', marginTop: 1 }}>{message}</text>
         <text style={{ fg: '#555555', marginTop: 1 }}>Press Esc to cancel</text>
       </box>
     </box>

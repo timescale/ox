@@ -21,6 +21,7 @@
   "type": "module",
   "dependencies": {
     "@opentui/react": "^0.1.74",
+    "build-strap": "^5.2.0",
     "commander": "^14.0.2",
     "react": "^19.2.3"
   }
