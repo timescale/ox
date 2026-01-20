@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { SelectOption } from '@opentui/core';
+import { useKeyboard } from '@opentui/react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   checkDockerStatus,
@@ -176,6 +177,12 @@ export function DockerSetup({
     onComplete({ type: 'cancelled' });
   };
 
+  useKeyboard((key) => {
+    if (key.name === 'escape') {
+      handleCancel();
+    }
+  });
+
   // ---- Checking State ----
   if (state.type === 'checking') {
     return (
@@ -199,9 +206,12 @@ export function DockerSetup({
             padding: 1,
             flexDirection: 'column',
             flexGrow: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
-          <text style={{ fg: '#00cc00' }}>Docker is running!</text>
+          <text style={{ fg: '#0c0' }}>Docker is running!</text>
+          <text style={{ fg: '#555555', marginTop: 1 }}>Press Esc to exit</text>
         </box>
       </box>
     );
@@ -214,7 +224,8 @@ export function DockerSetup({
     return (
       <Loading
         title={title}
-        message={`${state.message}\nThis may take a minute while ${providerName} initializes`}
+        message={state.message}
+        detail={`This may take a minute while ${providerName} initializes`}
         onCancel={handleCancel}
       />
     );
@@ -227,7 +238,8 @@ export function DockerSetup({
     return (
       <Loading
         title={title}
-        message={`Installing ${providerName}...\nThis may take a few minutes.`}
+        message={`Installing ${providerName}`}
+        detail="This may take a few minutes."
         onCancel={handleCancel}
       />
     );
@@ -245,6 +257,8 @@ export function DockerSetup({
             padding: 1,
             flexDirection: 'column',
             flexGrow: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
           <text style={{ fg: '#ff4444' }}>Error: {state.message}</text>
