@@ -75,6 +75,285 @@ export interface StartContainerOptions {
   envVars?: Record<string, string>;
 }
 
+// ============================================================================
+// Container Listing and Status
+// ============================================================================
+
+export interface ConductorSession {
+  containerId: string;
+  containerName: string;
+  branch: string;
+  agent: AgentType;
+  model?: string;
+  repo: string;
+  prompt: string;
+  created: string;
+  status: 'running' | 'exited' | 'paused' | 'restarting' | 'dead' | 'created';
+  exitCode?: number;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+interface DockerInspectResult {
+  Id: string;
+  Name: string;
+  State: {
+    Status: string;
+    Running: boolean;
+    Paused: boolean;
+    Restarting: boolean;
+    Dead: boolean;
+    ExitCode: number;
+    StartedAt: string;
+    FinishedAt: string;
+  };
+  Config: {
+    Labels: Record<string, string>;
+  };
+}
+
+/**
+ * List all conductor-managed containers with their metadata
+ */
+export async function listConductorSessions(): Promise<ConductorSession[]> {
+  try {
+    // Get all containers (running and stopped) with conductor.managed=true label
+    const result =
+      await Bun.$`docker ps -a --filter label=conductor.managed=true --format {{.ID}}`.quiet();
+    const containerIds = result.stdout
+      .toString()
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+
+    if (containerIds.length === 0) {
+      return [];
+    }
+
+    // Inspect each container to get full details
+    const inspectResult = await Bun.$`docker inspect ${containerIds}`.quiet();
+    const containers: DockerInspectResult[] = JSON.parse(
+      inspectResult.stdout.toString(),
+    );
+
+    return containers.map((container) => {
+      const labels = container.Config.Labels;
+      const state = container.State;
+
+      let status: ConductorSession['status'];
+      if (state.Running) {
+        status = 'running';
+      } else if (state.Paused) {
+        status = 'paused';
+      } else if (state.Restarting) {
+        status = 'restarting';
+      } else if (state.Dead) {
+        status = 'dead';
+      } else if (state.Status === 'created') {
+        status = 'created';
+      } else {
+        status = 'exited';
+      }
+
+      return {
+        containerId: container.Id.slice(0, 12),
+        containerName: container.Name.replace(/^\//, ''),
+        branch: labels['conductor.branch'] || 'unknown',
+        agent: (labels['conductor.agent'] as AgentType) || 'opencode',
+        model: labels['conductor.model'],
+        repo: labels['conductor.repo'] || 'unknown',
+        prompt: labels['conductor.prompt'] || '',
+        created: labels['conductor.created'] || '',
+        status,
+        exitCode: status === 'exited' ? state.ExitCode : undefined,
+        startedAt: state.StartedAt,
+        finishedAt: status === 'exited' ? state.FinishedAt : undefined,
+      };
+    });
+  } catch {
+    // If docker command fails, return empty array
+    return [];
+  }
+}
+
+/**
+ * Remove a conductor container by name or ID
+ */
+export async function removeContainer(nameOrId: string): Promise<void> {
+  await Bun.$`docker rm -f ${nameOrId}`.quiet();
+}
+
+/**
+ * Stop a running container gracefully
+ */
+export async function stopContainer(nameOrId: string): Promise<void> {
+  await Bun.$`docker stop ${nameOrId}`.quiet();
+}
+
+/**
+ * Get container logs (static snapshot)
+ */
+export async function getContainerLogs(
+  nameOrId: string,
+  tail?: number,
+): Promise<string> {
+  const tailArg = tail ? ['--tail', String(tail)] : [];
+  const result = await Bun.$`docker logs ${tailArg} ${nameOrId} 2>&1`.quiet();
+  return result.stdout.toString();
+}
+
+/**
+ * Stream container logs in real-time
+ */
+export interface LogStream {
+  lines: AsyncIterable<string>;
+  stop: () => void;
+}
+
+// ANSI escape code pattern for stripping color codes
+// biome-ignore lint/suspicious/noControlCharactersInRegex: needed for ANSI codes
+const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+
+function stripAnsi(str: string): string {
+  return str.replace(ANSI_PATTERN, '');
+}
+
+export function streamContainerLogs(nameOrId: string): LogStream {
+  const proc = Bun.spawn(['docker', 'logs', '-f', nameOrId], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  let stopped = false;
+
+  const stop = () => {
+    stopped = true;
+    proc.kill();
+  };
+
+  async function* generateLines(): AsyncIterable<string> {
+    // Combine stdout and stderr
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    // Helper to process a stream
+    async function* processStream(
+      stream: ReadableStream<Uint8Array>,
+    ): AsyncIterable<string> {
+      const reader = stream.getReader();
+      try {
+        while (!stopped) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          // Split by newlines and yield complete lines
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            yield stripAnsi(line);
+          }
+        }
+        // Yield any remaining content
+        if (buffer) {
+          yield stripAnsi(buffer);
+          buffer = '';
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+
+    // Process both stdout and stderr
+    if (proc.stdout) {
+      yield* processStream(proc.stdout);
+    }
+    if (proc.stderr) {
+      yield* processStream(proc.stderr);
+    }
+  }
+
+  return {
+    lines: generateLines(),
+    stop,
+  };
+}
+
+/**
+ * Attach to a running container interactively.
+ * This replaces the current process with docker attach.
+ */
+export async function attachToContainer(nameOrId: string): Promise<void> {
+  const proc = Bun.spawn(['docker', 'exec', '-it', nameOrId, '/bin/bash'], {
+    stdio: ['inherit', 'inherit', 'inherit'],
+  });
+  await proc.exited;
+}
+
+/**
+ * Get a single session by container ID or name
+ */
+export async function getSession(
+  nameOrId: string,
+): Promise<ConductorSession | null> {
+  try {
+    const result = await Bun.$`docker inspect ${nameOrId}`.quiet();
+    const containers: DockerInspectResult[] = JSON.parse(
+      result.stdout.toString(),
+    );
+
+    const container = containers[0];
+    if (!container) {
+      return null;
+    }
+
+    const labels = container.Config.Labels;
+
+    // Check if this is a conductor-managed container
+    if (labels['conductor.managed'] !== 'true') {
+      return null;
+    }
+
+    const state = container.State;
+
+    let status: ConductorSession['status'];
+    if (state.Running) {
+      status = 'running';
+    } else if (state.Paused) {
+      status = 'paused';
+    } else if (state.Restarting) {
+      status = 'restarting';
+    } else if (state.Dead) {
+      status = 'dead';
+    } else if (state.Status === 'created') {
+      status = 'created';
+    } else {
+      status = 'exited';
+    }
+
+    return {
+      containerId: container.Id.slice(0, 12),
+      containerName: container.Name.replace(/^\//, ''),
+      branch: labels['conductor.branch'] || 'unknown',
+      agent: (labels['conductor.agent'] as AgentType) || 'opencode',
+      model: labels['conductor.model'],
+      repo: labels['conductor.repo'] || 'unknown',
+      prompt: labels['conductor.prompt'] || '',
+      created: labels['conductor.created'] || '',
+      status,
+      exitCode: status === 'exited' ? state.ExitCode : undefined,
+      startedAt: state.StartedAt,
+      finishedAt: status === 'exited' ? state.FinishedAt : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
+// Container Creation
+// ============================================================================
+
 export async function startContainer(
   options: StartContainerOptions,
 ): Promise<string | null> {
@@ -162,10 +441,30 @@ exec ${agentCommand} \\
 Use the \\\`gh\\\` command to create a PR when done."
 `.trim();
 
+  // Build label arguments for conductor metadata
+  const labelArgs: string[] = [
+    '--label',
+    'conductor.managed=true',
+    '--label',
+    `conductor.branch=${branchName}`,
+    '--label',
+    `conductor.agent=${agent}`,
+    '--label',
+    `conductor.repo=${repoInfo.fullName}`,
+    '--label',
+    `conductor.created=${new Date().toISOString()}`,
+  ];
+  if (model) {
+    labelArgs.push('--label', `conductor.model=${model}`);
+  }
+  // Store the full prompt in label (truncation is done only at display time)
+  labelArgs.push('--label', `conductor.prompt=${prompt}`);
+
   try {
     if (detach) {
       const result = await Bun.$`docker run -d \
         --name ${containerName} \
+        ${labelArgs} \
         ${hostEnvArgs} \
         --env-file ${conductorEnvPath} \
         ${envArgs} \
@@ -184,6 +483,7 @@ Use the \\\`gh\\\` command to create a PR when done."
         '--rm',
         '--name',
         containerName,
+        ...labelArgs,
         ...hostEnvArgs,
         '--env-file',
         conductorEnvPath,
