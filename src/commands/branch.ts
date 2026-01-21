@@ -30,19 +30,19 @@ function printSummary(
 ): void {
   console.log(`
 Repository: ${repoInfo.fullName}
-Branch: conductor/${branchName}${
+Branch: hermes/${branchName}${
     forkResult
       ? `
 Database: ${forkResult.name} (service ID: ${forkResult.service_id})`
       : ''
   }
-Container: conductor-${branchName}
+Container: hermes-${branchName}
 
 To view agent logs:
-  docker logs -f conductor-${branchName}
+  docker logs -f hermes-${branchName}
 
 To stop the agent:
-  docker stop conductor-${branchName}
+  docker stop hermes-${branchName}
 `);
 }
 
@@ -66,7 +66,7 @@ export async function branchAction(
   const branchName = await generateBranchName(prompt);
   console.log(`  Branch name: ${branchName}`);
 
-  // Step 3: Ensure .gitignore has .conductor/ entry
+  // Step 3: Ensure .gitignore has .hermes/ entry
   await ensureGitignore();
 
   // Step 4: Read config for defaults
@@ -140,7 +140,7 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
   return cmd
     .option(
       '-s, --service-id <id>',
-      'Database service ID to fork (defaults to .conductor config or tiger default)',
+      'Database service ID to fork (defaults to .hermes config or tiger default)',
     )
     .option('--no-db-fork', 'Skip the database fork step')
     .option(

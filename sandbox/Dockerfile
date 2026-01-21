@@ -407,8 +407,8 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium
 ENV CHROME_BIN=/usr/local/bin/chromium
 
-RUN  git config --global user.email "conductor@tigerdata.com" \
-  && git config --global user.name "Conductor Agent"
+RUN  git config --global user.email "hermes@tigerdata.com" \
+  && git config --global user.name "Hermes Agent"
 
 
 # Create working directory

@@ -1,5 +1,5 @@
 // ============================================================================
-// Init Command - Configure conductor for a project
+// Init Command - Configure hermes for a project
 // ============================================================================
 
 import { createCliRenderer, type SelectOption } from '@opentui/core';
@@ -18,7 +18,7 @@ import {
 } from '../services/agents';
 import {
   type AgentType,
-  type ConductorConfig,
+  type HermesConfig,
   mergeConfig,
   readHomeConfig,
   readLocalConfig,
@@ -31,7 +31,7 @@ import { listServices, type TigerService } from '../services/tiger';
 // ============================================================================
 
 type WizardResult =
-  | { type: 'completed'; config: ConductorConfig }
+  | { type: 'completed'; config: HermesConfig }
   | { type: 'cancelled' }
   | { type: 'error'; message: string };
 
@@ -75,7 +75,7 @@ function App({ onComplete }: AppProps) {
   const [step, setStep] = useState<
     'docker' | 'service' | 'agent' | 'install-opencode' | 'model'
   >('docker');
-  const [config, setConfig] = useState<ConductorConfig | null>(null);
+  const [config, setConfig] = useState<HermesConfig | null>(null);
 
   // Async data - null means still loading
   const [services, setServices] = useState<TigerService[] | null>(null);
@@ -421,7 +421,7 @@ async function initAction(): Promise<void> {
   const config = result.config;
   await writeConfig(config);
 
-  print('\nConfiguration saved to .conductor/config.yml');
+  print('\nConfiguration saved to .hermes/config.yml');
   print('\nSummary:');
 
   if (config.tigerServiceId === null) {
@@ -437,5 +437,5 @@ async function initAction(): Promise<void> {
 }
 
 export const initCommand = new Command('init')
-  .description('Configure conductor for this project')
+  .description('Configure hermes for this project')
   .action(initAction);

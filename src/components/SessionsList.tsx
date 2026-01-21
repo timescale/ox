@@ -2,8 +2,8 @@ import type { ScrollBoxRenderable } from '@opentui/core';
 import { flushSync, useKeyboard } from '@opentui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  type ConductorSession,
-  listConductorSessions,
+  type HermesSession,
+  listHermesSessions,
 } from '../services/docker';
 import { Frame } from './Frame';
 import { Toast, type ToastType } from './Toast';
@@ -11,7 +11,7 @@ import { Toast, type ToastType } from './Toast';
 export type FilterMode = 'all' | 'running' | 'completed';
 
 export interface SessionsListProps {
-  onSelect: (session: ConductorSession) => void;
+  onSelect: (session: HermesSession) => void;
   onQuit: () => void;
 }
 
@@ -41,7 +41,7 @@ function formatRelativeTime(isoDate: string): string {
   return 'just now';
 }
 
-function getStatusIcon(session: ConductorSession): string {
+function getStatusIcon(session: HermesSession): string {
   switch (session.status) {
     case 'running':
       return '●';
@@ -56,7 +56,7 @@ function getStatusIcon(session: ConductorSession): string {
   }
 }
 
-function getStatusColor(session: ConductorSession): string {
+function getStatusColor(session: HermesSession): string {
   switch (session.status) {
     case 'running':
       return '#51cf66';
@@ -71,7 +71,7 @@ function getStatusColor(session: ConductorSession): string {
   }
 }
 
-function getStatusText(session: ConductorSession): string {
+function getStatusText(session: HermesSession): string {
   if (session.status === 'exited') {
     return session.exitCode === 0 ? 'complete' : `failed(${session.exitCode})`;
   }
@@ -87,7 +87,7 @@ const FILTER_LABELS: Record<FilterMode, string> = {
 const FILTER_ORDER: FilterMode[] = ['all', 'running', 'completed'];
 
 export function SessionsList({ onSelect, onQuit }: SessionsListProps) {
-  const [sessions, setSessions] = useState<ConductorSession[]>([]);
+  const [sessions, setSessions] = useState<HermesSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterText, setFilterText] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -121,7 +121,7 @@ export function SessionsList({ onSelect, onQuit }: SessionsListProps) {
   // Load sessions
   const loadSessions = useCallback(async () => {
     try {
-      const result = await listConductorSessions();
+      const result = await listHermesSessions();
       setSessions(result);
       setLoading(false);
     } catch (err) {
@@ -225,7 +225,7 @@ export function SessionsList({ onSelect, onQuit }: SessionsListProps) {
 
   if (loading && sessions.length === 0) {
     return (
-      <Frame title="Conductor Sessions" centered>
+      <Frame title="Hermes Sessions" centered>
         <text style={{ fg: '#888888' }}>Loading sessions...</text>
       </Frame>
     );
@@ -235,7 +235,7 @@ export function SessionsList({ onSelect, onQuit }: SessionsListProps) {
   const countText = `${filteredSessions.length} of ${sessions.length}`;
 
   return (
-    <Frame title="Conductor Sessions">
+    <Frame title="Hermes Sessions">
       {/* Filter bar */}
       <box
         style={{
@@ -288,7 +288,7 @@ export function SessionsList({ onSelect, onQuit }: SessionsListProps) {
         >
           <text style={{ fg: '#888888' }}>
             {sessions.length === 0
-              ? 'No sessions found. Run `conductor branch <prompt>` to create one.'
+              ? 'No sessions found. Run `hermes branch <prompt>` to create one.'
               : 'No sessions match the current filter.'}
           </text>
         </box>

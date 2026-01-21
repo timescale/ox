@@ -1,5 +1,5 @@
 // ============================================================================
-// Conductor CLI - Main Entry Point
+// Hermes CLI - Main Entry Point
 // ============================================================================
 
 import { program } from 'commander';
@@ -12,7 +12,7 @@ import { initCommand } from './commands/init';
 import { sessionsCommand } from './commands/sessions';
 
 program
-  .name('conductor')
+  .name('hermes')
   .description('Automates branch + database fork + agent sandbox creation')
   .version('1.0.0')
   .enablePositionalOptions();

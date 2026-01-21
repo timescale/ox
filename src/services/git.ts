@@ -77,14 +77,14 @@ async function getExistingServices(): Promise<string[]> {
 
 async function getExistingContainers(): Promise<string[]> {
   try {
-    // Get all container names (running and stopped), strip "conductor-" prefix if present
+    // Get all container names (running and stopped), strip "hermes-" prefix if present
     const result = await Bun.$`docker ps -a --format {{.Names}}`.quiet();
     return result.stdout
       .toString()
       .split('\n')
       .map((name) => name.trim())
       .filter(Boolean)
-      .map((name) => name.replace(/^conductor-/, '')); // Normalize to branch name format
+      .map((name) => name.replace(/^hermes-/, '')); // Normalize to branch name format
   } catch {
     // Docker not available, return empty array
     return [];

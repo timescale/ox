@@ -22,7 +22,7 @@ export function formatShellError(error: ShellError): Error {
 
 export async function ensureGitignore(): Promise<void> {
   const gitignorePath = '.gitignore';
-  const entry = '.conductor/';
+  const entry = '.hermes/';
 
   const file = Bun.file(gitignorePath);
   let content = '';
@@ -31,10 +31,10 @@ export async function ensureGitignore(): Promise<void> {
     content = await file.text();
   }
 
-  // Check if .conductor/ is already in gitignore
+  // Check if .hermes/ is already in gitignore
   const lines = content.split('\n');
   const hasEntry = lines.some(
-    (line) => line.trim() === '.conductor/' || line.trim() === '.conductor',
+    (line) => line.trim() === '.hermes/' || line.trim() === '.hermes',
   );
 
   if (!hasEntry) {
@@ -45,6 +45,6 @@ export async function ensureGitignore(): Promise<void> {
         : `${content}\n${entry}\n`;
 
     await Bun.write(gitignorePath, newContent);
-    console.log('  Added .conductor/ to .gitignore');
+    console.log('  Added .hermes/ to .gitignore');
   }
 }

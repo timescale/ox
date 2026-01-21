@@ -1,8 +1,8 @@
 import { useKeyboard } from '@opentui/react';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  type ConductorSession,
   getSession,
+  type HermesSession,
   removeContainer,
   stopContainer,
 } from '../services/docker';
@@ -12,7 +12,7 @@ import { LogViewer } from './LogViewer';
 import { Toast, type ToastType } from './Toast';
 
 export interface SessionDetailProps {
-  session: ConductorSession;
+  session: HermesSession;
   onBack: () => void;
   onQuit: () => void;
   onAttach: (containerId: string) => void;
@@ -47,7 +47,7 @@ function formatRelativeTime(isoDate: string): string {
   return 'just now';
 }
 
-function getStatusColor(status: ConductorSession['status']): string {
+function getStatusColor(status: HermesSession['status']): string {
   switch (status) {
     case 'running':
       return '#51cf66';
@@ -62,7 +62,7 @@ function getStatusColor(status: ConductorSession['status']): string {
   }
 }
 
-function getStatusIcon(session: ConductorSession): string {
+function getStatusIcon(session: HermesSession): string {
   switch (session.status) {
     case 'running':
       return '●';
@@ -77,7 +77,7 @@ function getStatusIcon(session: ConductorSession): string {
   }
 }
 
-function getStatusText(session: ConductorSession): string {
+function getStatusText(session: HermesSession): string {
   if (session.status === 'exited') {
     return session.exitCode === 0 ? 'complete' : `failed (${session.exitCode})`;
   }
@@ -220,7 +220,7 @@ export function SessionDetail({
           <text style={{ height: 1 }}>Agent: {agentDisplay}</text>
         </box>
         <box style={{ height: 1, flexDirection: 'row' }}>
-          <text style={{ height: 1 }}>Branch: conductor/{session.branch}</text>
+          <text style={{ height: 1 }}>Branch: hermes/{session.branch}</text>
           <text style={{ height: 1, flexGrow: 1 }} />
           <text style={{ height: 1 }}>Container: {session.containerName}</text>
         </box>

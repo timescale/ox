@@ -1,6 +1,6 @@
-# Conductor CLI - Detailed Implementation Plan
+# Hermes CLI - Detailed Implementation Plan
 
-## Command: `conductor branch "<prompt>"`
+## Command: `hermes branch "<prompt>"`
 
 ### Overview
 
@@ -10,9 +10,9 @@ Creates a new feature branch with an isolated database fork for development work
 
 - `claude` CLI installed locally
 - `tiger` CLI installed and authenticated
-- `conductor-sandbox` Docker image built and available locally
+- `hermes-sandbox` Docker image built and available locally
 - `.env` exists in project root (will be copied to worktree)
-- `.conductor/.env` exists (user-provided env vars for Docker container, e.g., API keys)
+- `.hermes/.env` exists (user-provided env vars for Docker container, e.g., API keys)
 
 ---
 
@@ -20,7 +20,7 @@ Creates a new feature branch with an isolated database fork for development work
 
 ### 1. CLI Argument Parsing
 
-**Input:** `conductor branch "<prompt>" [--service-id <id>]`
+**Input:** `hermes branch "<prompt>" [--service-id <id>]`
 
 - Parse `process.argv` for:
   - `branch` subcommand (required)
@@ -28,7 +28,7 @@ Creates a new feature branch with an isolated database fork for development work
   - `--service-id <id>` - optional database service ID to fork (defaults to tiger's current default)
 - On invalid input, print usage and exit with code 1:
   ```
-  Usage: conductor branch "<prompt>" [--service-id <id>]
+  Usage: hermes branch "<prompt>" [--service-id <id>]
   ```
 
 ---
@@ -68,14 +68,14 @@ Requirements:
 
 **Command:**
 ```bash
-git worktree add .conductor/worktrees/<branch-name> -b <branch-name> main
+git worktree add .hermes/worktrees/<branch-name> -b <branch-name> main
 ```
 
 **Details:**
 - Creates new branch `<branch-name>` from `main`
-- Checks out the branch into `.conductor/worktrees/<branch-name>`
+- Checks out the branch into `.hermes/worktrees/<branch-name>`
 
-**Output:** `Creating worktree at .conductor/worktrees/<branch-name>...`
+**Output:** `Creating worktree at .hermes/worktrees/<branch-name>...`
 
 **Errors:**
 - If worktree path already exists, fail with clear message
@@ -87,10 +87,10 @@ git worktree add .conductor/worktrees/<branch-name> -b <branch-name> main
 
 **Logic:**
 1. Read `.gitignore` from project root
-2. Check if `.conductor/` or `.conductor` line exists
-3. If not present, append `.conductor/` on a new line
+2. Check if `.hermes/` or `.hermes` line exists
+3. If not present, append `.hermes/` on a new line
 
-**Output:** (silent unless adding) `Added .conductor/ to .gitignore`
+**Output:** (silent unless adding) `Added .hermes/ to .gitignore`
 
 ---
 
@@ -139,7 +139,7 @@ Database fork created: <fork-name> (service ID: <service-id>)
 1. Read `<project-root>/.env`
 2. If `DATABASE_URL=` line exists, replace the entire line
 3. If not, append `DATABASE_URL=<connection_string>`
-4. Write to `.conductor/worktrees/<branch-name>/.env`
+4. Write to `.hermes/worktrees/<branch-name>/.env`
 
 **Connection String Format:**
 ```
@@ -158,31 +158,31 @@ postgresql://tsdbadmin:<password>@<host>:<port>/tsdb?sslmode=require
 **Command:**
 ```bash
 docker run -d \
-  --name conductor-<branch-name> \
-  --env-file .conductor/.env \
-  -v <absolute-path>/.conductor/worktrees/<branch-name>:/app \
+  --name hermes-<branch-name> \
+  --env-file .hermes/.env \
+  -v <absolute-path>/.hermes/worktrees/<branch-name>:/app \
   -w /app \
-  conductor-sandbox \
+  hermes-sandbox \
   claude "<prompt>"
 ```
 
 **Details:**
 - `-d` runs detached
 - `--name` allows easy management (`docker logs`, `docker stop`, etc.)
-- `--env-file` loads user's API keys and config from `.conductor/.env`
+- `--env-file` loads user's API keys and config from `.hermes/.env`
 - Volume mount gives container access to the worktree
 - Working directory set to `/app`
 
 **Output:**
 ```
 Starting agent container...
-Container started: conductor-<branch-name>
+Container started: hermes-<branch-name>
 ```
 
 **Errors:**
-- Image not found: "Error: conductor-sandbox image not found. Build it first."
-- Container name conflict: "Error: Container conductor-<branch-name> already exists"
-- `.conductor/.env` missing: "Error: .conductor/.env not found. Create it with required environment variables."
+- Image not found: "Error: hermes-sandbox image not found. Build it first."
+- Container name conflict: "Error: Container hermes-<branch-name> already exists"
+- `.hermes/.env` missing: "Error: .hermes/.env not found. Create it with required environment variables."
 
 ---
 
@@ -191,15 +191,15 @@ Container started: conductor-<branch-name>
 On success, print:
 ```
 Branch: <branch-name>
-Worktree: .conductor/worktrees/<branch-name>
+Worktree: .hermes/worktrees/<branch-name>
 Database: <fork-name> (forked from <source-name>)
-Container: conductor-<branch-name>
+Container: hermes-<branch-name>
 
 To view agent logs:
-  docker logs -f conductor-<branch-name>
+  docker logs -f hermes-<branch-name>
 
 To stop the agent:
-  docker stop conductor-<branch-name>
+  docker stop hermes-<branch-name>
 ```
 
 ---
@@ -230,7 +230,7 @@ async function main() {
   const branchName = await generateBranchName(args.prompt);
   console.log(`Branch name: ${branchName}`);
 
-  console.log(`Creating worktree at .conductor/worktrees/${branchName}...`);
+  console.log(`Creating worktree at .hermes/worktrees/${branchName}...`);
   await createWorktree(branchName);
 
   await ensureGitignore();

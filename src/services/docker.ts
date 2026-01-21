@@ -15,7 +15,7 @@ const hasher = new Bun.CryptoHasher('md5');
 hasher.update(SANDBOX_DOCKERFILE);
 const dockerfileHash = hasher.digest('hex').slice(0, 12);
 
-const DOCKER_IMAGE_NAME = 'conductor-sandbox';
+const DOCKER_IMAGE_NAME = 'hermes-sandbox';
 const DOCKER_IMAGE_TAG = `${DOCKER_IMAGE_NAME}:md5-${dockerfileHash}`;
 
 // ============================================================================
@@ -79,7 +79,7 @@ export interface StartContainerOptions {
 // Container Listing and Status
 // ============================================================================
 
-export interface ConductorSession {
+export interface HermesSession {
   containerId: string;
   containerName: string;
   branch: string;
@@ -113,13 +113,13 @@ interface DockerInspectResult {
 }
 
 /**
- * List all conductor-managed containers with their metadata
+ * List all hermes-managed containers with their metadata
  */
-export async function listConductorSessions(): Promise<ConductorSession[]> {
+export async function listHermesSessions(): Promise<HermesSession[]> {
   try {
-    // Get all containers (running and stopped) with conductor.managed=true label
+    // Get all containers (running and stopped) with hermes.managed=true label
     const result =
-      await Bun.$`docker ps -a --filter label=conductor.managed=true --format {{.ID}}`.quiet();
+      await Bun.$`docker ps -a --filter label=hermes.managed=true --format {{.ID}}`.quiet();
     const containerIds = result.stdout
       .toString()
       .trim()
@@ -140,7 +140,7 @@ export async function listConductorSessions(): Promise<ConductorSession[]> {
       const labels = container.Config.Labels;
       const state = container.State;
 
-      let status: ConductorSession['status'];
+      let status: HermesSession['status'];
       if (state.Running) {
         status = 'running';
       } else if (state.Paused) {
@@ -158,12 +158,12 @@ export async function listConductorSessions(): Promise<ConductorSession[]> {
       return {
         containerId: container.Id.slice(0, 12),
         containerName: container.Name.replace(/^\//, ''),
-        branch: labels['conductor.branch'] || 'unknown',
-        agent: (labels['conductor.agent'] as AgentType) || 'opencode',
-        model: labels['conductor.model'],
-        repo: labels['conductor.repo'] || 'unknown',
-        prompt: labels['conductor.prompt'] || '',
-        created: labels['conductor.created'] || '',
+        branch: labels['hermes.branch'] || 'unknown',
+        agent: (labels['hermes.agent'] as AgentType) || 'opencode',
+        model: labels['hermes.model'],
+        repo: labels['hermes.repo'] || 'unknown',
+        prompt: labels['hermes.prompt'] || '',
+        created: labels['hermes.created'] || '',
         status,
         exitCode: status === 'exited' ? state.ExitCode : undefined,
         startedAt: state.StartedAt,
@@ -177,7 +177,7 @@ export async function listConductorSessions(): Promise<ConductorSession[]> {
 }
 
 /**
- * Remove a conductor container by name or ID
+ * Remove a hermes container by name or ID
  */
 export async function removeContainer(nameOrId: string): Promise<void> {
   await Bun.$`docker rm -f ${nameOrId}`.quiet();
@@ -295,7 +295,7 @@ export async function attachToContainer(nameOrId: string): Promise<void> {
  */
 export async function getSession(
   nameOrId: string,
-): Promise<ConductorSession | null> {
+): Promise<HermesSession | null> {
   try {
     const result = await Bun.$`docker inspect ${nameOrId}`.quiet();
     const containers: DockerInspectResult[] = JSON.parse(
@@ -309,14 +309,14 @@ export async function getSession(
 
     const labels = container.Config.Labels;
 
-    // Check if this is a conductor-managed container
-    if (labels['conductor.managed'] !== 'true') {
+    // Check if this is a hermes-managed container
+    if (labels['hermes.managed'] !== 'true') {
       return null;
     }
 
     const state = container.State;
 
-    let status: ConductorSession['status'];
+    let status: HermesSession['status'];
     if (state.Running) {
       status = 'running';
     } else if (state.Paused) {
@@ -334,12 +334,12 @@ export async function getSession(
     return {
       containerId: container.Id.slice(0, 12),
       containerName: container.Name.replace(/^\//, ''),
-      branch: labels['conductor.branch'] || 'unknown',
-      agent: (labels['conductor.agent'] as AgentType) || 'opencode',
-      model: labels['conductor.model'],
-      repo: labels['conductor.repo'] || 'unknown',
-      prompt: labels['conductor.prompt'] || '',
-      created: labels['conductor.created'] || '',
+      branch: labels['hermes.branch'] || 'unknown',
+      agent: (labels['hermes.agent'] as AgentType) || 'opencode',
+      model: labels['hermes.model'],
+      repo: labels['hermes.repo'] || 'unknown',
+      prompt: labels['hermes.prompt'] || '',
+      created: labels['hermes.created'] || '',
       status,
       exitCode: status === 'exited' ? state.ExitCode : undefined,
       startedAt: state.StartedAt,
@@ -368,15 +368,15 @@ export async function startContainer(
     envVars,
   } = options;
 
-  const conductorEnvPath = '.conductor/.env';
-  const conductorEnvFile = Bun.file(conductorEnvPath);
+  const hermesEnvPath = '.hermes/.env';
+  const hermesEnvFile = Bun.file(hermesEnvPath);
 
-  // Create empty .conductor/.env if it doesn't exist
-  if (!(await conductorEnvFile.exists())) {
-    await Bun.write(conductorEnvPath, '');
+  // Create empty .hermes/.env if it doesn't exist
+  if (!(await hermesEnvFile.exists())) {
+    await Bun.write(hermesEnvPath, '');
   }
 
-  const containerName = `conductor-${branchName}`;
+  const containerName = `hermes-${branchName}`;
 
   // Build env var arguments for docker run
   // Order matters for precedence: later values override earlier ones
@@ -434,31 +434,31 @@ cd /work
 gh auth setup-git
 gh repo clone ${repoInfo.fullName} app
 cd app
-git switch -c "conductor/${branchName}"
+git switch -c "hermes/${branchName}"
 exec ${agentCommand} \\
   "${prompt.replace(/"/g, '\\"')}
 
 Use the \\\`gh\\\` command to create a PR when done."
 `.trim();
 
-  // Build label arguments for conductor metadata
+  // Build label arguments for hermes metadata
   const labelArgs: string[] = [
     '--label',
-    'conductor.managed=true',
+    'hermes.managed=true',
     '--label',
-    `conductor.branch=${branchName}`,
+    `hermes.branch=${branchName}`,
     '--label',
-    `conductor.agent=${agent}`,
+    `hermes.agent=${agent}`,
     '--label',
-    `conductor.repo=${repoInfo.fullName}`,
+    `hermes.repo=${repoInfo.fullName}`,
     '--label',
-    `conductor.created=${new Date().toISOString()}`,
+    `hermes.created=${new Date().toISOString()}`,
   ];
   if (model) {
-    labelArgs.push('--label', `conductor.model=${model}`);
+    labelArgs.push('--label', `hermes.model=${model}`);
   }
   // Store the full prompt in label (truncation is done only at display time)
-  labelArgs.push('--label', `conductor.prompt=${prompt}`);
+  labelArgs.push('--label', `hermes.prompt=${prompt}`);
 
   try {
     if (detach) {
@@ -466,7 +466,7 @@ Use the \\\`gh\\\` command to create a PR when done."
         --name ${containerName} \
         ${labelArgs} \
         ${hostEnvArgs} \
-        --env-file ${conductorEnvPath} \
+        --env-file ${hermesEnvPath} \
         ${envArgs} \
         ${volumeArgs} \
         ${DOCKER_IMAGE_TAG} \
@@ -486,7 +486,7 @@ Use the \\\`gh\\\` command to create a PR when done."
         ...labelArgs,
         ...hostEnvArgs,
         '--env-file',
-        conductorEnvPath,
+        hermesEnvPath,
         ...envArgs,
         ...volumeArgs,
         DOCKER_IMAGE_TAG,

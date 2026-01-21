@@ -1,5 +1,5 @@
 // ============================================================================
-// Sessions Command - Shows all conductor sessions and their status
+// Sessions Command - Shows all hermes sessions and their status
 // ============================================================================
 
 import { createCliRenderer } from '@opentui/core';
@@ -10,8 +10,8 @@ import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
 import {
   attachToContainer,
-  type ConductorSession,
-  listConductorSessions,
+  type HermesSession,
+  listHermesSessions,
   removeContainer,
 } from '../services/docker';
 
@@ -21,7 +21,7 @@ import {
 
 type SessionsView =
   | { type: 'list' }
-  | { type: 'detail'; session: ConductorSession };
+  | { type: 'detail'; session: HermesSession };
 
 interface SessionsResult {
   type: 'quit' | 'attach';
@@ -109,7 +109,7 @@ function formatRelativeTime(isoDate: string): string {
   return 'just now';
 }
 
-function getStatusDisplay(session: ConductorSession): string {
+function getStatusDisplay(session: HermesSession): string {
   switch (session.status) {
     case 'running':
       return '\x1b[32mrunning\x1b[0m'; // green
@@ -136,7 +136,7 @@ function truncate(str: string, maxLen: number): string {
   return `${str.slice(0, maxLen - 3)}...`;
 }
 
-function printTable(sessions: ConductorSession[]): void {
+function printTable(sessions: HermesSession[]): void {
   const headers = ['BRANCH', 'STATUS', 'AGENT', 'REPO', 'CREATED', 'PROMPT'];
   const rows = sessions.map((s) => [
     s.branch,
@@ -238,7 +238,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
   }
 
   // CLI output modes
-  const sessions = await listConductorSessions();
+  const sessions = await listHermesSessions();
 
   // Filter to only running sessions unless --all is specified
   const filteredSessions = options.all
@@ -262,11 +262,9 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
   // Table output
   if (filteredSessions.length === 0) {
     if (options.all) {
-      console.log('No conductor sessions found.');
+      console.log('No hermes sessions found.');
     } else {
-      console.log(
-        'No running conductor sessions. Use --all to see all sessions.',
-      );
+      console.log('No running hermes sessions. Use --all to see all sessions.');
     }
     return;
   }
@@ -293,7 +291,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
 
 export const sessionsCommand = new Command('sessions')
   .aliases(['session', 'status', 's'])
-  .description('Show all conductor sessions and their status')
+  .description('Show all hermes sessions and their status')
   .option(
     '-o, --output <format>',
     'Output format: tui, table, json, yaml',
@@ -307,11 +305,11 @@ export const sessionsCommand = new Command('sessions')
 
 // Subcommand to remove/clean up sessions
 const cleanCommand = new Command('clean')
-  .description('Remove stopped conductor containers')
+  .description('Remove stopped hermes containers')
   .option('-a, --all', 'Remove all containers (including running)')
   .option('-f, --force', 'Skip confirmation')
   .action(async (options: { all: boolean; force: boolean }) => {
-    const sessions = await listConductorSessions();
+    const sessions = await listHermesSessions();
 
     const toRemove = options.all
       ? sessions

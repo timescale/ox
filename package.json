@@ -1,8 +1,8 @@
 {
-  "name": "conductor",
+  "name": "hermes",
   "module": "index.ts",
   "scripts": {
-    "build": "bun build ./index.ts --compile --outfile ./bin/conductor",
+    "build": "bun build ./index.ts --compile --outfile ./bin/hermes",
     "typecheck": "tsc --noEmit",
     "lint": "bun x @biomejs/biome check"
   },
@@ -15,7 +15,7 @@
     "typescript": "^5"
   },
   "bin": {
-    "conductor": "./index.ts"
+    "hermes": "./index.ts"
   },
   "private": true,
   "type": "module",

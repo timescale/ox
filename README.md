@@ -1,25 +1,23 @@
-# conductor
+# hermes
 
 Install:
 
 ```
-git clone git@github.com:timescale/conductor.git
-cd conductor
+git clone git@github.com:timescale/hermes.git
+cd hermes
 bun link
 ```
 
 Usage:
 
-
 ```
 cd myproject
-conductor branch "Add a way for users to mark books as their favorite."
+hermes "Add a way for users to mark books as their favorite."
 ```
-
 
 ## Demo Workflow
 
-Run `conductor branch "<prompt>"` and conductor will:
+Run `hermes "<prompt>"` and hermes will:
 
 1. come up with a branch name (Ask claude based on prompt)
 2. create a git worktree with the branch name
@@ -49,9 +47,9 @@ eventually:
 
 ## Ideas
 
-* We _eventually_ want the agent sandboxes running in the cloud so you can close your laptop and go to the coffee shop with it still working
-* The agent sandbox should have MPC servers configured (e.g. pg-aiguide); some by default, others customized?
-* Using forkable volumes (eventually) would be ideal for setting up the agents' dev environment
-* In addition to passing the prompt to the cli command, you could pass it a github issue or linear ticket, etc.
-* Queue up N tasks and have M (M < N) agent sandboxes working the queue?
-* When agent sandbox is in the cloud, we don't really need git worktrees anymore, just normal branches.
+- We _eventually_ want the agent sandboxes running in the cloud so you can close your laptop and go to the coffee shop with it still working
+- The agent sandbox should have MPC servers configured (e.g. pg-aiguide); some by default, others customized?
+- Using forkable volumes (eventually) would be ideal for setting up the agents' dev environment
+- In addition to passing the prompt to the cli command, you could pass it a github issue or linear ticket, etc.
+- Queue up N tasks and have M (M < N) agent sandboxes working the queue?
+- When agent sandbox is in the cloud, we don't really need git worktrees anymore, just normal branches.
