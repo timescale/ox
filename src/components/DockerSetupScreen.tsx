@@ -4,6 +4,7 @@
 
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
+import { dockerIsRunning } from '../services/dockerSetup';
 import { restoreConsole } from '../utils';
 import { DockerSetup, type DockerSetupResult } from './DockerSetup';
 
@@ -12,9 +13,17 @@ import { DockerSetup, type DockerSetupResult } from './DockerSetup';
  * This is used by commands like `branch` that need to ensure Docker is ready
  * but aren't part of a larger wizard flow.
  *
+ * If Docker is already running, returns immediately without showing the TUI.
+ *
  * @returns Promise that resolves with the setup result
  */
 export async function runDockerSetupScreen(): Promise<DockerSetupResult> {
+  // Check if Docker is already running before showing any UI
+  if (await dockerIsRunning()) {
+    return { type: 'ready' };
+  }
+
+  // Docker isn't running - show the setup TUI
   let resolveSetup: (result: DockerSetupResult) => void;
   const setupPromise = new Promise<DockerSetupResult>((resolve) => {
     resolveSetup = resolve;
