@@ -130,8 +130,9 @@ ENV GOPATH="/root/go"
 RUN go install github.com/go-delve/delve/cmd/dlv@latest
 
 # Docker (daemon + CLI for Docker-in-Docker scenarios)
+# Using 'noble' codename directly for Ubuntu 24.04 (avoids needing lsb-release package)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
-  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list \
   && apt-get update \
   && apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
   && rm -rf /var/lib/apt/lists/*
@@ -170,10 +171,7 @@ RUN groupadd --gid ${USER_GID} ${USER_NAME} \
 
 # Copy tools installed in root's home to agent's home
 RUN cp -r /root/.bun /home/${USER_NAME}/.bun \
-  && cp -r /root/.cargo /home/${USER_NAME}/.cargo \
-  && cp -r /root/.rustup /home/${USER_NAME}/.rustup \
   && cp -r /root/go /home/${USER_NAME}/go \
-  && cp -r /root/.cache/ms-playwright /home/${USER_NAME}/.cache/ms-playwright \
   && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}
 
 # Install claude code as non-root user
@@ -212,7 +210,7 @@ RUN ln -s /home/${USER_NAME}/.opencode/bin/opencode /home/${USER_NAME}/.local/bi
 # ============================================================================
 
 ENV HOME=/home/${USER_NAME}
-ENV PATH="/home/${USER_NAME}/.local/bin:/home/${USER_NAME}/.bun/bin:/home/${USER_NAME}/.cargo/bin:/home/${USER_NAME}/go/bin:/usr/local/go/bin:$PATH"
+ENV PATH="/home/${USER_NAME}/.local/bin:/home/${USER_NAME}/.bun/bin:/home/${USER_NAME}/go/bin:/usr/local/go/bin:$PATH"
 ENV BUN_INSTALL="/home/${USER_NAME}/.bun"
 ENV GOPATH="/home/${USER_NAME}/go"
 
