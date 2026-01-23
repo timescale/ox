@@ -25,9 +25,7 @@ import {
 import {
   type AgentType,
   type HermesConfig,
-  mergeConfig,
-  readHomeConfig,
-  readLocalConfig,
+  readConfig,
   writeConfig,
 } from '../services/config';
 import { ensureDockerImage, getDockerImageTag } from '../services/docker';
@@ -59,13 +57,7 @@ interface AppProps {
 
 function App({ onComplete }: AppProps) {
   // Create all promises immediately (only once via useMemo)
-  const configPromise = useMemo(
-    () =>
-      Promise.all([readLocalConfig(), readHomeConfig()]).then(([local, home]) =>
-        mergeConfig(local, home),
-      ),
-    [],
-  );
+  const configPromise = useMemo(() => readConfig(), []);
   const servicesPromise = useMemo(() => listServices(), []);
   const claudeModelsPromise = useMemo(
     () => getModelsForAgent('claude').then((m) => [...m]),
@@ -109,12 +101,14 @@ function App({ onComplete }: AppProps) {
 
   // Load data from promises
   useEffect(() => {
-    configPromise.then(setConfig).catch((err) =>
-      onComplete({
-        type: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      }),
-    );
+    configPromise
+      .then((config) => setConfig(config ?? {}))
+      .catch((err) =>
+        onComplete({
+          type: 'error',
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
   }, [configPromise, onComplete]);
 
   useEffect(() => {
@@ -515,7 +509,7 @@ function App({ onComplete }: AppProps) {
 // Main Init Action
 // ============================================================================
 
-async function initAction(): Promise<void> {
+export async function initAction(): Promise<void> {
   let resolveWizard: (result: WizardResult) => void;
   const wizardPromise = new Promise<WizardResult>((resolve) => {
     resolveWizard = resolve;

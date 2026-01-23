@@ -13,6 +13,7 @@ import {
   type RepoInfo,
 } from '../services/git';
 import { ensureGitignore } from '../utils';
+import { initAction } from './init';
 
 interface BranchOptions {
   serviceId?: string;
@@ -69,28 +70,35 @@ export async function branchAction(
   // Step 3: Ensure .gitignore has .hermes/ entry
   await ensureGitignore();
 
-  // Step 4: Read config for defaults
-  const config = await readConfig();
+  // Step 4: Read config for defaults, run init if no config exists
+  let config = await readConfig();
+  if (!config) {
+    console.log('No config found. Running init wizard...\n');
+    await initAction();
+    // Re-read config after init
+    config = await readConfig();
+    if (!config) {
+      console.error('Init was cancelled or failed. Cannot continue.');
+      process.exit(1);
+    }
+    console.log(''); // blank line after init
+  }
 
   // Step 5: Determine effective values from options or config
-  const effectiveServiceId: string | null | undefined =
-    options.serviceId ?? config?.tigerServiceId;
-  const effectiveAgent: AgentType =
-    options.agent ?? config?.agent ?? 'opencode';
-  const effectiveModel: string | undefined = options.model ?? config?.model;
+  const effectiveServiceId = options.serviceId ?? config.tigerServiceId;
+  const effectiveAgent: AgentType = options.agent ?? config.agent ?? 'opencode';
+  const effectiveModel: string | undefined = options.model ?? config.model;
 
-  // Step 6: Fork database (unless --no-db-fork is set or config says null)
+  // Step 6: Fork database (only if explicitly configured with a service ID)
   let forkResult: ForkResult | null = null;
   if (!options.dbFork) {
     console.log('Skipping database fork (--no-db-fork)');
-  } else if (effectiveServiceId === null) {
-    console.log('Skipping database fork (configured as "none" in config)');
+  } else if (!effectiveServiceId) {
+    // Default is to skip fork unless a service ID is explicitly configured
+    console.log('Skipping database fork (no service ID configured)');
   } else {
     console.log('Forking database (this may take a few minutes)...');
-    forkResult = await forkDatabase(
-      branchName,
-      effectiveServiceId || undefined,
-    );
+    forkResult = await forkDatabase(branchName, effectiveServiceId);
     console.log(`  Database fork created: ${forkResult.name}`);
   }
 
