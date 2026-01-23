@@ -129,17 +129,6 @@ ENV GOPATH="/root/go"
 # Go debugger
 RUN go install github.com/go-delve/delve/cmd/dlv@latest
 
-# ============================================================================
-# HEADLESS BROWSER AUTOMATION
-# ============================================================================
-
-# Install Playwright browsers (Chromium, Firefox, WebKit) - works on both amd64 and arm64
-RUN playwright install --with-deps chromium firefox webkit \
-  && ln -s /root/.cache/ms-playwright/chromium-*/chrome-linux/chrome /usr/local/bin/chromium
-
-# Install Puppeteer (will use Playwright's Chromium)
-RUN bun install -g puppeteer
-
 # Docker (daemon + CLI for Docker-in-Docker scenarios)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
@@ -226,12 +215,6 @@ ENV HOME=/home/${USER_NAME}
 ENV PATH="/home/${USER_NAME}/.local/bin:/home/${USER_NAME}/.bun/bin:/home/${USER_NAME}/.cargo/bin:/home/${USER_NAME}/go/bin:/usr/local/go/bin:$PATH"
 ENV BUN_INSTALL="/home/${USER_NAME}/.bun"
 ENV GOPATH="/home/${USER_NAME}/go"
-
-# Environment variables for browser automation
-ENV PLAYWRIGHT_BROWSERS_PATH=/home/${USER_NAME}/.cache/ms-playwright
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium
-ENV CHROME_BIN=/usr/local/bin/chromium
 
 RUN  git config --global user.email "hermes@tigerdata.com" \
   && git config --global user.name "Hermes Agent"
