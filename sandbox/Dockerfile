@@ -36,10 +36,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   curl \
   ca-certificates \
   wget \
-  httpie \
-  netcat-openbsd \
-  dnsutils \
-  iputils-ping \
   openssh-client \
   # Archive & compression
   zip \
@@ -47,11 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   tar \
   gzip \
   bzip2 \
-  xz-utils \
-  p7zip-full \
   # Text processing & editors
   vim \
-  nano \
   jq \
   yq \
   ripgrep \
@@ -64,9 +57,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   procps \
   lsof \
   strace \
-  # Database clients (PostgreSQL installed separately below)
-  redis-tools \
-  sqlite3 \
   # SSL & certificates
   ca-certificates \
   openssl \
@@ -74,67 +64,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   # Misc utilities
   locales \
   tzdata \
-  file \
-  bc \
-  uuid-runtime \
-  # Libraries for various tools
-  libssl-dev \
-  libffi-dev \
-  zlib1g-dev \
-  libbz2-dev \
-  libreadline-dev \
-  libsqlite3-dev \
-  libncurses5-dev \
-  libncursesw5-dev \
-  liblzma-dev \
-  libxml2-dev \
-  libxslt1-dev \
-  libpq-dev \
-  # X11 and display libraries (for headless browsers)
-  xvfb \
-  xauth \
-  libx11-xcb1 \
-  libxcomposite1 \
-  libxcursor1 \
-  libxdamage1 \
-  libxi6 \
-  libxtst6 \
-  libnss3 \
-  libcups2 \
-  libxss1 \
-  libxrandr2 \
-  libasound2t64 \
-  libpangocairo-1.0-0 \
-  libatk1.0-0 \
-  libatk-bridge2.0-0 \
-  libgtk-3-0 \
-  libgbm1 \
-  libdrm2 \
-  libxkbcommon0 \
-  fonts-liberation \
-  fonts-noto-color-emoji \
-  # Media processing
-  ffmpeg \
-  imagemagick \
-  libmagickwand-dev \
-  # OCR & document processing
-  tesseract-ocr \
-  tesseract-ocr-eng \
-  poppler-utils \
-  ghostscript \
-  wkhtmltopdf \
-  # Diagramming & visualization
-  graphviz \
-  # Metadata tools
-  libimage-exiftool-perl \
-  # PDF Generation
-  pandoc \
-  texlive-latex-base \
-  texlive-latex-recommended \
-  texlive-latex-extra \
-  texlive-fonts-recommended \
-  texlive-xetex \
-  latexmk \
   # Python
   python3 \
   python3-full \
@@ -177,74 +106,15 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
 
-# Global npm packages
-RUN bun install -g \
-  typescript \
-  tsx \
-  yarn \
-  prettier \
-  eslint
-
 # Set Python 3 as default
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
 # Essential Python packages
 RUN pip install --no-cache-dir --break-system-packages --ignore-installed \
   # Package management
-  setuptools \
-  wheel \
   pipx \
   uv \
-  poetry \
-  # Web & HTTP
-  requests \
-  httpx \
-  aiohttp \
-  fastapi \
-  uvicorn \
-  flask \
-  # Data processing
-  pandas \
-  numpy \
-  polars \
-  # CLI & utilities
-  click \
-  typer \
-  rich \
-  pydantic \
-  python-dotenv \
-  # Testing
-  pytest \
-  pytest-asyncio \
-  # Code quality
-  black \
-  ruff \
-  mypy \
-  # Scraping & automation
-  beautifulsoup4 \
-  lxml \
-  selenium \
-  playwright \
-  # Database
-  psycopg2-binary \
-  sqlalchemy \
-  # Async
-  asyncio \
-  anyio \
-  # Document & media processing
-  pypdf \
-  python-docx \
-  openpyxl \
-  markdown \
-  pytesseract \
-  Pillow \
-  opencv-python-headless \
-  # CSV processing
-  csvkit \
-  # Misc
-  pyyaml \
-  toml \
-  jinja2
+  poetry
 
 # ============================================================================
 # GO (Golang)
@@ -260,20 +130,6 @@ ENV GOPATH="/root/go"
 RUN go install github.com/go-delve/delve/cmd/dlv@latest
 
 # ============================================================================
-# RUST (via rustup)
-# ============================================================================
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:$PATH"
-
-# Common Rust tools
-RUN cargo install \
-  tokei \
-  hyperfine \
-  bat \
-  eza
-
-# ============================================================================
 # HEADLESS BROWSER AUTOMATION
 # ============================================================================
 
@@ -283,36 +139,6 @@ RUN playwright install --with-deps chromium firefox webkit \
 
 # Install Puppeteer (will use Playwright's Chromium)
 RUN bun install -g puppeteer
-
-# ============================================================================
-# CLOUD CLIs & INFRASTRUCTURE TOOLS
-# ============================================================================
-
-# AWS CLI v2
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
-  && unzip awscliv2.zip \
-  && ./aws/install \
-  && rm -rf awscliv2.zip aws
-
-# Azure CLI
-RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
-
-# Terraform
-RUN wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg \
-  && echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" > /etc/apt/sources.list.d/hashicorp.list \
-  && apt-get update \
-  && apt-get install -y terraform \
-  && rm -rf /var/lib/apt/lists/*
-
-# kubectl
-RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-apt-keyring.gpg \
-  && echo "deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" > /etc/apt/sources.list.d/kubernetes.list \
-  && apt-get update \
-  && apt-get install -y kubectl \
-  && rm -rf /var/lib/apt/lists/*
-
-# Helm
-RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Docker (daemon + CLI for Docker-in-Docker scenarios)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \

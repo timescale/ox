@@ -3,14 +3,14 @@ name: Publish Binaries
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: non-prod
 
     steps:
       - uses: actions/checkout@v4
