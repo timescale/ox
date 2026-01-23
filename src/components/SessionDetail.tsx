@@ -9,8 +9,8 @@ import {
 import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { LogViewer } from './LogViewer';
+import { OptionsModal } from './OptionsModal';
 import { PromptModal } from './PromptModal';
-import { ResumeModal } from './ResumeModal';
 import { Toast, type ToastType } from './Toast';
 
 export interface SessionDetailProps {
@@ -341,11 +341,25 @@ export function SessionDetail({
       )}
 
       {modal === 'resume' && (
-        <ResumeModal
+        <OptionsModal
           title="Resume Session"
           message={`Resume ${session.containerName}?`}
-          onInteractive={handleResumeInteractive}
-          onDetached={handleResumeDetached}
+          options={[
+            {
+              key: 'd',
+              name: 'Detached',
+              description: 'runs in the background',
+              onSelect: handleResumeDetached,
+              color: '#339af0',
+            },
+            {
+              key: 'i',
+              name: 'Interactive',
+              description: 'runs in this terminal',
+              onSelect: handleResumeInteractive,
+              color: '#51cf66',
+            },
+          ]}
           onCancel={() => setModal(null)}
         />
       )}
@@ -354,7 +368,7 @@ export function SessionDetail({
         <PromptModal
           title="Resume (Detached)"
           message="Enter a prompt to continue this session."
-          placeholder="Add a prompt for the resumed agent"
+          placeholder="Describe what the agent should do next..."
           onSubmit={handleResumePromptSubmit}
           onCancel={() => setModal(null)}
         />

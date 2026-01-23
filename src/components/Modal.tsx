@@ -1,3 +1,5 @@
+import { RGBA, TextAttributes } from '@opentui/core';
+import { useKeyboard } from '@opentui/react';
 import type { ReactNode } from 'react';
 
 export interface ModalProps {
@@ -5,9 +7,7 @@ export interface ModalProps {
   children: ReactNode;
   minWidth?: number;
   maxWidth?: number;
-  padding?: number;
-  paddingLeft?: number;
-  paddingRight?: number;
+  onClose?: () => void;
 }
 
 export function Modal({
@@ -15,36 +15,43 @@ export function Modal({
   children,
   minWidth = 40,
   maxWidth = 60,
-  padding = 2,
-  paddingLeft = 3,
-  paddingRight = 3,
+  onClose,
 }: ModalProps) {
+  useKeyboard((key) => {
+    if (key.name === 'escape') {
+      onClose?.();
+    }
+  });
+
   return (
     <box
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
+      position="absolute"
+      top={0}
+      left={0}
+      right={0}
+      bottom={0}
+      alignItems="center"
+      justifyContent="center"
+      backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
     >
       <box
-        title={title}
-        style={{
-          border: true,
-          borderStyle: 'single',
-          padding,
-          paddingLeft,
-          paddingRight,
-          flexDirection: 'column',
-          minWidth,
-          maxWidth,
-          backgroundColor: '#1f232a',
-        }}
+        padding={1}
+        flexDirection="column"
+        minWidth={minWidth}
+        maxWidth={maxWidth}
+        backgroundColor="#151515"
       >
+        <box
+          marginLeft={2}
+          marginRight={2}
+          marginBottom={1}
+          flexDirection="row"
+        >
+          <text flexGrow={1} flexShrink={1} attributes={TextAttributes.BOLD}>
+            {title}
+          </text>
+          {onClose ? <text fg="#888888">esc</text> : null}
+        </box>
         {children}
       </box>
     </box>

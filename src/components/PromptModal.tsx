@@ -1,5 +1,5 @@
-import { useKeyboard } from '@opentui/react';
-import { useState } from 'react';
+import type { MouseEvent, TextareaRenderable } from '@opentui/core';
+import { useRef, useState } from 'react';
 import { Modal } from './Modal';
 
 export interface PromptModalProps {
@@ -17,50 +17,50 @@ export function PromptModal({
   onSubmit,
   onCancel,
 }: PromptModalProps) {
-  const [prompt, setPrompt] = useState('');
+  const ref = useRef<TextareaRenderable>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = () => {
-    const trimmed = prompt.trim();
-    if (!trimmed) {
-      setError('Prompt is required.');
-      return;
-    }
-    onSubmit(trimmed);
-  };
-
-  useKeyboard((key) => {
-    if (key.name === 'escape') {
-      onCancel();
-    } else if (key.name === 'return') {
-      handleSubmit();
-    }
-  });
-
   return (
-    <Modal title={title} minWidth={50} maxWidth={80}>
-      <text style={{ marginBottom: 1 }}>{message}</text>
-      <input
-        focused
-        value={prompt}
-        placeholder={placeholder ?? 'Enter prompt...'}
-        onInput={(value) => {
-          setPrompt(value);
-          if (error) setError(null);
-        }}
-        style={{
-          backgroundColor: '#333333',
-          textColor: '#ffffff',
-        }}
-      />
-      {error && <text style={{ fg: '#ff6b6b', marginTop: 1 }}>{error}</text>}
-      <box style={{ marginTop: 1, justifyContent: 'flex-end', gap: 2 }}>
-        <text>
-          [<span fg="#51cf66">Enter</span>] Resume
-        </text>
-        <text>
-          [<span fg="#888888">Esc</span>] Cancel
-        </text>
+    <Modal title={title} minWidth={80} maxWidth={80} onClose={onCancel}>
+      <box paddingLeft={2} paddingRight={2}>
+        <text marginBottom={1}>{message}</text>
+        <box padding={1} backgroundColor="#222">
+          <textarea
+            ref={ref}
+            focused
+            placeholder={placeholder ?? 'Enter prompt...'}
+            onSubmit={() => {
+              const trimmed = ref.current?.plainText.trim() || '';
+              if (!trimmed) {
+                setError('Prompt is required.');
+                return;
+              }
+              onSubmit(trimmed);
+            }}
+            onContentChange={(e) => {
+              if (error) setError(null);
+            }}
+            onMouseDown={(r: MouseEvent) => r.target?.focus()}
+            keyBindings={[
+              { name: 'return', ctrl: true, action: 'newline' },
+              { name: 'return', meta: true, action: 'newline' },
+              { name: 'return', shift: true, action: 'newline' },
+              { name: 'return', action: 'submit' },
+            ]}
+            backgroundColor="#222"
+            focusedBackgroundColor="#222"
+            textColor="#fff"
+            focusedTextColor="#fff"
+            minHeight={1}
+            maxHeight={5}
+            flexWrap="wrap"
+          />
+        </box>
+        {error && (
+          <text fg="#ff6b6b" marginTop={1}>
+            {error}
+          </text>
+        )}
       </box>
     </Modal>
   );

@@ -1,5 +1,4 @@
-import { useKeyboard } from '@opentui/react';
-import { Modal } from './Modal';
+import { type Option, OptionsModal } from './OptionsModal';
 
 export interface ConfirmModalProps {
   title: string;
@@ -20,28 +19,35 @@ export function ConfirmModal({
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
-  useKeyboard((key) => {
-    if (key.name === 'escape') {
-      onCancel();
-    } else if (key.name === 'return') {
-      onConfirm();
-    }
-  });
-
+  const options: Option[] = [
+    {
+      key: 'enter',
+      name: confirmLabel,
+      description: 'remove the container',
+      onSelect: onConfirm,
+      color: confirmColor,
+    },
+    {
+      key: 'escape',
+      name: 'Cancel',
+      onSelect: onCancel,
+      color: '#888888',
+    },
+  ];
   return (
-    <Modal title={title} minWidth={40} maxWidth={60}>
-      <text style={{ marginBottom: 1 }}>{message}</text>
+    <OptionsModal
+      title={title}
+      message={message}
+      minWidth={40}
+      maxWidth={60}
+      options={options}
+      onCancel={onCancel}
+    >
       {detail && (
-        <text style={{ fg: '#888888', marginBottom: 1 }}>{detail}</text>
+        <text fg="#888888" marginTop={1} marginLeft={2} marginRight={2}>
+          {detail}
+        </text>
       )}
-      <box style={{ marginTop: 1, justifyContent: 'flex-end', gap: 2 }}>
-        <text>
-          [<span fg={confirmColor}>Enter</span>] {confirmLabel}
-        </text>
-        <text>
-          [<span fg="#888888">Esc</span>] Cancel
-        </text>
-      </box>
-    </Modal>
+    </OptionsModal>
   );
 }
