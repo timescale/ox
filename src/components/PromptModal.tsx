@@ -37,7 +37,7 @@ export function PromptModal({
               }
               onSubmit(trimmed);
             }}
-            onContentChange={(e) => {
+            onContentChange={() => {
               if (error) setError(null);
             }}
             onMouseDown={(r: MouseEvent) => r.target?.focus()}
