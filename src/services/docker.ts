@@ -17,6 +17,23 @@ const hasher = new Bun.CryptoHasher('md5');
 hasher.update(SANDBOX_DOCKERFILE);
 const dockerfileHash = hasher.digest('hex').slice(0, 12);
 
+/**
+ * Escape a string for safe use in shell commands using base64 encoding.
+ * This approach avoids any shell interpretation of special characters
+ * by encoding the entire string and decoding it at runtime.
+ */
+function base64Encode(text: string): string {
+  return Buffer.from(text, 'utf8').toString('base64');
+}
+
+const escapePrompt = (cmd: string, prompt?: string | null): string =>
+  prompt
+    ? `
+HERMES_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"
+exec ${cmd} "$HERMES_PROMPT"
+`.trim()
+    : `exec ${cmd}`;
+
 const DOCKER_IMAGE_NAME = 'hermes-sandbox';
 const DOCKER_IMAGE_TAG = `${DOCKER_IMAGE_NAME}:md5-${dockerfileHash}`;
 
@@ -619,20 +636,11 @@ export async function resumeSession(
     labels['hermes.name'] || labels['hermes.branch'] || 'session';
   const resumeName = `${baseSessionName}-resumed-${resumeSuffix}`;
   const agentCommand = buildResumeAgentCommand(agent, mode, model);
-  const resumeScript =
-    mode === 'detached' && prompt
-      ? `
-set -e
-cd /work/app
-exec ${agentCommand} <<'HERMES_PROMPT_HEREDOC'
-${prompt}
 
-HERMES_PROMPT_HEREDOC
-`.trim()
-      : `
+  const resumeScript = `
 set -e
 cd /work/app
-exec ${agentCommand}
+${escapePrompt(agentCommand, prompt)}
 `.trim();
 
   const labelArgs: string[] = [
@@ -839,19 +847,22 @@ cp /tmp/opencode-cfg/auth.json ~/.local/share/opencode/auth.json
 `.trim()
     : '';
 
+  const fullPrompt = interactive
+    ? prompt
+    : `${prompt}
+
+---
+Unless otherwise instructed above, use the \`gh\` command to create a PR when done.`;
+
   const startupScript = `
 set -e
 ${opencodeAuthSetup}
 cd /work
- gh auth setup-git
- gh repo clone ${repoInfo.fullName} app
- cd app
- git switch -c "hermes/${branchName}"
- exec ${agentCommand} <<'HERMES_PROMPT_HEREDOC'
-${prompt}
-
-Use the \`gh\` command to create a PR when done.
-HERMES_PROMPT_HEREDOC
+gh auth setup-git
+gh repo clone ${repoInfo.fullName} app
+cd app
+git switch -c "hermes/${branchName}"
+${escapePrompt(agentCommand, fullPrompt)}
 `.trim();
 
   // Build label arguments for hermes metadata
