@@ -442,6 +442,7 @@ function SessionsApp({
             startSession(prompt, agent, model);
           }}
           onCancel={() => onComplete({ type: 'quit' })}
+          onViewSessions={() => setView({ type: 'list' })}
         />
         {toast && (
           <Toast

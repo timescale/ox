@@ -36,6 +36,7 @@ export interface PromptScreenProps {
     model: string;
   }) => void;
   onCancel: () => void;
+  onViewSessions?: () => void;
 }
 
 interface ToastState {
@@ -76,6 +77,7 @@ export function PromptScreen({
   defaultAgent,
   defaultModel = null,
   onSubmit,
+  onViewSessions,
 }: PromptScreenProps) {
   const textareaRef = useRef<TextareaRenderable>(null);
   const [agent, setAgent] = useState<AgentType>(defaultAgent);
@@ -146,6 +148,11 @@ export function PromptScreen({
       if (currentModels?.length) {
         setShowModelSelector(true);
       }
+      return;
+    }
+
+    if (key.name === 's' && key.ctrl) {
+      onViewSessions?.();
       return;
     }
   });
@@ -258,6 +265,7 @@ export function PromptScreen({
             {[
               ['tab', 'agents'],
               ['ctrl+l', 'models'],
+              ['ctrl+s', 'sessions'],
             ].map(([key, action]) => (
               <box key={key} flexDirection="row" gap={1}>
                 <text style={{ fg: '#eee' }}>{key}</text>
