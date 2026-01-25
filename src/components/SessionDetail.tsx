@@ -8,6 +8,7 @@ import {
 } from '../services/docker';
 import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
+import { HotkeysBar } from './HotkeysBar';
 import { LogViewer } from './LogViewer';
 import { OptionsModal } from './OptionsModal';
 import { PromptModal } from './PromptModal';
@@ -226,15 +227,22 @@ export function SessionDetail({
   const metadataHeight = session.resumedFrom ? 5 : 4;
 
   // Build help text based on available actions
-  const actions: string[] = [];
-  if (isRunning) {
-    actions.push('[s]top', '[a]ttach');
-  }
-  if (isStopped) {
-    actions.push('[r]esume', '[d]elete');
-  }
-  actions.push('[b]ack', '[q]uit');
-  const helpText = actions.join('  ');
+  const actions = [
+    ...(isRunning
+      ? [
+          ['s', 'top'],
+          ['a', 'ttach'],
+        ]
+      : []),
+    ...(isStopped
+      ? [
+          ['r', 'esume'],
+          ['d', 'elete'],
+        ]
+      : []),
+    ['b', 'ack'],
+    ['q', 'uit'],
+  ] as unknown as readonly [string, string][];
 
   return (
     <Frame title={session.branch}>
@@ -312,8 +320,7 @@ export function SessionDetail({
         />
       </box>
 
-      {/* Help bar */}
-      <text style={{ height: 1, fg: '#888888' }}>{helpText}</text>
+      <HotkeysBar compact keyList={actions} />
 
       {/* Confirmation modals */}
       {modal === 'stop' && (

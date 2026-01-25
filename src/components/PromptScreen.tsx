@@ -14,6 +14,7 @@ import {
 } from '../services/agents';
 import type { AgentType } from '../services/config';
 import { FilterableSelector } from './FilterableSelector';
+import { HotkeysBar } from './HotkeysBar';
 import { Modal } from './Modal';
 import { Selector } from './Selector';
 import { Toast, type ToastType } from './Toast';
@@ -260,19 +261,13 @@ export function PromptScreen({
               }}
             />
           </box>
-          {/* Keyboard hints */}
-          <box flexDirection="row" justifyContent="flex-end" gap={2}>
-            {[
+          <HotkeysBar
+            keyList={[
               ['tab', 'agents'],
               ['ctrl+l', 'models'],
               ['ctrl+s', 'sessions'],
-            ].map(([key, action]) => (
-              <box key={key} flexDirection="row" gap={1}>
-                <text style={{ fg: '#eee' }}>{key}</text>
-                <text style={{ fg: '#666666' }}>{action}</text>
-              </box>
-            ))}
-          </box>
+            ]}
+          />
         </box>
       </box>
       <box height={1} flexDirection="row" width="100%">

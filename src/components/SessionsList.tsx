@@ -3,6 +3,7 @@ import { flushSync, useKeyboard } from '@opentui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type HermesSession, listHermesSessions } from '../services/docker';
 import { Frame } from './Frame';
+import { HotkeysBar } from './HotkeysBar';
 import { Toast, type ToastType } from './Toast';
 
 export type FilterMode = 'all' | 'running' | 'completed';
@@ -394,12 +395,14 @@ export function SessionsList({
         </scrollbox>
       )}
 
-      {/* Help bar */}
-      <text style={{ height: 1, fg: '#888888' }}>
-        {onNewTask
-          ? '[Enter] view [Tab] filter [ctrl+p] new [ctrl+r] refresh [Esc] quit'
-          : '[Enter] view [Tab] filter mode [ctrl+r] refresh [Esc] quit'}
-      </text>
+      <HotkeysBar
+        keyList={[
+          ['enter', 'view'],
+          ['tab', 'filter'],
+          ['ctrl+p', 'new'],
+          ['ctrl+r', 'refresh'],
+        ]}
+      />
 
       {/* Toast notifications */}
       {toast && (
