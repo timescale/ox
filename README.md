@@ -1,19 +1,40 @@
 # hermes
 
-Install:
+A CLI tool to run AI coding agents in isolated sandboxes per task.
 
-```
+## Installation
+
+While this is still internal-only, you can install hermes by cloning the repo and linking it with bun:
+
+```bash
 git clone git@github.com:timescale/hermes.git
 cd hermes
-bun link
+./bun i && ./bun link
+source ~/.zshrc # or restart your shell
 ```
 
-Usage:
+## Usage
 
-```
+```bash
 cd myproject
-hermes "Add a way for users to mark books as their favorite."
+# Full TUI experience
+hermes
+
+# Or just run a single task:
+hermes "Build a new feature that ..."
 ```
+
+## Updates
+
+Just pull the latest code to update:
+
+```bash
+cd hermes # wherever you cloned it above
+git pull
+./bun i # in case deps changed
+```
+
+---
 
 ## Demo Workflow
 
