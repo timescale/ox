@@ -929,7 +929,6 @@ ${escapePrompt(agentCommand, fullPrompt)}
         'docker',
         'run',
         '-it',
-        '--rm',
         '--name',
         containerName,
         ...labelArgs,
