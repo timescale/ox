@@ -37,7 +37,8 @@ Always use `./bun` wrapper script (auto-installs pinned Bun version):
 
 **Important**: After making code changes, always run:
 1. `./bun run lint --write` - Fix formatting/linting issues
-2. `./bun test` - Ensure all tests pass
+2. `./bun run typecheck` - Ensure no type errors
+3. `./bun test` - Ensure all tests pass
 
 ## Code Style
 

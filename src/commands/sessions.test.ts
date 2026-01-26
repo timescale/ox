@@ -77,6 +77,7 @@ describe('getStatusDisplay', () => {
     repo: 'owner/repo',
     prompt: 'test prompt',
     created: new Date().toISOString(),
+    interactive: false,
     status,
     exitCode,
   });
