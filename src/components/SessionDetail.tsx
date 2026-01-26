@@ -316,6 +316,7 @@ export function SessionDetail({
         <LogViewer
           containerId={session.containerId}
           isRunning={isRunning}
+          isInteractive={session.interactive}
           onError={handleLogError}
         />
       </box>

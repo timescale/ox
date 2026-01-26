@@ -6,14 +6,21 @@ import {
   type LogStream,
   streamContainerLogs,
 } from '../services/docker';
+import { AnsiText } from './AnsiText';
 
 export interface LogViewerProps {
   containerId: string;
   isRunning: boolean;
+  isInteractive: boolean;
   onError?: (error: string) => void;
 }
 
-export function LogViewer({ containerId, isRunning, onError }: LogViewerProps) {
+export function LogViewer({
+  containerId,
+  isRunning,
+  isInteractive,
+  onError,
+}: LogViewerProps) {
   const [lines, setLines] = useState<string[]>([]);
   const [following, setFollowing] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -40,7 +47,13 @@ export function LogViewer({ containerId, isRunning, onError }: LogViewerProps) {
   }, []);
 
   // Load initial logs and start streaming for running containers
+  // Skip for interactive sessions since their logs are TUI state, not text
   useEffect(() => {
+    if (isInteractive) {
+      setLoading(false);
+      return;
+    }
+
     let mounted = true;
 
     async function loadLogs() {
@@ -91,7 +104,7 @@ export function LogViewer({ containerId, isRunning, onError }: LogViewerProps) {
         streamRef.current = null;
       }
     };
-  }, [containerId, isRunning, onError]);
+  }, [containerId, isRunning, isInteractive, onError]);
 
   // Auto-scroll when following and new lines arrive
   useEffect(() => {
@@ -132,6 +145,23 @@ export function LogViewer({ containerId, isRunning, onError }: LogViewerProps) {
     );
   }
 
+  // Interactive sessions use a full TUI, so logs aren't meaningful text
+  if (isInteractive) {
+    return (
+      <box
+        style={{
+          flexGrow: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <text style={{ fg: '#888888' }}>
+          Logs not available for interactive sessions
+        </text>
+      </box>
+    );
+  }
+
   if (lines.length === 0) {
     return (
       <box
@@ -157,8 +187,8 @@ export function LogViewer({ containerId, isRunning, onError }: LogViewerProps) {
       >
         {lines.map((line, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: log lines are append-only with no stable ID
-          <text key={i} style={{ height: 1 }}>
-            {line || ' '}
+          <text key={i} wrapMode="word">
+            <AnsiText>{line || ' '}</AnsiText>
           </text>
         ))}
       </scrollbox>

@@ -360,6 +360,7 @@ export interface HermesSession {
   prompt: string;
   created: string;
   resumedFrom?: string;
+  interactive: boolean;
   status: 'running' | 'exited' | 'paused' | 'restarting' | 'dead' | 'created';
   exitCode?: number;
   startedAt?: string;
@@ -439,6 +440,7 @@ export async function listHermesSessions(): Promise<HermesSession[]> {
         prompt: labels['hermes.prompt'] || '',
         created: labels['hermes.created'] || '',
         resumedFrom: labels['hermes.resumed-from'],
+        interactive: labels['hermes.interactive'] === 'true',
         status,
         exitCode: status === 'exited' ? state.ExitCode : undefined,
         startedAt: state.StartedAt,
@@ -488,6 +490,14 @@ export async function stopContainer(nameOrId: string): Promise<void> {
 }
 
 /**
+ * Normalize line endings for container logs.
+ * Converts \r\n and standalone \r to \n.
+ */
+function normalizeLineEndings(text: string): string {
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+/**
  * Get container logs (static snapshot)
  */
 export async function getContainerLogs(
@@ -496,7 +506,7 @@ export async function getContainerLogs(
 ): Promise<string> {
   const tailArg = tail ? ['--tail', String(tail)] : [];
   const result = await Bun.$`docker logs ${tailArg} ${nameOrId} 2>&1`.quiet();
-  return result.stdout.toString();
+  return normalizeLineEndings(result.stdout.toString());
 }
 
 /**
@@ -505,14 +515,6 @@ export async function getContainerLogs(
 export interface LogStream {
   lines: AsyncIterable<string>;
   stop: () => void;
-}
-
-// ANSI escape code pattern for stripping color codes
-// biome-ignore lint/suspicious/noControlCharactersInRegex: needed for ANSI codes
-const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
-
-function stripAnsi(str: string): string {
-  return str.replace(ANSI_PATTERN, '');
 }
 
 export function streamContainerLogs(nameOrId: string): LogStream {
@@ -542,18 +544,22 @@ export function streamContainerLogs(nameOrId: string): LogStream {
         while (!stopped) {
           const { done, value } = await reader.read();
           if (done) break;
-          buffer += decoder.decode(value, { stream: true });
+          // Normalize line endings as we receive data
+          const chunk = normalizeLineEndings(
+            decoder.decode(value, { stream: true }),
+          );
+          buffer += chunk;
 
           // Split by newlines and yield complete lines
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
           for (const line of lines) {
-            yield stripAnsi(line);
+            yield line;
           }
         }
         // Yield any remaining content
         if (buffer) {
-          yield stripAnsi(buffer);
+          yield buffer;
           buffer = '';
         }
       } finally {
@@ -703,6 +709,8 @@ ${escapePrompt(agentCommand, prompt)}
     `hermes.resumed-from=${container.Name.replace(/^\//, '')}`,
     '--label',
     `hermes.resume-image=${resumeImage}`,
+    '--label',
+    `hermes.interactive=${mode === 'interactive'}`,
   ];
   if (model) {
     labelArgs.push('--label', `hermes.model=${model}`);
@@ -798,6 +806,7 @@ export async function getSession(
       prompt: labels['hermes.prompt'] || '',
       created: labels['hermes.created'] || '',
       resumedFrom: labels['hermes.resumed-from'],
+      interactive: labels['hermes.interactive'] === 'true',
       status,
       exitCode: status === 'exited' ? state.ExitCode : undefined,
       startedAt: state.StartedAt,
@@ -902,6 +911,8 @@ ${escapePrompt(agentCommand, fullPrompt)}
     `hermes.repo=${repoInfo.fullName}`,
     '--label',
     `hermes.created=${new Date().toISOString()}`,
+    '--label',
+    `hermes.interactive=${interactive}`,
   ];
   if (model) {
     labelArgs.push('--label', `hermes.model=${model}`);

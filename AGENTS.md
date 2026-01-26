@@ -181,6 +181,15 @@ const { registerKeys } = useKeyboard();
 registerKeys(['escape'], () => onCancel());
 ```
 
+Always prefer to use the named props over the `style` prop for better readability.
+
+```tsx
+<text fg="#888888" />              // Prefer this
+<text style={{ fg: '#888888' }} /> // Avoid this
+```
+
+Correct existing usages of `style` when editing components.
+
 ## CLI Framework
 
 Uses `commander` for argument parsing. Commands are in `src/commands/`.
