@@ -2,7 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import pino from 'pino';
 
-const LOGS_DIR = '.hermes/logs';
+export const LOGS_DIR = '.hermes/logs';
+export const LOG_FILE = join(LOGS_DIR, 'hermes.log');
 
 try {
   mkdirSync(LOGS_DIR, { recursive: true });
@@ -16,6 +17,6 @@ export const log = pino(
     timestamp: pino.stdTimeFunctions.isoTime,
   },
   pino.destination({
-    dest: join(LOGS_DIR, 'hermes.log'),
+    dest: LOG_FILE,
   }),
 );

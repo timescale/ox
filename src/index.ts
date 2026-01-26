@@ -9,6 +9,7 @@ import {
   withBranchOptions,
 } from './commands/branch';
 import { configCommand } from './commands/config';
+import { logsCommand } from './commands/logs';
 import { resumeCommand } from './commands/resume';
 import { runSessionsTui, sessionsCommand } from './commands/sessions';
 
@@ -58,6 +59,7 @@ withBranchOptions(program)
 // Add subcommands (after root options so they take precedence)
 program.addCommand(branchCommand);
 program.addCommand(configCommand);
+program.addCommand(logsCommand);
 program.addCommand(resumeCommand);
 program.addCommand(sessionsCommand);
 
