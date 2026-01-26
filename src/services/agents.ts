@@ -5,6 +5,7 @@
 import type { SelectOption } from '@opentui/core';
 import { useEffect, useState } from 'react';
 import type { AgentType } from './config';
+import { getDockerImageTag, getOpencodeAuthMount } from './docker';
 
 export interface Model {
   id: string;
@@ -66,37 +67,6 @@ export const AGENT_INFO_MAP: Record<AgentType, AgentInfo> = AGENT_INFO.reduce(
   {} as Record<AgentType, AgentInfo>,
 );
 
-/**
- * Check if opencode is installed and available in PATH
- */
-export async function isOpencodeInstalled(): Promise<boolean> {
-  try {
-    await Bun.$`which opencode`.quiet();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Install opencode using the recommended method
- */
-export async function installOpencode(): Promise<{
-  success: boolean;
-  error?: string;
-}> {
-  try {
-    // Use bun to install opencode globally
-    await Bun.$`curl -fsSL https://opencode.ai/install | bash`.quiet();
-    return { success: true };
-  } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
 export const openCodeIdToModel = (id: string): Model => {
   const [description, name = id] = id.split('/');
   return {
@@ -107,18 +77,25 @@ export const openCodeIdToModel = (id: string): Model => {
 };
 
 /**
- * Get available models for opencode from the CLI
+ * Get available models for opencode by running the CLI inside the Docker container
  */
 async function getOpencodeModels(): Promise<readonly Model[]> {
   try {
-    const result = await Bun.$`opencode models`.quiet();
+    const imageTag = getDockerImageTag();
+    const opencodeAuth = await getOpencodeAuthMount();
+
+    // Build the command with auth setup if needed
+    const script = `${opencodeAuth.setupScript}\nexec opencode models`.trim();
+
+    const result =
+      await Bun.$`docker run --rm ${opencodeAuth.volumeArgs} ${imageTag} bash -c ${script}`.quiet();
     const output = result.stdout.toString().trim();
     return output
       .split('\n')
       .filter((line) => line.length > 0)
       .map(openCodeIdToModel);
   } catch {
-    // Return empty array if opencode is not installed or fails
+    // Return empty array if docker or opencode fails
     return [];
   }
 }

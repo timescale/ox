@@ -289,6 +289,47 @@ async function getGhCredentialsMountArgs(): Promise<string[]> {
   return [];
 }
 
+// Opencode config paths
+const OPENCODE_HOST_CONFIG_DIR = join(homedir(), '.local', 'share', 'opencode');
+const OPENCODE_CONTAINER_TMP_DIR = '/tmp/opencode-cfg';
+const OPENCODE_CONTAINER_CONFIG_DIR = '/home/agent/.local/share/opencode';
+
+/**
+ * Configuration for mounting opencode auth into a Docker container.
+ * The auth file is mounted read-only to a temp location and must be
+ * copied to the final location via the setup script.
+ */
+export interface OpencodeAuthMount {
+  /** Whether auth.json exists on the host */
+  exists: boolean;
+  /** Docker volume args to mount the config dir (empty if no auth) */
+  volumeArgs: string[];
+  /** Bash script to copy auth to final location (empty if no auth) */
+  setupScript: string;
+}
+
+/**
+ * Get opencode auth mount configuration for Docker containers.
+ * Returns volume args and setup script needed to make opencode auth available.
+ */
+export async function getOpencodeAuthMount(): Promise<OpencodeAuthMount> {
+  const authFile = Bun.file(join(OPENCODE_HOST_CONFIG_DIR, 'auth.json'));
+  const exists = await authFile.exists();
+
+  if (!exists) {
+    return { exists: false, volumeArgs: [], setupScript: '' };
+  }
+
+  return {
+    exists: true,
+    volumeArgs: [
+      '-v',
+      `${OPENCODE_HOST_CONFIG_DIR}:${OPENCODE_CONTAINER_TMP_DIR}:ro`,
+    ],
+    setupScript: `mkdir -p ${OPENCODE_CONTAINER_CONFIG_DIR} && cp ${OPENCODE_CONTAINER_TMP_DIR}/auth.json ${OPENCODE_CONTAINER_CONFIG_DIR}/auth.json`,
+  };
+}
+
 // ============================================================================
 // Container Options
 // ============================================================================
@@ -815,15 +856,9 @@ export async function startContainer(
     envArgs.push('-e', `${key}=${value}`);
   }
 
-  // Check if opencode auth.json exists on host and prepare mount args
-  const opencodeConfigDir = join(homedir(), '.local', 'share', 'opencode');
-  const opencodeAuthFile = Bun.file(join(opencodeConfigDir, 'auth.json'));
-  const hasOpencodeAuth = await opencodeAuthFile.exists();
-  const volumeArgs: string[] = [];
-  if (hasOpencodeAuth) {
-    // Mount the directory read-only to a temp location
-    volumeArgs.push('-v', `${opencodeConfigDir}:/tmp/opencode-cfg:ro`);
-  }
+  // Get opencode auth mount configuration
+  const opencodeAuth = await getOpencodeAuthMount();
+  const volumeArgs: string[] = [...opencodeAuth.volumeArgs];
 
   // Mount gh credentials from .hermes/gh if they exist
   volumeArgs.push(...(await getGhCredentialsMountArgs()));
@@ -835,18 +870,6 @@ export async function startContainer(
       ? `claude${interactive ? '' : ' -p'}${modelArg} --dangerously-skip-permissions`
       : `opencode${modelArg} ${interactive ? '--prompt' : 'run'}`;
 
-  // Build the startup script that:
-  // 1. Copies opencode auth.json if mounted
-  // 2. Clones the repo using gh
-  // 3. Creates and checks out the new branch
-  // 4. Runs the selected agent with the prompt
-  const opencodeAuthSetup = hasOpencodeAuth
-    ? `
-mkdir -p ~/.local/share/opencode
-cp /tmp/opencode-cfg/auth.json ~/.local/share/opencode/auth.json
-`.trim()
-    : '';
-
   const fullPrompt = interactive
     ? prompt
     : `${prompt}
@@ -856,7 +879,7 @@ Unless otherwise instructed above, use the \`gh\` command to create a PR when do
 
   const startupScript = `
 set -e
-${opencodeAuthSetup}
+${opencodeAuth.setupScript}
 cd /work
 gh auth setup-git
 gh repo clone ${repoInfo.fullName} app

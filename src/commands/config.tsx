@@ -11,13 +11,7 @@ import { FilterableSelector } from '../components/FilterableSelector';
 import { GhAuth } from '../components/GhAuth';
 import { Loading } from '../components/Loading';
 import { Selector } from '../components/Selector';
-import {
-  AGENT_SELECT_OPTIONS,
-  getModelsForAgent,
-  installOpencode,
-  isOpencodeInstalled,
-  type Model,
-} from '../services/agents';
+import { AGENT_SELECT_OPTIONS, useAgentModels } from '../services/agents';
 import {
   type GhAuthProcess,
   startContainerGhAuth,
@@ -54,38 +48,15 @@ export function ConfigWizard({ onComplete }: ConfigWizardProps) {
   // Create all promises immediately (only once via useMemo)
   const configPromise = useMemo(() => readConfig(), []);
   const servicesPromise = useMemo(() => listServices(), []);
-  const claudeModelsPromise = useMemo(
-    () => getModelsForAgent('claude').then((m) => [...m]),
-    [],
-  );
-  const opencodeInstalledPromise = useMemo(() => isOpencodeInstalled(), []);
-  const opencodeModelsPromise = useMemo(
-    () =>
-      opencodeInstalledPromise.then((installed) =>
-        installed ? getModelsForAgent('opencode').then((m) => [...m]) : [],
-      ),
-    [opencodeInstalledPromise],
-  );
 
   const [step, setStep] = useState<
-    | 'docker'
-    | 'service'
-    | 'agent'
-    | 'install-opencode'
-    | 'model'
-    | 'gh-auth-check'
-    | 'gh-auth'
+    'docker' | 'service' | 'agent' | 'model' | 'gh-auth-check' | 'gh-auth'
   >('docker');
   const [config, setConfig] = useState<HermesConfig | null>(null);
 
   // Async data - null means still loading
   const [services, setServices] = useState<TigerService[] | null>(null);
-  const [claudeModels, setClaudeModels] = useState<Model[] | null>(null);
-  const [opencodeInstalled, setOpencodeInstalled] = useState<boolean | null>(
-    null,
-  );
-  const [opencodeModels, setOpencodeModels] = useState<Model[] | null>(null);
-  const [isInstalling, setIsInstalling] = useState(false);
+  const modelsMap = useAgentModels();
 
   // GitHub auth state
   const [ghAuthProcess, setGhAuthProcess] = useState<GhAuthProcess | null>(
@@ -107,22 +78,6 @@ export function ConfigWizard({ onComplete }: ConfigWizardProps) {
   useEffect(() => {
     servicesPromise.then(setServices).catch(() => setServices([]));
   }, [servicesPromise]);
-
-  useEffect(() => {
-    claudeModelsPromise.then(setClaudeModels).catch(() => setClaudeModels([]));
-  }, [claudeModelsPromise]);
-
-  useEffect(() => {
-    opencodeInstalledPromise
-      .then(setOpencodeInstalled)
-      .catch(() => setOpencodeInstalled(false));
-  }, [opencodeInstalledPromise]);
-
-  useEffect(() => {
-    opencodeModelsPromise
-      .then(setOpencodeModels)
-      .catch(() => setOpencodeModels([]));
-  }, [opencodeModelsPromise]);
 
   // Handle GitHub auth check step - start the auth process
   useEffect(() => {
@@ -280,11 +235,6 @@ export function ConfigWizard({ onComplete }: ConfigWizardProps) {
 
   // ---- Step 3: Agent Selection ----
   if (step === 'agent') {
-    // Need opencodeInstalled to know whether to show install prompt
-    if (opencodeInstalled === null) {
-      return <Loading title="Loading" onCancel={handleCancel} />;
-    }
-
     const initialIndex = config?.agent
       ? AGENT_SELECT_OPTIONS.findIndex((opt) => opt.value === config.agent)
       : 0;
@@ -299,19 +249,11 @@ export function ConfigWizard({ onComplete }: ConfigWizardProps) {
         onSelect={(value) => {
           const newAgent = value as AgentType;
 
-          // If opencode is selected but not installed, show install prompt
-          if (newAgent === 'opencode' && !opencodeInstalled) {
-            setConfig((c) => (c ? { ...c, agent: newAgent } : c));
-            setStep('install-opencode');
-            return;
-          }
-
           // Get models for the selected agent
-          const models =
-            newAgent === 'opencode' ? opencodeModels : claudeModels;
+          const models = modelsMap[newAgent];
 
           // If no models, complete wizard
-          if (!models || models.length === 0) {
+          if (models && models.length === 0) {
             onComplete({
               type: 'completed',
               config: { ...config, agent: newAgent, model: undefined },
@@ -332,83 +274,16 @@ export function ConfigWizard({ onComplete }: ConfigWizardProps) {
     );
   }
 
-  // ---- Step 3.5: Install OpenCode ----
-  if (step === 'install-opencode') {
-    if (isInstalling) {
-      return <Loading title="Installing opencode" onCancel={handleCancel} />;
-    }
-
-    const installOptions: SelectOption[] = [
-      {
-        name: 'Install OpenCode',
-        description: 'Install opencode globally using bun',
-        value: 'install',
-      },
-      {
-        name: 'Choose Different Agent',
-        description: 'Go back and select a different agent',
-        value: 'back',
-      },
-    ];
-
-    return (
-      <Selector
-        title="OpenCode Not Found"
-        description="OpenCode is not installed. Would you like to install it?"
-        options={installOptions}
-        initialIndex={0}
-        showBack
-        onSelect={async (value) => {
-          if (value === 'back') {
-            setStep('agent');
-            return;
-          }
-
-          setIsInstalling(true);
-          const result = await installOpencode();
-
-          if (!result.success) {
-            setIsInstalling(false);
-            onComplete({
-              type: 'error',
-              message: `Failed to install opencode: ${result.error}`,
-            });
-            return;
-          }
-
-          // Refresh opencode models after installation
-          const models = await getModelsForAgent('opencode');
-          setOpencodeModels([...models]);
-          setOpencodeInstalled(true);
-          setIsInstalling(false);
-
-          if (models.length === 0) {
-            onComplete({
-              type: 'completed',
-              config: { ...config, model: undefined },
-            });
-            return;
-          }
-
-          setStep('model');
-        }}
-        onCancel={handleCancel}
-        onBack={() => setStep('agent')}
-      />
-    );
-  }
-
   // ---- Step 4: Model Selection ----
   if (step === 'model') {
-    const currentModels =
-      config?.agent === 'opencode' ? opencodeModels : claudeModels;
+    const currentModels = config?.agent ? modelsMap[config.agent] : null;
 
     // Need models for the selected agent
     if (currentModels === null) {
       return <Loading title="Loading models" onCancel={handleCancel} />;
     }
 
-    const modelOptions: SelectOption[] = currentModels.map((model: Model) => ({
+    const modelOptions: SelectOption[] = currentModels.map((model) => ({
       name: model.name,
       description: model.description || '',
       value: model.id,
