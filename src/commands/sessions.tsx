@@ -8,7 +8,7 @@ import { Command } from 'commander';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfigWizard, type ConfigWizardResult } from '../commands/config.tsx';
 import { DockerSetup, type DockerSetupResult } from '../components/DockerSetup';
-import { PromptScreen } from '../components/PromptScreen';
+import { PromptScreen, type SubmitMode } from '../components/PromptScreen';
 import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
 import { StartingScreen } from '../components/StartingScreen';
@@ -55,8 +55,16 @@ type SessionsView =
   | { type: 'list' };
 
 interface SessionsResult {
-  type: 'quit' | 'attach' | 'resume';
+  type: 'quit' | 'attach' | 'resume' | 'start-interactive';
   containerId?: string;
+  // For start-interactive: info needed to start the container
+  startInfo?: {
+    prompt: string;
+    agent: AgentType;
+    model: string;
+    branchName: string;
+    envVars?: Record<string, string>;
+  };
 }
 
 interface ToastState {
@@ -143,8 +151,13 @@ function SessionsApp({
 
   // Start session function - handles the full flow of starting an agent
   const startSession = useCallback(
-    async (prompt: string, agent: AgentType, model: string) => {
-      log.debug({ agent, model, prompt }, 'startSession received');
+    async (
+      prompt: string,
+      agent: AgentType,
+      model: string,
+      mode: SubmitMode = 'async',
+    ) => {
+      log.debug({ agent, model, prompt, mode }, 'startSession received');
       setView({
         type: 'starting',
         prompt,
@@ -203,7 +216,22 @@ function SessionsApp({
           );
         }
 
-        // Step 7: Start container (always detached in TUI mode)
+        // For interactive mode, exit TUI and let the caller start the container
+        if (mode === 'interactive') {
+          onComplete({
+            type: 'start-interactive',
+            startInfo: {
+              prompt,
+              agent,
+              model,
+              branchName,
+              envVars: forkResult?.envVars,
+            },
+          });
+          return;
+        }
+
+        // Step 7: Start container (detached for async mode)
         setView((v) =>
           v.type === 'starting'
             ? { ...v, step: 'Starting agent container' }
@@ -220,7 +248,7 @@ function SessionsApp({
           envVars: forkResult?.envVars,
         });
 
-        // Step 7: Fetch the created session
+        // Step 8: Fetch the created session
         setView((v) =>
           v.type === 'starting' ? { ...v, step: 'Loading session' } : v,
         );
@@ -239,7 +267,7 @@ function SessionsApp({
         setView({ type: 'prompt' });
       }
     },
-    [showToast, setView],
+    [showToast, setView, onComplete],
   );
 
   // Initialize: always go through docker setup first (handles both runtime and image)
@@ -412,8 +440,8 @@ function SessionsApp({
         <PromptScreen
           defaultAgent={config?.agent ?? 'opencode'}
           defaultModel={config?.model}
-          onSubmit={({ prompt, agent, model }) => {
-            startSession(prompt, agent, model);
+          onSubmit={({ prompt, agent, model, mode }) => {
+            startSession(prompt, agent, model, mode);
           }}
           onCancel={() => onComplete({ type: 'quit' })}
           onViewSessions={() => setView({ type: 'list' })}
@@ -543,6 +571,26 @@ export async function runSessionsTui(
       });
     } catch (err) {
       console.error(`Failed to resume: ${err}`);
+    }
+  }
+
+  // Handle start-interactive action - start container attached to terminal
+  if (result.type === 'start-interactive' && result.startInfo) {
+    const { prompt, agent, model, branchName, envVars } = result.startInfo;
+    try {
+      const repoInfo = await getRepoInfo();
+      await startContainer({
+        branchName,
+        prompt,
+        repoInfo,
+        agent,
+        model,
+        detach: false,
+        interactive: true,
+        envVars,
+      });
+    } catch (err) {
+      console.error(`Failed to start: ${err}`);
     }
   }
 }

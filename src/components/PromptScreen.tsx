@@ -21,6 +21,8 @@ import { Modal } from './Modal';
 import { Selector } from './Selector';
 import { Toast, type ToastType } from './Toast';
 
+export type SubmitMode = 'async' | 'interactive';
+
 export interface PromptScreenProps {
   defaultAgent: AgentType;
   defaultModel?: string | null;
@@ -28,6 +30,7 @@ export interface PromptScreenProps {
     prompt: string;
     agent: AgentType;
     model: string;
+    mode: SubmitMode;
   }) => void;
   onCancel: () => void;
   onViewSessions?: () => void;
@@ -82,6 +85,7 @@ export function PromptScreen({
   modelMem.current[agent] = modelId;
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [submitMode, setSubmitMode] = useState<SubmitMode>('async');
   const modelsMap = useAgentModels();
   const currentModels = modelsMap[agent];
   const agentInfo: AgentInfo = AGENT_INFO_MAP[agent];
@@ -129,8 +133,8 @@ export function PromptScreen({
       setToast({ message: 'Please select a model', type: 'error' });
       return;
     }
-    log.debug({ agent, model: modelId }, 'Submitting prompt');
-    onSubmit({ prompt: promptText, agent, model: modelId });
+    log.debug({ agent, model: modelId, mode: submitMode }, 'Submitting prompt');
+    onSubmit({ prompt: promptText, agent, model: modelId, mode: submitMode });
   };
 
   // Use a ref to avoid stale closure issues with @opentui/react's textarea.
@@ -142,6 +146,7 @@ export function PromptScreen({
 
   // Keyboard handling (when modal not shown)
   useKeyboard((key) => {
+    log.trace({ key }, 'Key pressed in PromptScreen');
     if (showModelSelector) return;
 
     if (key.name === 'tab') {
@@ -158,6 +163,11 @@ export function PromptScreen({
 
     if (key.name === 's' && key.ctrl) {
       onViewSessions?.();
+      return;
+    }
+
+    if (key.name === 'a' && key.ctrl) {
+      setSubmitMode((m) => (m === 'async' ? 'interactive' : 'async'));
       return;
     }
   });
@@ -234,6 +244,9 @@ export function PromptScreen({
               {/* Agent and model display row */}
               <box flexDirection="row" marginTop={1} height={1} gap={1}>
                 <text fg={agentInfo?.color}>{agentInfo?.name || agent}</text>
+                {submitMode === 'interactive' ? (
+                  <text fg="#22c55e">[interactive]</text>
+                ) : null}
                 <text fg="#aaaaaa">
                   {model?.name || modelId || 'Loading...'}
                 </text>
@@ -267,6 +280,7 @@ export function PromptScreen({
             keyList={[
               ['tab', 'agents'],
               ['ctrl+l', 'models'],
+              ['ctrl+a', 'mode'],
               ['ctrl+s', 'sessions'],
             ]}
           />
