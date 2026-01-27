@@ -13,6 +13,7 @@ import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
 import { StartingScreen } from '../components/StartingScreen';
 import { Toast, type ToastType } from '../components/Toast';
+import { hasLocalGhAuth } from '../services/auth';
 import {
   type AgentType,
   type HermesConfig,
@@ -195,7 +196,14 @@ function SessionsApp({
           },
         });
 
-        // Step 6: Start container (always detached in TUI mode)
+        // Step 6: Ensure GitHub auth is configured
+        if (!(await hasLocalGhAuth())) {
+          throw new Error(
+            'GitHub authentication not configured. Run `hermes config` to set up.',
+          );
+        }
+
+        // Step 7: Start container (always detached in TUI mode)
         setView((v) =>
           v.type === 'starting'
             ? { ...v, step: 'Starting agent container' }

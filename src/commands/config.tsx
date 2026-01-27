@@ -237,18 +237,6 @@ export function ConfigWizard({ onComplete }: ConfigWizardProps) {
         onSelect={(value) => {
           const newAgent = value as AgentType;
 
-          // Get models for the selected agent
-          const models = modelsMap[newAgent];
-
-          // If no models, complete wizard
-          if (models && models.length === 0) {
-            onComplete({
-              type: 'completed',
-              config: { ...config, agent: newAgent, model: undefined },
-            });
-            return;
-          }
-
           setConfig((c) => ({
             ...c,
             agent: newAgent,
@@ -269,6 +257,28 @@ export function ConfigWizard({ onComplete }: ConfigWizardProps) {
     // Need models for the selected agent
     if (currentModels === null) {
       return <Loading title="Loading models" onCancel={handleCancel} />;
+    }
+
+    // If no models available (e.g., docker or opencode CLI issues), allow skipping
+    if (currentModels.length === 0) {
+      return (
+        <Selector
+          title={`Step 4/5: Default Model (${config?.agent})`}
+          description="Could not load models. You can skip and specify a model later with --model."
+          options={[
+            {
+              name: 'Skip model selection',
+              value: '__skip__',
+              description: 'Continue without setting a default model',
+            },
+          ]}
+          initialIndex={0}
+          showBack
+          onSelect={() => setStep('gh-auth-check')}
+          onCancel={handleCancel}
+          onBack={() => setStep('agent')}
+        />
+      );
     }
 
     const modelOptions: SelectOption[] = currentModels.map((model) => ({

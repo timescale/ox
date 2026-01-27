@@ -4,6 +4,7 @@
 
 import { Command } from 'commander';
 import { runDockerSetupScreen } from '../components/DockerSetupScreen';
+import { hasLocalGhAuth } from '../services/auth';
 import { type AgentType, readConfig } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { startContainer } from '../services/docker';
@@ -113,7 +114,15 @@ export async function branchAction(
     process.exit(1);
   }
 
-  // Step 8: Start container (repo will be cloned inside container)
+  // Step 8: Ensure GitHub auth is configured
+  if (!(await hasLocalGhAuth())) {
+    console.error(
+      'Error: GitHub authentication not configured.\nRun `hermes config` to set up authentication.',
+    );
+    process.exit(1);
+  }
+
+  // Step 9: Start container (repo will be cloned inside container)
   console.log(
     `Starting agent container (using ${effectiveAgent}${effectiveModel ? ` with ${effectiveModel}` : ''})...`,
   );
