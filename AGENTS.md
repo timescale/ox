@@ -35,7 +35,10 @@ Always use `./bun` wrapper script (auto-installs pinned Bun version):
 ./bun index.ts <command>
 ```
 
-**Important**: Always run `./bun run lint --write` after making code changes.
+**Important**: After making code changes, always run:
+1. `./bun run lint --write` - Fix formatting/linting issues
+2. `./bun run typecheck` - Ensure no type errors
+3. `./bun test` - Ensure all tests pass
 
 ## Code Style
 
@@ -138,7 +141,7 @@ await proc.exited;
 
 ## Testing
 
-Use Bun's built-in test runner:
+Use Bun's built-in test runner. Tests are colocated with source files using `.test.ts` suffix.
 
 ```typescript
 import { test, expect, describe } from 'bun:test';
@@ -149,6 +152,14 @@ describe('featureName', () => {
   });
 });
 ```
+
+### Test Guidelines
+
+- **Run tests after changes**: Always run `./bun test` after modifying code
+- **Colocate tests**: Place `foo.test.ts` next to `foo.ts`
+- **Export for testability**: If a function needs testing, export it
+- **Use descriptive names**: Test names should describe expected behavior
+- **Test edge cases**: Include tests for error conditions and boundary cases
 
 ## Project Structure
 

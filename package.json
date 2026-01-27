@@ -5,7 +5,8 @@
   "scripts": {
     "build": "bun build ./index.ts --compile --outfile ./bin/hermes",
     "typecheck": "tsc --noEmit",
-    "lint": "bun x @biomejs/biome check"
+    "lint": "bun x @biomejs/biome check",
+    "test": "bun test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",

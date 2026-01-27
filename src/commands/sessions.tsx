@@ -586,7 +586,7 @@ interface SessionsOptions {
   all: boolean;
 }
 
-function formatRelativeTime(isoDate: string): string {
+export function formatRelativeTime(isoDate: string): string {
   const date = new Date(isoDate);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -607,7 +607,7 @@ function formatRelativeTime(isoDate: string): string {
   return 'just now';
 }
 
-function getStatusDisplay(session: HermesSession): string {
+export function getStatusDisplay(session: HermesSession): string {
   switch (session.status) {
     case 'running':
       return '\x1b[32mrunning\x1b[0m'; // green
@@ -629,7 +629,7 @@ function getStatusDisplay(session: HermesSession): string {
   }
 }
 
-function truncate(str: string, maxLen: number): string {
+export function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
   return `${str.slice(0, maxLen - 3)}...`;
 }
@@ -681,7 +681,7 @@ function printTable(sessions: HermesSession[]): void {
   }
 }
 
-function toYaml(data: unknown, indent = 0): string {
+export function toYaml(data: unknown, indent = 0): string {
   const prefix = '  '.repeat(indent);
 
   if (data === null || data === undefined) {

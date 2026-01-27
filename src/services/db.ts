@@ -10,7 +10,7 @@ export interface ForkResult {
   envVars: Record<string, string>; // PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
 }
 
-function parseEnvOutput(output: string): Record<string, string> {
+export function parseEnvOutput(output: string): Record<string, string> {
   const envVars: Record<string, string> = {};
   for (const line of output.split('\n')) {
     const trimmed = line.trim();

@@ -16,3 +16,5 @@ jobs:
         run: ./bun run lint
       - name: Run Type Check
         run: ./bun run typecheck
+      - name: Run Tests
+        run: ./bun test
