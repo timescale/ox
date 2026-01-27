@@ -32,25 +32,29 @@ export function Loading({
   }, []);
 
   return (
-    <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
+    <box flexDirection="column" padding={1} flexGrow={1}>
       <box
         title={title}
-        style={{
-          border: true,
-          borderStyle: 'single',
-          padding: 1,
-          flexDirection: 'column',
-          flexGrow: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+        border
+        borderStyle="single"
+        padding={1}
+        flexDirection="column"
+        flexGrow={1}
+        alignItems="center"
+        justifyContent="center"
       >
-        <text style={{ fg: '#eee' }}>
+        <text fg="#eee">
           {message}
           {dots}
         </text>
-        {detail && <text style={{ fg: '#888', marginTop: 1 }}>{detail}</text>}
-        <text style={{ fg: '#555', marginTop: 1 }}>Press Esc to cancel</text>
+        {detail && (
+          <text fg="#888" marginTop={1}>
+            {detail}
+          </text>
+        )}
+        <text fg="#555" marginTop={1}>
+          Press Esc to cancel
+        </text>
       </box>
     </box>
   );

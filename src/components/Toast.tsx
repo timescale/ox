@@ -37,16 +37,14 @@ export function Toast({
 
   return (
     <box
-      style={{
-        position: 'absolute',
-        bottom: 1,
-        right: 1,
-        border: true,
-        borderStyle: 'single',
-        padding: 1,
-        paddingLeft: 2,
-        paddingRight: 2,
-      }}
+      position="absolute"
+      bottom={1}
+      right={1}
+      border
+      borderStyle="single"
+      padding={1}
+      paddingLeft={2}
+      paddingRight={2}
     >
       <text>
         <span fg={color}>{icon}</span> {message}

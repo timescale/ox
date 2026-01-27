@@ -38,21 +38,21 @@ export function GhAuth({ code, url, onComplete }: GhAuthProps) {
 
   return (
     <Frame title="GitHub Authentication">
-      <box style={{ flexDirection: 'column', alignItems: 'center' }}>
-        <text style={{ fg: '#888' }}>Open this URL in your browser:</text>
-        <text style={{ fg: '#6bf' }}>{url}</text>
+      <box flexDirection="column" alignItems="center">
+        <text fg="#888">Open this URL in your browser:</text>
+        <text fg="#6bf">{url}</text>
 
-        <box style={{ height: 1 }} />
+        <box height={1} />
 
-        <text style={{ fg: '#888' }}>And enter this one-time code:</text>
-        <text style={{ fg: '#0f0' }}> {code} </text>
+        <text fg="#888">And enter this one-time code:</text>
+        <text fg="#0f0"> {code} </text>
 
-        <box style={{ height: 2 }} />
+        <box height={2} />
 
-        <text style={{ fg: '#888' }}>Waiting for authentication{dots}</text>
+        <text fg="#888">Waiting for authentication{dots}</text>
 
-        <box style={{ height: 1 }} />
-        <text style={{ fg: '#555' }}>Press Esc to cancel</text>
+        <box height={1} />
+        <text fg="#555">Press Esc to cancel</text>
       </box>
     </Frame>
   );

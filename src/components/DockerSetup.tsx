@@ -197,21 +197,21 @@ export function DockerSetup({
   // ---- Ready State ----
   if (state.type === 'ready') {
     return (
-      <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
+      <box flexDirection="column" padding={1} flexGrow={1}>
         <box
           title={title}
-          style={{
-            border: true,
-            borderStyle: 'single',
-            padding: 1,
-            flexDirection: 'column',
-            flexGrow: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+          border
+          borderStyle="single"
+          padding={1}
+          flexDirection="column"
+          flexGrow={1}
+          alignItems="center"
+          justifyContent="center"
         >
-          <text style={{ fg: '#0c0' }}>Docker is running!</text>
-          <text style={{ fg: '#555555', marginTop: 1 }}>Press Esc to exit</text>
+          <text fg="#0c0">Docker is running!</text>
+          <text fg="#555555" marginTop={1}>
+            Press Esc to exit
+          </text>
         </box>
       </box>
     );
@@ -248,27 +248,25 @@ export function DockerSetup({
   // ---- Error State ----
   if (state.type === 'error') {
     return (
-      <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
+      <box flexDirection="column" padding={1} flexGrow={1}>
         <box
           title={title}
-          style={{
-            border: true,
-            borderStyle: 'single',
-            padding: 1,
-            flexDirection: 'column',
-            flexGrow: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+          border
+          borderStyle="single"
+          padding={1}
+          flexDirection="column"
+          flexGrow={1}
+          alignItems="center"
+          justifyContent="center"
         >
-          <text style={{ fg: '#ff4444' }}>Error: {state.message}</text>
-          <text style={{ fg: '#888888', marginTop: 1 }}>
+          <text fg="#ff4444">Error: {state.message}</text>
+          <text fg="#888888" marginTop={1}>
             Please install Docker manually and try again.
           </text>
-          <text style={{ fg: '#888888' }}>
-            Visit: https://docs.docker.com/get-docker/
+          <text fg="#888888">Visit: https://docs.docker.com/get-docker/</text>
+          <text fg="#555555" marginTop={1}>
+            Press Esc to exit
           </text>
-          <text style={{ fg: '#555555', marginTop: 1 }}>Press Esc to exit</text>
         </box>
       </box>
     );

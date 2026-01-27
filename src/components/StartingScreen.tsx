@@ -18,15 +18,15 @@ export function StartingScreen({ step }: StartingScreenProps) {
 
   return (
     <box
-      style={{
-        flexDirection: 'column',
-        flexGrow: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
+      flexDirection="column"
+      flexGrow={1}
+      alignItems="center"
+      justifyContent="center"
     >
-      <text style={{ fg: '#888888', marginBottom: 2 }}>Starting...</text>
-      <text style={{ fg: '#cccccc' }}>
+      <text fg="#888888" marginBottom={2}>
+        Starting...
+      </text>
+      <text fg="#cccccc">
         {step}
         {dots}
       </text>

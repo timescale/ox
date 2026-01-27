@@ -36,14 +36,12 @@ export function ListItem({
     <box
       onMouseDown={onMouseDown}
       onMouseOver={onMouseOver}
-      style={{
-        flexDirection: 'column',
-        backgroundColor: bgColor,
-        paddingLeft: 1,
-      }}
+      flexDirection="column"
+      backgroundColor={bgColor}
+      paddingLeft={1}
     >
-      <text style={{ fg: textColor }}>{`${arrow} ${option.name}`}</text>
-      <text style={{ fg: descColor }}>{`  ${option.description}`}</text>
+      <text fg={textColor}>{`${arrow} ${option.name}`}</text>
+      <text fg={descColor}>{`  ${option.description}`}</text>
     </box>
   );
 }

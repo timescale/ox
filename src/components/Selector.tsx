@@ -96,29 +96,27 @@ export function Selector({
     : 'Arrows to navigate, Enter/click to select, Esc to cancel';
 
   return (
-    <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
+    <box flexDirection="column" padding={1} flexGrow={1}>
       <box
         title={title}
-        style={{
-          border: true,
-          borderStyle: 'single',
-          padding: 1,
-          flexDirection: 'column',
-          flexGrow: 1,
-        }}
+        border
+        borderStyle="single"
+        padding={1}
+        flexDirection="column"
+        flexGrow={1}
       >
-        <text style={{ height: 1 }}>{description}</text>
-        <text style={{ height: 1, fg: '#888888' }}>{helpText}</text>
+        <text height={1}>{description}</text>
+        <text height={1} fg="#888888">
+          {helpText}
+        </text>
 
         <scrollbox
           ref={scrollboxRef}
           onMouseOut={handleMouseOut}
-          style={{
-            marginTop: 1,
-            flexShrink: 1,
-            flexGrow: 1,
-            maxHeight: options.length * LINES_PER_ITEM,
-          }}
+          marginTop={1}
+          flexShrink={1}
+          flexGrow={1}
+          maxHeight={options.length * LINES_PER_ITEM}
         >
           {options.map((option, index) => (
             <ListItem

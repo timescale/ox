@@ -235,7 +235,7 @@ export function SessionsList({
   if (loading && sessions.length === 0) {
     return (
       <Frame title="Hermes Sessions" centered>
-        <text style={{ fg: '#888888' }}>Loading sessions...</text>
+        <text fg="#888888">Loading sessions...</text>
       </Frame>
     );
   }
@@ -246,69 +246,48 @@ export function SessionsList({
   return (
     <Frame title="Hermes Sessions">
       {/* Filter bar */}
-      <box
-        style={{
-          height: 1,
-          marginBottom: 1,
-          flexDirection: 'row',
-        }}
-      >
-        <text style={{ height: 1 }}>
+      <box height={1} marginBottom={1} flexDirection="row">
+        <text height={1}>
           Filter: <span fg="#51cf66">{filterText || ''}</span>
           <span fg="#444444">█</span>
         </text>
-        <text style={{ height: 1, flexGrow: 1 }} />
-        <text style={{ height: 1, fg: '#888888' }}>
+        <text height={1} flexGrow={1} />
+        <text height={1} fg="#888888">
           [{filterLabel}] {countText}
         </text>
       </box>
 
       {/* Column headers */}
-      <box
-        style={{
-          height: 1,
-          flexDirection: 'row',
-          paddingLeft: 1,
-          paddingRight: 1,
-        }}
-      >
-        <text style={{ height: 1, width: 3 }} />
-        <text style={{ height: 1, flexGrow: 2, flexBasis: 0, fg: '#888888' }}>
+      <box height={1} flexDirection="row" paddingLeft={1} paddingRight={1}>
+        <text height={1} width={3} />
+        <text height={1} flexGrow={2} flexBasis={0} fg="#888888">
           NAME
         </text>
-        <text style={{ height: 1, width: 12, fg: '#888888' }}>STATUS</text>
-        <text style={{ height: 1, flexGrow: 1, flexBasis: 0, fg: '#888888' }}>
+        <text height={1} width={12} fg="#888888">
+          STATUS
+        </text>
+        <text height={1} flexGrow={1} flexBasis={0} fg="#888888">
           AGENT
         </text>
-        <text style={{ height: 1, flexGrow: 2, flexBasis: 0, fg: '#888888' }}>
+        <text height={1} flexGrow={2} flexBasis={0} fg="#888888">
           REPO
         </text>
-        <text style={{ height: 1, width: 10, fg: '#888888' }}>CREATED</text>
+        <text height={1} width={10} fg="#888888">
+          CREATED
+        </text>
       </box>
 
       {/* Session list */}
       {filteredSessions.length === 0 ? (
-        <box
-          style={{
-            flexGrow: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <text style={{ fg: '#888888' }}>
+        <box flexGrow={1} alignItems="center" justifyContent="center">
+          <text fg="#888888">
             {sessions.length === 0
               ? 'No sessions found. Run `hermes branch <prompt>` to create one.'
               : 'No sessions match the current filter.'}
           </text>
         </box>
       ) : (
-        <scrollbox
-          ref={scrollboxRef}
-          style={{
-            flexGrow: 1,
-            flexShrink: 1,
-          }}
-        >
+        <scrollbox ref={scrollboxRef} flexGrow={1} flexShrink={1}>
           {filteredSessions.map((session, index) => {
             const isSelected = index === selectedIndex;
             const statusIcon = getStatusIcon(session);
@@ -324,68 +303,54 @@ export function SessionsList({
             return (
               <box
                 key={session.containerId}
-                style={{
-                  height: 1,
-                  flexDirection: 'row',
-                  backgroundColor: isSelected ? '#0066cc' : undefined,
-                  paddingLeft: 1,
-                  paddingRight: 1,
-                }}
+                height={1}
+                flexDirection="row"
+                backgroundColor={isSelected ? '#0066cc' : undefined}
+                paddingLeft={1}
+                paddingRight={1}
               >
                 <text
-                  style={{
-                    height: 1,
-                    width: 3,
-                    fg: isSelected ? '#ffffff' : statusColor,
-                  }}
+                  height={1}
+                  width={3}
+                  fg={isSelected ? '#ffffff' : statusColor}
                 >
                   {statusIcon}
                 </text>
                 <text
-                  style={{
-                    height: 1,
-                    flexGrow: 2,
-                    flexBasis: 0,
-                    fg: isSelected ? '#ffffff' : undefined,
-                  }}
+                  height={1}
+                  flexGrow={2}
+                  flexBasis={0}
+                  fg={isSelected ? '#ffffff' : undefined}
                 >
                   {session.name}
                 </text>
                 <text
-                  style={{
-                    height: 1,
-                    width: 12,
-                    fg: isSelected ? '#cccccc' : '#888888',
-                  }}
+                  height={1}
+                  width={12}
+                  fg={isSelected ? '#cccccc' : '#888888'}
                 >
                   {statusText}
                 </text>
                 <text
-                  style={{
-                    height: 1,
-                    flexGrow: 1,
-                    flexBasis: 0,
-                    fg: isSelected ? '#ffffff' : undefined,
-                  }}
+                  height={1}
+                  flexGrow={1}
+                  flexBasis={0}
+                  fg={isSelected ? '#ffffff' : undefined}
                 >
                   {agentText}
                 </text>
                 <text
-                  style={{
-                    height: 1,
-                    flexGrow: 2,
-                    flexBasis: 0,
-                    fg: isSelected ? '#ffffff' : undefined,
-                  }}
+                  height={1}
+                  flexGrow={2}
+                  flexBasis={0}
+                  fg={isSelected ? '#ffffff' : undefined}
                 >
                   {session.repo}
                 </text>
                 <text
-                  style={{
-                    height: 1,
-                    width: 10,
-                    fg: isSelected ? '#cccccc' : '#666666',
-                  }}
+                  height={1}
+                  width={10}
+                  fg={isSelected ? '#cccccc' : '#666666'}
                 >
                   {timeText}
                 </text>

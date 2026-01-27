@@ -130,32 +130,30 @@ export function FilterableSelector({
     : 'Type to filter, arrows to navigate, Enter/click to select, Esc to cancel';
 
   return (
-    <box style={{ flexDirection: 'column', padding: 1, flexGrow: 1 }}>
+    <box flexDirection="column" padding={1} flexGrow={1}>
       <box
         title={title}
-        style={{
-          border: true,
-          borderStyle: 'single',
-          padding: 1,
-          flexDirection: 'column',
-          flexGrow: 1,
-        }}
+        border
+        borderStyle="single"
+        padding={1}
+        flexDirection="column"
+        flexGrow={1}
       >
-        <text style={{ height: 1 }}>{description}</text>
-        <text style={{ height: 1, fg: '#888888' }}>{helpText}</text>
+        <text height={1}>{description}</text>
+        <text height={1} fg="#888888">
+          {helpText}
+        </text>
 
-        <box style={{ marginTop: 1, flexDirection: 'row', height: 1 }}>
-          <text style={{ fg: '#888888' }}>Filter: </text>
+        <box marginTop={1} flexDirection="row" height={1}>
+          <text fg="#888888">Filter: </text>
           <input
             focused
             value={filterText}
             placeholder="Type to filter..."
             onInput={handleFilterInput}
-            style={{
-              flexGrow: 1,
-              backgroundColor: '#333333',
-              textColor: '#ffffff',
-            }}
+            flexGrow={1}
+            backgroundColor="#333333"
+            textColor="#ffffff"
           />
         </box>
 
@@ -163,12 +161,10 @@ export function FilterableSelector({
           <scrollbox
             ref={scrollboxRef}
             onMouseOut={handleMouseOut}
-            style={{
-              marginTop: 1,
-              flexShrink: 1,
-              flexGrow: 1,
-              maxHeight: filteredOptions.length * LINES_PER_ITEM,
-            }}
+            marginTop={1}
+            flexShrink={1}
+            flexGrow={1}
+            maxHeight={filteredOptions.length * LINES_PER_ITEM}
           >
             {filteredOptions.map((option, index) => (
               <ListItem
@@ -182,12 +178,12 @@ export function FilterableSelector({
             ))}
           </scrollbox>
         ) : (
-          <text style={{ marginTop: 1, fg: '#888888' }}>
+          <text marginTop={1} fg="#888888">
             No items match your filter
           </text>
         )}
 
-        <text style={{ marginTop: 1, fg: '#555555' }}>
+        <text marginTop={1} fg="#555555">
           {filteredOptions.length} of {options.length} items shown
         </text>
       </box>

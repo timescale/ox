@@ -133,14 +133,8 @@ export function LogViewer({
 
   if (loading) {
     return (
-      <box
-        style={{
-          flexGrow: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <text style={{ fg: '#888888' }}>Loading logs...</text>
+      <box flexGrow={1} alignItems="center" justifyContent="center">
+        <text fg="#888888">Loading logs...</text>
       </box>
     );
   }
@@ -148,43 +142,23 @@ export function LogViewer({
   // Interactive sessions use a full TUI, so logs aren't meaningful text
   if (isInteractive) {
     return (
-      <box
-        style={{
-          flexGrow: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <text style={{ fg: '#888888' }}>
-          Logs not available for interactive sessions
-        </text>
+      <box flexGrow={1} alignItems="center" justifyContent="center">
+        <text fg="#888888">Logs not available for interactive sessions</text>
       </box>
     );
   }
 
   if (lines.length === 0) {
     return (
-      <box
-        style={{
-          flexGrow: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <text style={{ fg: '#888888' }}>No logs available</text>
+      <box flexGrow={1} alignItems="center" justifyContent="center">
+        <text fg="#888888">No logs available</text>
       </box>
     );
   }
 
   return (
-    <box style={{ flexDirection: 'column', flexGrow: 1 }}>
-      <scrollbox
-        ref={scrollboxRef}
-        style={{
-          flexGrow: 1,
-          flexShrink: 1,
-        }}
-      >
+    <box flexDirection="column" flexGrow={1}>
+      <scrollbox ref={scrollboxRef} flexGrow={1} flexShrink={1}>
         {lines.map((line, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: log lines are append-only with no stable ID
           <text key={i} wrapMode="word">
@@ -193,8 +167,8 @@ export function LogViewer({
         ))}
       </scrollbox>
       {following && (
-        <box style={{ position: 'absolute', bottom: 0, right: 1 }}>
-          <text style={{ fg: '#51cf66' }}>[F]</text>
+        <box position="absolute" bottom={0} right={1}>
+          <text fg="#51cf66">[F]</text>
         </box>
       )}
     </box>

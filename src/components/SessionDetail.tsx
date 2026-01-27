@@ -247,58 +247,43 @@ export function SessionDetail({
   return (
     <Frame title={session.branch}>
       {/* Metadata section */}
-      <box
-        style={{
-          height: metadataHeight,
-          flexDirection: 'column',
-          marginBottom: 1,
-        }}
-      >
-        <box style={{ height: 1, flexDirection: 'row' }}>
-          <text style={{ height: 1 }}>
+      <box height={metadataHeight} flexDirection="column" marginBottom={1}>
+        <box height={1} flexDirection="row">
+          <text height={1}>
             Status:{' '}
             <span fg={statusColor}>
               {statusIcon} {statusText}
             </span>
           </text>
-          <text style={{ height: 1, flexGrow: 1 }} />
-          <text style={{ height: 1 }}>
+          <text height={1} flexGrow={1} />
+          <text height={1}>
             Created:{' '}
             {session.created ? formatRelativeTime(session.created) : 'unknown'}
           </text>
         </box>
-        <box style={{ height: 1, flexDirection: 'row' }}>
-          <text style={{ height: 1 }}>Repo: {session.repo}</text>
-          <text style={{ height: 1, flexGrow: 1 }} />
-          <text style={{ height: 1 }}>Agent: {agentDisplay}</text>
+        <box height={1} flexDirection="row">
+          <text height={1}>Repo: {session.repo}</text>
+          <text height={1} flexGrow={1} />
+          <text height={1}>Agent: {agentDisplay}</text>
         </box>
-        <box style={{ height: 1, flexDirection: 'row' }}>
-          <text style={{ height: 1 }}>Name: {session.name}</text>
-          <text style={{ height: 1, flexGrow: 1 }} />
-          <text style={{ height: 1 }}>Branch: hermes/{session.branch}</text>
+        <box height={1} flexDirection="row">
+          <text height={1}>Name: {session.name}</text>
+          <text height={1} flexGrow={1} />
+          <text height={1}>Branch: hermes/{session.branch}</text>
         </box>
-        <box style={{ height: 1, flexDirection: 'row' }}>
-          <text style={{ height: 1 }}>Container: {session.containerName}</text>
+        <box height={1} flexDirection="row">
+          <text height={1}>Container: {session.containerName}</text>
         </box>
         {session.resumedFrom && (
-          <box style={{ height: 1, flexDirection: 'row' }}>
-            <text style={{ height: 1 }}>
-              Resumed From: {session.resumedFrom}
-            </text>
+          <box height={1} flexDirection="row">
+            <text height={1}>Resumed From: {session.resumedFrom}</text>
           </box>
         )}
       </box>
 
       {/* Prompt section */}
-      <box
-        title="Prompt"
-        style={{
-          border: true,
-          borderStyle: 'single',
-          height: 3,
-        }}
-      >
-        <text style={{ fg: '#cccccc', height: 1, overflow: 'scroll' }}>
+      <box title="Prompt" border borderStyle="single" height={3}>
+        <text fg="#cccccc" height={1} overflow="scroll">
           {session.prompt || '(no prompt)'}
         </text>
       </box>
@@ -306,12 +291,10 @@ export function SessionDetail({
       {/* Logs section */}
       <box
         title="Logs"
-        style={{
-          border: true,
-          borderStyle: 'single',
-          flexGrow: 1,
-          flexDirection: 'column',
-        }}
+        border
+        borderStyle="single"
+        flexGrow={1}
+        flexDirection="column"
       >
         <LogViewer
           containerId={session.containerId}
