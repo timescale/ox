@@ -802,7 +802,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
 // ============================================================================
 
 export const sessionsCommand = new Command('sessions')
-  .aliases(['session', 'status', 's'])
+  .aliases(['list', 'session', 'status', 's'])
   .description('Show all hermes sessions and their status')
   .option(
     '-o, --output <format>',
