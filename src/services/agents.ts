@@ -5,8 +5,8 @@
 import type { SelectOption } from '@opentui/core';
 import { useEffect, useState } from 'react';
 import type { AgentType } from './config';
-import { getOpencodeAuthMount, HASHED_SANDBOX_DOCKER_IMAGE } from './docker';
 import { log } from './logger';
+import { runOpencodeInDocker } from './opencode';
 
 export interface Model {
   id: string;
@@ -82,22 +82,12 @@ export const openCodeIdToModel = (id: string): Model => {
  */
 async function getOpencodeModels(): Promise<readonly Model[]> {
   try {
-    const imageTag = HASHED_SANDBOX_DOCKER_IMAGE;
-    const opencodeAuth = await getOpencodeAuthMount();
-
-    // Build the command with auth setup if needed
-    const script = `${opencodeAuth.setupScript}\nexec opencode models`.trim();
-
-    log.debug(
-      {
-        cmd: `docker run --rm ${opencodeAuth.volumeArgs.join(' ')} ${imageTag} bash -c "${script}"`,
-      },
-      'Fetching OpenCode models',
-    );
-    const result =
-      await Bun.$`docker run --rm ${opencodeAuth.volumeArgs} ${imageTag} bash -c ${script}`.quiet();
-    const output = result.stdout.toString().trim();
-    return output
+    const proc = await runOpencodeInDocker({
+      cmdArgs: ['models'],
+    });
+    return proc
+      .text()
+      .trim()
       .split('\n')
       .filter((line) => line.length > 0)
       .map(openCodeIdToModel);

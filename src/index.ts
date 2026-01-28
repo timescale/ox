@@ -11,6 +11,7 @@ import {
 import { claudeCommand } from './commands/claude';
 import { configCommand } from './commands/config';
 import { logsCommand } from './commands/logs';
+import { opencodeCommand } from './commands/opencode';
 import { resumeCommand } from './commands/resume';
 import { runSessionsTui, sessionsCommand } from './commands/sessions';
 
@@ -62,6 +63,7 @@ program.addCommand(branchCommand);
 program.addCommand(claudeCommand);
 program.addCommand(configCommand);
 program.addCommand(logsCommand);
+program.addCommand(opencodeCommand);
 program.addCommand(resumeCommand);
 program.addCommand(sessionsCommand);
 

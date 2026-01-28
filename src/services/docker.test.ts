@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { getOpencodeAuthMount, HASHED_SANDBOX_DOCKER_IMAGE } from './docker';
+import { HASHED_SANDBOX_DOCKER_IMAGE } from './docker';
 
 describe('docker service', () => {
   describe('HASHED_SANDBOX_DOCKER_IMAGE', () => {
@@ -23,48 +23,6 @@ describe('docker service', () => {
       const tag1 = HASHED_SANDBOX_DOCKER_IMAGE;
       const tag2 = HASHED_SANDBOX_DOCKER_IMAGE;
       expect(tag1).toBe(tag2);
-    });
-  });
-
-  describe('getOpencodeAuthMount', () => {
-    test('returns valid OpencodeAuthMount structure', async () => {
-      const mount = await getOpencodeAuthMount();
-
-      expect(typeof mount.exists).toBe('boolean');
-      expect(Array.isArray(mount.volumeArgs)).toBe(true);
-      expect(typeof mount.setupScript).toBe('string');
-    });
-
-    test('volumeArgs is empty when auth does not exist', async () => {
-      const mount = await getOpencodeAuthMount();
-
-      // If auth doesn't exist, volumeArgs should be empty
-      if (!mount.exists) {
-        expect(mount.volumeArgs).toHaveLength(0);
-        expect(mount.setupScript).toBe('');
-      }
-    });
-
-    test('volumeArgs has correct format when auth exists', async () => {
-      const mount = await getOpencodeAuthMount();
-
-      if (mount.exists) {
-        // Should have -v and the mount path
-        expect(mount.volumeArgs).toHaveLength(2);
-        expect(mount.volumeArgs[0]).toBe('-v');
-        expect(mount.volumeArgs[1]).toContain(':');
-        expect(mount.volumeArgs[1]).toContain(':ro');
-      }
-    });
-
-    test('setupScript contains mkdir and cp when auth exists', async () => {
-      const mount = await getOpencodeAuthMount();
-
-      if (mount.exists) {
-        expect(mount.setupScript).toContain('mkdir -p');
-        expect(mount.setupScript).toContain('cp');
-        expect(mount.setupScript).toContain('auth.json');
-      }
     });
   });
 });

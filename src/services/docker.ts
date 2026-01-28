@@ -16,6 +16,7 @@ import { CLAUDE_CONFIG_VOLUME } from './claude';
 import type { AgentType } from './config';
 import type { RepoInfo } from './git';
 import { log } from './logger';
+import { OPENCODE_CONFIG_VOLUME } from './opencode';
 
 // Compute MD5 hash of the Dockerfile content for versioned tagging
 const hasher = new Bun.CryptoHasher('md5');
@@ -82,7 +83,7 @@ export const ensureDockerSandbox = async (): Promise<void> => {
 async function buildDockerImage(): Promise<void> {
   // Use Bun.spawn to pipe the Dockerfile content to docker build
   const proc = Bun.spawn(
-    ['docker', 'build', '-q', '-t', DOCKER_IMAGE_TAG, '-'],
+    ['docker', 'build', '-q', '-t', HASHED_SANDBOX_DOCKER_IMAGE, '-'],
     {
       stdin: Buffer.from(SANDBOX_DOCKERFILE),
       stdout: 'ignore',
@@ -280,7 +281,7 @@ async function buildDockerImageWithCache(
       '--cache-from',
       cacheFromImage,
       '-t',
-      DOCKER_IMAGE_TAG,
+      HASHED_SANDBOX_DOCKER_IMAGE,
       '-',
     ],
     {
@@ -366,47 +367,6 @@ async function getGhCredentialsMountArgs(): Promise<string[]> {
     return ['-v', `${ghConfigDir}:/home/agent/.config/gh`];
   }
   return [];
-}
-
-// Opencode config paths
-const OPENCODE_HOST_CONFIG_DIR = join(homedir(), '.local', 'share', 'opencode');
-const OPENCODE_CONTAINER_TMP_DIR = '/tmp/opencode-cfg';
-const OPENCODE_CONTAINER_CONFIG_DIR = '/home/agent/.local/share/opencode';
-
-/**
- * Configuration for mounting opencode auth into a Docker container.
- * The auth file is mounted read-only to a temp location and must be
- * copied to the final location via the setup script.
- */
-export interface OpencodeAuthMount {
-  /** Whether auth.json exists on the host */
-  exists: boolean;
-  /** Docker volume args to mount the config dir (empty if no auth) */
-  volumeArgs: string[];
-  /** Bash script to copy auth to final location (empty if no auth) */
-  setupScript: string;
-}
-
-/**
- * Get opencode auth mount configuration for Docker containers.
- * Returns volume args and setup script needed to make opencode auth available.
- */
-export async function getOpencodeAuthMount(): Promise<OpencodeAuthMount> {
-  const authFile = Bun.file(join(OPENCODE_HOST_CONFIG_DIR, 'auth.json'));
-  const exists = await authFile.exists();
-
-  if (!exists) {
-    return { exists: false, volumeArgs: [], setupScript: '' };
-  }
-
-  return {
-    exists: true,
-    volumeArgs: [
-      '-v',
-      `${OPENCODE_HOST_CONFIG_DIR}:${OPENCODE_CONTAINER_TMP_DIR}:ro`,
-    ],
-    setupScript: `mkdir -p ${OPENCODE_CONTAINER_CONFIG_DIR} && cp ${OPENCODE_CONTAINER_TMP_DIR}/auth.json ${OPENCODE_CONTAINER_CONFIG_DIR}/auth.json`,
-  };
 }
 
 // ============================================================================
@@ -903,7 +863,7 @@ export async function getSession(
   }
 }
 
-const printArgs = (args: string[]): string => {
+export const printArgs = (args: readonly string[]): string => {
   return args.map((arg) => $.escape(arg)).join(' ');
 };
 
@@ -955,12 +915,11 @@ export async function startContainer(
     envArgs.push('-e', `${key}=${value}`);
   }
 
-  // Get opencode auth mount configuration
-  const opencodeAuth = await getOpencodeAuthMount();
   const volumeArgs: string[] = [
     '-v',
     CLAUDE_CONFIG_VOLUME,
-    ...opencodeAuth.volumeArgs,
+    '-v',
+    OPENCODE_CONFIG_VOLUME,
   ];
 
   // Mount gh credentials from .hermes/gh if they exist
@@ -982,7 +941,6 @@ Unless otherwise instructed above, use the \`gh\` command to create a PR when do
 
   const startupScript = `
 set -e
-${opencodeAuth.setupScript}
 cd /work
 gh auth setup-git
 gh repo clone ${repoInfo.fullName} app
@@ -1025,7 +983,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
         --env-file ${hermesEnvPath} \
         ${printArgs(envArgs)} \
         ${printArgs(volumeArgs)} \
-        ${DOCKER_IMAGE_TAG} \
+        ${HASHED_SANDBOX_DOCKER_IMAGE} \
         bash -c ${$.escape(startupScript)}`,
         },
         'Starting docker container in detached mode',
@@ -1037,7 +995,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
         --env-file ${hermesEnvPath} \
         ${envArgs} \
         ${volumeArgs} \
-        ${DOCKER_IMAGE_TAG} \
+        ${HASHED_SANDBOX_DOCKER_IMAGE} \
         bash -c ${startupScript}`.quiet();
       return result.stdout.toString().trim();
     }
@@ -1055,7 +1013,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
       hermesEnvPath,
       ...envArgs,
       ...volumeArgs,
-      DOCKER_IMAGE_TAG,
+      HASHED_SANDBOX_DOCKER_IMAGE,
       'bash',
       '-c',
       startupScript,

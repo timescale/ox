@@ -163,7 +163,7 @@ ${[...allExistingNames].join(', ')}`;
     let result: string;
     try {
       const proc = await runClaudeInDocker({
-        claudeArgs: ['--model', 'haiku', '-p', claudePrompt],
+        cmdArgs: ['--model', 'haiku', '-p', claudePrompt],
       });
       result = proc.text();
     } catch (err) {
