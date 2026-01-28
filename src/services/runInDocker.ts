@@ -15,9 +15,10 @@ interface RunInDockerOptions extends RunInDockerOptionsBase {
 }
 
 export interface RunInDockerResult {
-  text: () => string;
-  json: () => unknown;
+  errorText: () => string;
   exited: Promise<number>;
+  json: () => unknown;
+  text: () => string;
 }
 
 export const runInDocker = async ({
@@ -55,6 +56,7 @@ export const runInDocker = async ({
     }
     return {
       exited: proc.exited,
+      errorText: () => '',
       text: () => '',
       json: () => null,
     };
@@ -65,6 +67,7 @@ export const runInDocker = async ({
       .quiet()
       .throws(shouldThrow);
   return {
+    errorText: () => proc.stderr.toString(),
     text: () => proc.text(),
     json: () => proc.json(),
     exited: Promise.resolve(proc.exitCode),

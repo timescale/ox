@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { file } from 'bun';
+import { readConfig } from './config';
 import { HASHED_SANDBOX_DOCKER_IMAGE } from './docker';
 import { log } from './logger';
 import {
@@ -83,6 +84,28 @@ export const checkOpencodeCredentials = async (): Promise<boolean> => {
   const output = proc.text().trim();
   const match = output.match(/(\d+)\s+credentials/);
   const numCreds = match?.[1] ? parseInt(match[1], 10) : 0;
-  log.debug({ exitCode, output, numCreds }, 'checkOpencodeCredentials');
-  return exitCode === 0 && numCreds > 0;
+  log.debug(
+    { exitCode, output, numCreds },
+    'checkOpencodeCredentials auth list',
+  );
+  if (exitCode || !numCreds) {
+    return false;
+  }
+  const model = (await readConfig())?.model;
+  const proc2 = await runOpencodeInDocker({
+    cmdArgs: [
+      'run',
+      ...(model ? ['--model', model] : []),
+      'just output `true`, and nothing else',
+    ],
+    shouldThrow: false,
+  });
+  const exitCode2 = await proc2.exited;
+  const output2 = proc2.text().trim();
+  const errText = proc2.errorText().trim();
+  log.debug(
+    { exitCode: exitCode2, output: output2, errText, model },
+    'checkOpencodeCredentials test run',
+  );
+  return exitCode2 === 0 && !errText.includes('Error');
 };
