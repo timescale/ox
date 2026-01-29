@@ -31,6 +31,7 @@ import {
   removeContainer,
   resumeSession,
   startContainer,
+  startShellContainer,
 } from '../services/docker';
 import { generateBranchName, getRepoInfo } from '../services/git';
 import { log } from '../services/logger';
@@ -44,7 +45,7 @@ type SessionsView =
   | { type: 'init' } // Initial loading state
   | { type: 'docker' }
   | { type: 'config' }
-  | { type: 'prompt' }
+  | { type: 'prompt'; resumeSession?: HermesSession }
   | {
       type: 'starting';
       prompt: string;
@@ -56,8 +57,12 @@ type SessionsView =
   | { type: 'list' };
 
 interface SessionsResult {
-  type: 'quit' | 'attach' | 'resume' | 'start-interactive';
+  type: 'quit' | 'attach' | 'resume' | 'start-interactive' | 'shell';
   containerId?: string;
+  // For resume: optional model override
+  resumeModel?: string;
+  // For shell: container ID if resuming, undefined if fresh shell
+  resumeContainerId?: string;
   // For start-interactive: info needed to start the container
   startInfo?: {
     prompt: string;
@@ -352,26 +357,12 @@ function SessionsApp({
     [onComplete, showToast, startSession, setView],
   );
 
-  // Handle resume from session detail
+  // Handle resume from session detail - navigate to PromptScreen with resume context
   const handleResume = useCallback(
-    async (
-      containerId: string,
-      mode: 'interactive' | 'detached',
-      prompt?: string,
-    ) => {
-      if (mode === 'interactive') {
-        onComplete({ type: 'resume', containerId });
-        return;
-      }
-
-      if (!prompt) {
-        throw new Error('Prompt is required for detached resume');
-      }
-
-      await resumeSession(containerId, { mode: 'detached', prompt });
-      setView({ type: 'list' });
+    (session: HermesSession) => {
+      setView({ type: 'prompt', resumeSession: session });
     },
-    [onComplete, setView],
+    [setView],
   );
 
   // ---- Initial Loading View ----
@@ -428,13 +419,54 @@ function SessionsApp({
 
   // ---- Prompt Screen View ----
   if (view.type === 'prompt') {
+    const { resumeSession: resumeSess } = view;
     return (
       <>
         <PromptScreen
-          defaultAgent={config?.agent ?? 'opencode'}
-          defaultModel={config?.model}
+          defaultAgent={resumeSess?.agent ?? config?.agent ?? 'opencode'}
+          defaultModel={resumeSess?.model ?? config?.model}
+          resumeSession={resumeSess}
           onSubmit={({ prompt, agent, model, mode }) => {
-            startSession(prompt, agent, model, mode);
+            if (resumeSess) {
+              // Resume flow
+              if (mode === 'interactive') {
+                onComplete({
+                  type: 'resume',
+                  containerId: resumeSess.containerId,
+                  resumeModel: model,
+                });
+              } else {
+                // Detached resume - then navigate to the new session's detail view
+                resumeSession(resumeSess.containerId, {
+                  mode: 'detached',
+                  prompt,
+                  model,
+                }).then(async (newContainerId) => {
+                  // Fetch the newly created session and show its detail
+                  const newSession = await getSession(newContainerId);
+                  if (newSession) {
+                    setView({ type: 'detail', session: newSession });
+                  } else {
+                    setView({ type: 'list' });
+                  }
+                });
+              }
+            } else {
+              // Fresh session
+              startSession(prompt, agent, model, mode);
+            }
+          }}
+          onShell={() => {
+            if (resumeSess) {
+              // Shell on resumed container
+              onComplete({
+                type: 'shell',
+                resumeContainerId: resumeSess.containerId,
+              });
+            } else {
+              // Fresh shell container
+              onComplete({ type: 'shell' });
+            }
           }}
           onCancel={() => onComplete({ type: 'quit' })}
           onViewSessions={() => setView({ type: 'list' })}
@@ -563,10 +595,28 @@ export async function runSessionsTui(
     try {
       await resumeSession(result.containerId, {
         mode: 'interactive',
+        model: result.resumeModel,
       });
     } catch (err) {
       log.error({ err }, 'Failed to resume session');
       console.error(`Failed to resume: ${err}`);
+    }
+  }
+
+  // Handle shell action - start bash shell in container
+  if (result.type === 'shell') {
+    try {
+      if (result.resumeContainerId) {
+        // Shell on resumed container
+        await resumeSession(result.resumeContainerId, { mode: 'shell' });
+      } else {
+        // Fresh shell container
+        const repoInfo = await getRepoInfo();
+        await startShellContainer({ repoInfo });
+      }
+    } catch (err) {
+      log.error({ err }, 'Failed to start shell');
+      console.error(`Failed to start shell: ${err}`);
     }
   }
 

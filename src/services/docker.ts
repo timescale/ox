@@ -17,6 +17,7 @@ import type { AgentType } from './config';
 import type { RepoInfo } from './git';
 import { log } from './logger';
 import { OPENCODE_CONFIG_VOLUME } from './opencode';
+import { runInDocker } from './runInDocker';
 
 // Compute MD5 hash of the Dockerfile content for versioned tagging
 const hasher = new Bun.CryptoHasher('md5');
@@ -638,8 +639,9 @@ export async function attachToContainer(nameOrId: string): Promise<void> {
 // ============================================================================
 
 export interface ResumeSessionOptions {
-  mode: 'interactive' | 'detached';
+  mode: 'interactive' | 'detached' | 'shell';
   prompt?: string;
+  model?: string; // Allow overriding model on resume
 }
 
 function buildResumeAgentCommand(
@@ -700,7 +702,7 @@ export async function resumeSession(
   }
 
   const agent = (labels['hermes.agent'] as AgentType) || 'opencode';
-  const model = labels['hermes.model'];
+  const model = options.model ?? labels['hermes.model'];
   const resumeSuffix = nanoid(6).toLowerCase();
   const resumeImage = `hermes-resume:${container.Id.slice(0, 12)}-${resumeSuffix}`;
 
@@ -716,8 +718,16 @@ export async function resumeSession(
     envArgs.push('-e', envVar);
   }
 
+  // Mount config volumes for agent credentials and session continuity
+  const volumeArgs: string[] = [
+    '-v',
+    CLAUDE_CONFIG_VOLUME,
+    '-v',
+    OPENCODE_CONFIG_VOLUME,
+  ];
+
   // Mount gh credentials from .hermes/gh if they exist (for fresh auth)
-  const volumeArgs = await getGhCredentialsMountArgs();
+  volumeArgs.push(...(await getGhCredentialsMountArgs()));
 
   const baseName = container.Name.replace(/\//g, '').trim();
   const containerName = `${baseName}-resumed-${resumeSuffix}`;
@@ -727,12 +737,15 @@ export async function resumeSession(
   const baseSessionName =
     labels['hermes.name'] || labels['hermes.branch'] || 'session';
   const resumeName = `${baseSessionName}-resumed-${resumeSuffix}`;
-  const agentCommand = buildResumeAgentCommand(agent, mode, model);
 
-  const resumeScript = `
+  // For shell mode, just run bash; otherwise run the agent
+  const resumeScript =
+    mode === 'shell'
+      ? 'cd /work/app && exec bash'
+      : `
 set -e
 cd /work/app
-${escapePrompt(agentCommand, prompt)}
+${escapePrompt(buildResumeAgentCommand(agent, mode, model), prompt)}
 `.trim();
 
   const labelArgs: string[] = [
@@ -755,7 +768,7 @@ ${escapePrompt(agentCommand, prompt)}
     '--label',
     `hermes.resume-image=${resumeImage}`,
     '--label',
-    `hermes.interactive=${mode === 'interactive'}`,
+    `hermes.interactive=${mode === 'interactive' || mode === 'shell'}`,
   ];
   if (model) {
     labelArgs.push('--label', `hermes.model=${model}`);
@@ -1028,4 +1041,94 @@ ${escapePrompt(agentCommand, fullPrompt)}
     log.error({ error }, 'Error starting container');
     throw formatShellError(error as ShellError);
   }
+}
+
+export interface StartShellContainerOptions {
+  repoInfo: RepoInfo;
+}
+
+/**
+ * Start a fresh shell container (no agent, just bash).
+ * Uses a random name and clones the repo to the default branch.
+ */
+export async function startShellContainer(
+  options: StartShellContainerOptions,
+): Promise<void> {
+  const { repoInfo } = options;
+
+  const hermesEnvPath = '.hermes/.env';
+  const hermesEnvFile = Bun.file(hermesEnvPath);
+
+  // Create empty .hermes/.env if it doesn't exist
+  if (!(await hermesEnvFile.exists())) {
+    await Bun.write(hermesEnvPath, '');
+  }
+
+  const shellSuffix = nanoid(6).toLowerCase();
+  const containerName = `hermes-shell-${shellSuffix}`;
+
+  // Pass through API keys from host environment
+  const hostEnvArgs: string[] = [];
+  const apiKeysToPassthrough = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+  for (const key of apiKeysToPassthrough) {
+    const value = process.env[key];
+    if (value) {
+      hostEnvArgs.push('-e', `${key}=${value}`);
+    }
+  }
+
+  const volumeArgs: string[] = [
+    '-v',
+    CLAUDE_CONFIG_VOLUME,
+    '-v',
+    OPENCODE_CONFIG_VOLUME,
+  ];
+
+  // Mount gh credentials from .hermes/gh if they exist
+  volumeArgs.push(...(await getGhCredentialsMountArgs()));
+
+  // Shell startup script: clone repo to default branch and drop into bash
+  const startupScript = `
+set -e
+cd /work
+gh auth setup-git
+gh repo clone ${repoInfo.fullName} app
+cd app
+exec bash
+`.trim();
+
+  // Build label arguments for hermes metadata
+  const labelArgs: string[] = [
+    '--label',
+    'hermes.managed=true',
+    '--label',
+    `hermes.name=shell-${shellSuffix}`,
+    '--label',
+    `hermes.branch=shell-${shellSuffix}`,
+    '--label',
+    'hermes.agent=shell',
+    '--label',
+    `hermes.repo=${repoInfo.fullName}`,
+    '--label',
+    `hermes.created=${new Date().toISOString()}`,
+    '--label',
+    'hermes.interactive=true',
+    '--label',
+    'hermes.prompt=Interactive shell session',
+  ];
+
+  await runInDocker({
+    interactive: true,
+    dockerArgs: [
+      '--name',
+      containerName,
+      ...labelArgs,
+      ...hostEnvArgs,
+      '--env-file',
+      hermesEnvPath,
+      ...volumeArgs,
+    ],
+    cmdName: 'bash',
+    cmdArgs: ['-c', startupScript],
+  });
 }

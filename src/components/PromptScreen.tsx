@@ -13,6 +13,7 @@ import {
   useAgentModels,
 } from '../services/agents';
 import type { AgentType } from '../services/config';
+import type { HermesSession } from '../services/docker';
 import { log } from '../services/logger';
 import { FilterableSelector } from './FilterableSelector';
 import { HermesTitle } from './HermesTitle';
@@ -26,12 +27,14 @@ export type SubmitMode = 'async' | 'interactive';
 export interface PromptScreenProps {
   defaultAgent: AgentType;
   defaultModel?: string | null;
+  resumeSession?: HermesSession; // If set, we're resuming this session
   onSubmit: (result: {
     prompt: string;
     agent: AgentType;
     model: string;
     mode: SubmitMode;
   }) => void;
+  onShell: () => void; // Launch bash shell
   onCancel: () => void;
   onViewSessions?: () => void;
 }
@@ -73,7 +76,9 @@ function findEquivalentModel(
 export function PromptScreen({
   defaultAgent,
   defaultModel = null,
+  resumeSession,
   onSubmit,
+  onShell,
   onViewSessions,
 }: PromptScreenProps) {
   const textareaRef = useRef<TextareaRenderable>(null);
@@ -93,8 +98,11 @@ export function PromptScreen({
     currentModels?.find((m) => m.id === modelId) ??
     (modelId && agent === 'opencode' ? openCodeIdToModel(modelId) : null);
 
-  // Handle agent switch with model matching
+  // Handle agent switch with model matching (disabled when resuming)
   const switchAgent = () => {
+    // Don't allow switching agents when resuming a session
+    if (resumeSession) return;
+
     const newAgent =
       AGENTS[(AGENTS.indexOf(agent) + 1) % AGENTS.length] ||
       defaultAgent ||
@@ -149,7 +157,7 @@ export function PromptScreen({
     log.trace({ key }, 'Key pressed in PromptScreen');
     if (showModelSelector) return;
 
-    if (key.name === 'tab') {
+    if (key.name === 'tab' && !resumeSession) {
       switchAgent();
       return;
     }
@@ -168,6 +176,11 @@ export function PromptScreen({
 
     if (key.name === 'a' && key.ctrl) {
       setSubmitMode((m) => (m === 'async' ? 'interactive' : 'async'));
+      return;
+    }
+
+    if (key.name === 'b' && key.ctrl) {
+      onShell();
       return;
     }
   });
@@ -201,6 +214,13 @@ export function PromptScreen({
         <box width="100%" maxWidth={76} flexDirection="column">
           {/* ASCII Art Title */}
           <HermesTitle />
+          {/* Resume indicator */}
+          {resumeSession && (
+            <box marginBottom={1}>
+              <text fg="#888888">{'Resuming: '}</text>
+              <text fg="#fcc419">{resumeSession.name}</text>
+            </box>
+          )}
           {/* Main input box */}
           <box
             border={['left']}
@@ -278,9 +298,10 @@ export function PromptScreen({
           </box>
           <HotkeysBar
             keyList={[
-              ['tab', 'agents'],
+              ...(resumeSession ? [] : [['tab', 'agents'] as [string, string]]),
               ['ctrl+l', 'models'],
               ['ctrl+a', 'mode'],
+              ['ctrl+b', 'shell'],
               ['ctrl+s', 'sessions'],
             ]}
           />

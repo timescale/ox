@@ -11,8 +11,6 @@ import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
 import { LogViewer } from './LogViewer';
-import { OptionsModal } from './OptionsModal';
-import { PromptModal } from './PromptModal';
 import { Toast, type ToastType } from './Toast';
 
 export interface SessionDetailProps {
@@ -20,15 +18,11 @@ export interface SessionDetailProps {
   onBack: () => void;
   onQuit: () => void;
   onAttach: (containerId: string) => void;
-  onResume: (
-    containerId: string,
-    mode: 'interactive' | 'detached',
-    prompt?: string,
-  ) => Promise<void> | void;
+  onResume: (session: HermesSession) => void;
   onSessionDeleted: () => void;
 }
 
-type ModalType = 'stop' | 'delete' | 'resume' | 'resumePrompt' | null;
+type ModalType = 'stop' | 'delete' | null;
 
 interface ToastState {
   message: string;
@@ -163,33 +157,9 @@ export function SessionDetail({
     }
   }, [session.containerId, showToast, onSessionDeleted]);
 
-  const handleResumeInteractive = useCallback(() => {
-    setModal(null);
-    onResume(session.containerId, 'interactive');
-  }, [onResume, session.containerId]);
-
-  const handleResumeDetached = useCallback(() => {
-    setModal('resumePrompt');
-  }, []);
-
-  const handleResumePromptSubmit = useCallback(
-    async (prompt: string) => {
-      setModal(null);
-      setActionInProgress(true);
-      showToast('Resuming in background...', 'info');
-      try {
-        await onResume(session.containerId, 'detached', prompt);
-        showToast('Resume started', 'success');
-        onBack();
-      } catch (err) {
-        log.error({ err }, `Failed to resume container ${session.containerId}`);
-        showToast(`Failed to resume: ${err}`, 'error');
-      } finally {
-        setActionInProgress(false);
-      }
-    },
-    [onBack, onResume, session.containerId, showToast],
-  );
+  const handleResume = useCallback(() => {
+    onResume(session);
+  }, [onResume, session]);
 
   const handleLogError = useCallback(
     (error: string) => {
@@ -218,7 +188,7 @@ export function SessionDetail({
     } else if (key.raw === 'a' && isRunning) {
       onAttach(session.containerId);
     } else if (key.raw === 'r' && isStopped) {
-      setModal('resume');
+      handleResume();
     }
   });
 
@@ -331,40 +301,6 @@ export function SessionDetail({
           confirmLabel="Delete"
           confirmColor="#ff6b6b"
           onConfirm={handleDelete}
-          onCancel={() => setModal(null)}
-        />
-      )}
-
-      {modal === 'resume' && (
-        <OptionsModal
-          title="Resume Session"
-          message={`Resume ${session.containerName}?`}
-          options={[
-            {
-              key: 'd',
-              name: 'Detached',
-              description: 'runs in the background',
-              onSelect: handleResumeDetached,
-              color: '#339af0',
-            },
-            {
-              key: 'i',
-              name: 'Interactive',
-              description: 'runs in this terminal',
-              onSelect: handleResumeInteractive,
-              color: '#51cf66',
-            },
-          ]}
-          onCancel={() => setModal(null)}
-        />
-      )}
-
-      {modal === 'resumePrompt' && (
-        <PromptModal
-          title="Resume (Detached)"
-          message="Enter a prompt to continue this session."
-          placeholder="Describe what the agent should do next..."
-          onSubmit={handleResumePromptSubmit}
           onCancel={() => setModal(null)}
         />
       )}
