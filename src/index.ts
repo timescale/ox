@@ -14,6 +14,7 @@ import { logsCommand } from './commands/logs';
 import { opencodeCommand } from './commands/opencode';
 import { resumeCommand } from './commands/resume';
 import { runSessionsTui, sessionsCommand } from './commands/sessions';
+import { log } from './services/logger';
 
 program
   .name('hermes')
@@ -26,6 +27,7 @@ program
 withBranchOptions(program)
   .argument('[prompt]', 'Natural language description of the task')
   .action(async (prompt, options) => {
+    log.debug({ options, prompt }, 'Root hermes command invoked');
     if (prompt) {
       // Guard against accidentally running with an invalid command as prompt
       // Prompt must contain at least one space (more than one word)
@@ -42,20 +44,17 @@ withBranchOptions(program)
         await branchAction(prompt, options);
         return;
       }
-
-      // Default: use unified TUI starting at 'starting' view
-      await runSessionsTui({
-        initialView: 'starting',
-        initialPrompt: prompt,
-        initialAgent: options.agent,
-        initialModel: options.model,
-        serviceId: options.serviceId,
-        dbFork: options.dbFork,
-      });
-    } else {
-      // No prompt: launch interactive TUI starting at 'prompt' view
-      await runSessionsTui({ initialView: 'prompt' });
     }
+
+    // Default: use unified TUI starting at 'starting' view
+    await runSessionsTui({
+      initialView: prompt ? 'starting' : 'prompt',
+      initialPrompt: prompt,
+      initialAgent: options.agent,
+      initialModel: options.model,
+      serviceId: options.serviceId,
+      dbFork: options.dbFork,
+    });
   });
 
 // Add subcommands (after root options so they take precedence)

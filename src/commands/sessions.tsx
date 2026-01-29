@@ -25,6 +25,7 @@ import { type ForkResult, forkDatabase } from '../services/db';
 import {
   attachToContainer,
   ensureDockerImage,
+  ensureDockerSandbox,
   getSession,
   type HermesSession,
   listHermesSessions,
@@ -111,22 +112,9 @@ function SessionsApp({
   dbFork = true,
   onComplete,
 }: SessionsAppProps) {
-  const [view, setViewRaw] = useState<SessionsView>({ type: 'init' });
+  const [view, setView] = useState<SessionsView>({ type: 'init' });
   const [config, setConfig] = useState<HermesConfig | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-
-  // Wrapper to debug view changes
-  const setView = useCallback(
-    (newView: SessionsView | ((prev: SessionsView) => SessionsView)) => {
-      setViewRaw((prev) => {
-        const next = typeof newView === 'function' ? newView(prev) : newView;
-        // Uncomment for debugging:
-        // console.log(`View: ${prev.type} -> ${next.type}`);
-        return next;
-      });
-    },
-    [],
-  );
 
   // Use refs to store props/config that we need in async functions
   // This avoids dependency issues with useCallback/useEffect
@@ -265,15 +253,8 @@ function SessionsApp({
         setView({ type: 'prompt' });
       }
     },
-    [showToast, setView, onComplete],
+    [showToast, onComplete],
   );
-
-  // Initialize: always go through docker setup first (handles both runtime and image)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally only runs on mount
-  useEffect(() => {
-    // Always start with docker setup - it handles both Docker runtime and image building
-    setView({ type: 'docker' });
-  }, []);
 
   // Handle docker setup completion
   const handleDockerComplete = useCallback(
@@ -315,8 +296,14 @@ function SessionsApp({
         setView({ type: 'list' });
       }
     },
-    [onComplete, showToast, startSession, setView],
+    [onComplete, showToast, startSession],
   );
+
+  useEffect(() => {
+    if (view.type === 'init') {
+      handleDockerComplete({ type: 'ready' });
+    }
+  }, [view.type, handleDockerComplete]);
 
   // Handle config wizard completion
   const handleConfigComplete = useCallback(
@@ -354,16 +341,13 @@ function SessionsApp({
         setView({ type: 'list' });
       }
     },
-    [onComplete, showToast, startSession, setView],
+    [onComplete, showToast, startSession],
   );
 
   // Handle resume from session detail - navigate to PromptScreen with resume context
-  const handleResume = useCallback(
-    (session: HermesSession) => {
-      setView({ type: 'prompt', resumeSession: session });
-    },
-    [setView],
-  );
+  const handleResume = useCallback((session: HermesSession) => {
+    setView({ type: 'prompt', resumeSession: session });
+  }, []);
 
   // ---- Initial Loading View ----
   if (view.type === 'init') {
@@ -423,8 +407,10 @@ function SessionsApp({
     return (
       <>
         <PromptScreen
-          defaultAgent={resumeSess?.agent ?? config?.agent ?? 'opencode'}
-          defaultModel={resumeSess?.model ?? config?.model}
+          defaultAgent={
+            resumeSess?.agent ?? initialAgent ?? config?.agent ?? 'opencode'
+          }
+          defaultModel={resumeSess?.model ?? initialModel ?? config?.model}
           resumeSession={resumeSess}
           onSubmit={({ prompt, agent, model, mode }) => {
             if (resumeSess) {
@@ -546,17 +532,15 @@ function SessionsApp({
 // TUI Runner
 // ============================================================================
 
-export async function runSessionsTui(
-  options: RunSessionsTuiOptions = {},
-): Promise<void> {
-  const {
-    initialView = 'list',
-    initialPrompt,
-    initialAgent,
-    initialModel,
-    serviceId,
-    dbFork,
-  } = options;
+export async function runSessionsTui({
+  initialView = 'list',
+  initialPrompt,
+  initialAgent,
+  initialModel,
+  serviceId,
+  dbFork,
+}: RunSessionsTuiOptions = {}): Promise<void> {
+  await ensureDockerSandbox();
 
   let resolveResult: (result: SessionsResult) => void;
   const resultPromise = new Promise<SessionsResult>((resolve) => {
