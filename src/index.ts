@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { program } from 'commander';
+import packageJson from '../package.json' with { type: 'json' };
 import {
   branchAction,
   branchCommand,
@@ -19,7 +20,7 @@ import { log } from './services/logger';
 program
   .name('hermes')
   .description('Automates branch + database fork + agent sandbox creation')
-  .version('1.0.0')
+  .version(packageJson.version, '-v, --version')
   .enablePositionalOptions();
 
 // Make 'branch' the default command by adding same options to root
