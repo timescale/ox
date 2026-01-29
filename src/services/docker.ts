@@ -2,7 +2,6 @@
 // Docker Container Service
 // ============================================================================
 
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { dockerIsRunning } from 'build-strap';
 import { $ } from 'bun';
@@ -45,12 +44,9 @@ const DOCKER_IMAGE_NAME = 'hermes-sandbox';
 const DOCKER_IMAGE_TAG = `md5-${dockerfileHash}`;
 export const HASHED_SANDBOX_DOCKER_IMAGE = `${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}`;
 
-// GHCR (GitHub Container Registry) configuration
-const GHCR_REGISTRY = 'ghcr.io';
+// GHCR (GitHub Container Registry) configuration for public image cache
 const GHCR_IMAGE_NAME = 'ghcr.io/timescale/hermes/sandbox';
-const GHCR_AUTH_TEST_TAG = 'ghcr.io/timescale/hermes/auth-test:latest';
 const GHCR_IMAGE_TAG_LATEST = `${GHCR_IMAGE_NAME}:latest`;
-// Version tag from package.json
 const GHCR_IMAGE_TAG_VERSION = `${GHCR_IMAGE_NAME}:${packageJson.version}`;
 
 // ============================================================================
@@ -82,88 +78,9 @@ export const ensureDockerSandbox = async (): Promise<void> => {
   }
 };
 
-async function buildDockerImage(): Promise<void> {
-  // Use Bun.spawn to pipe the Dockerfile content to docker build
-  const proc = Bun.spawn(
-    ['docker', 'build', '-q', '-t', HASHED_SANDBOX_DOCKER_IMAGE, '-'],
-    {
-      stdin: Buffer.from(SANDBOX_DOCKERFILE),
-      stdout: 'ignore',
-      stderr: 'ignore',
-    },
-  );
-
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    throw new Error(`Docker build failed with exit code ${exitCode}`);
-  }
-}
-
 // ============================================================================
-// GHCR (GitHub Container Registry) Authentication
+// GHCR (GitHub Container Registry) Image Pull
 // ============================================================================
-
-export const GHCR_TOKEN_URL =
-  'https://github.com/settings/tokens/new?scopes=read:packages&description=hermes-ghcr-token';
-export const GHCR_LOGIN_INSTRUCTIONS = `To pull cached Docker images, you need to authenticate with GitHub Container Registry.
-
-1. Go to: ${GHCR_TOKEN_URL}
-2. Generate a new token with the "read:packages" scope
-3. Enter your GitHub username and the token below`;
-
-export interface GhcrCredentials {
-  username: string;
-  password: string;
-}
-
-/**
- * Check if we have stored credentials for ghcr.io
- */
-async function hasGhcrCredentials(): Promise<boolean> {
-  const configFile = join(homedir(), '.docker', 'config.json');
-  try {
-    const file = Bun.file(configFile);
-    if (!(await file.exists())) {
-      return false;
-    }
-    const config = await file.json();
-    return !!config?.auths?.[GHCR_REGISTRY];
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Login to ghcr.io using provided credentials
- * Returns true if login succeeded, false otherwise
- */
-async function loginToGhcr(credentials: GhcrCredentials): Promise<boolean> {
-  try {
-    const proc = Bun.spawn(
-      [
-        'docker',
-        'login',
-        GHCR_REGISTRY,
-        '-u',
-        credentials.username,
-        '--password-stdin',
-      ],
-      {
-        stdin: Buffer.from(credentials.password),
-        stdout: 'ignore',
-        stderr: 'ignore',
-      },
-    );
-    const exitCode = await proc.exited;
-    return exitCode === 0;
-  } catch (error) {
-    log.error({ error }, 'Docker login to GHCR failed');
-    return false;
-  }
-}
-
-const MAX_GHCR_LOGIN_ATTEMPTS = 3;
 
 /**
  * Try to pull a specific image tag
@@ -178,115 +95,47 @@ async function tryPullImage(imageTag: string): Promise<boolean> {
   }
 }
 
-type CredentialsCallback = (error?: string) => Promise<GhcrCredentials | null>;
 type ProgressCallback = (message: string) => void;
 
 /**
- * Ensure ghcr.io docker login is valid by attempting a pull
- * If credentials are invalid/expired, requests new credentials via callback
- * Returns true if authenticated, false if user cancelled or all attempts failed
- */
-async function ensureGhcrDockerLoginValid(
-  onCredentialsNeeded?: CredentialsCallback,
-  onProgress?: ProgressCallback,
-): Promise<boolean> {
-  let errorMessage: string | undefined;
-
-  for (let attempt = 1; attempt <= MAX_GHCR_LOGIN_ATTEMPTS; attempt++) {
-    // Check if we already have valid credentials
-    if (await hasGhcrCredentials()) {
-      // Try to pull to verify credentials are still valid
-      onProgress?.('Verifying stored credentials');
-      if (await tryPullImage(GHCR_AUTH_TEST_TAG)) {
-        return true; // Success
-      }
-      // Credentials exist but are invalid - logout and request new ones
-      try {
-        await $`docker logout ${GHCR_REGISTRY}`.quiet();
-      } catch {
-        // Ignore logout errors
-      }
-      errorMessage = 'Stored credentials are invalid or expired';
-    }
-
-    // Need credentials - request via callback
-    if (!onCredentialsNeeded) {
-      // No callback provided, can't get credentials
-      return false;
-    }
-
-    const credentials = await onCredentialsNeeded(errorMessage);
-    if (!credentials) {
-      // User cancelled/skipped
-      return false;
-    }
-
-    // Try to login with provided credentials
-    onProgress?.('Logging in to GHCR');
-    const loginSuccess = await loginToGhcr(credentials);
-    if (!loginSuccess) {
-      // Login failed, will retry on next iteration
-      errorMessage = 'Login failed. Please check your username and token.';
-      continue;
-    }
-
-    // Verify login works by trying to pull
-    onProgress?.('Pulling cache image');
-    if (await tryPullImage(GHCR_AUTH_TEST_TAG)) {
-      return true; // Success
-    }
-
-    errorMessage =
-      'Authentication succeeded but pull failed. Token may lack read:packages scope.';
-  }
-
-  return false;
-}
-
-/**
  * Pull GHCR image for use as build cache
- * Tries version-tagged image first, falls back to latest
- * Returns the image tag that was successfully pulled, or null if all pulls failed
+ * The image is public, so no authentication is needed.
+ * Tries version-tagged image first, falls back to latest.
+ * Returns the image tag that was successfully pulled, or null if all pulls failed.
  */
 async function pullGhcrImageForCache(
-  onCredentialsNeeded?: CredentialsCallback,
   onProgress?: ProgressCallback,
 ): Promise<string | null> {
-  const authenticated = await ensureGhcrDockerLoginValid(
-    onCredentialsNeeded,
-    onProgress,
-  );
-  if (!authenticated) {
-    // Could not authenticate - will build from scratch
-    return null;
-  }
-
   // Try version-tagged image first (closer cache match)
-  onProgress?.(`Pulling versioned cache image`);
+  onProgress?.('Pulling versioned sandbox image');
   if (await tryPullImage(GHCR_IMAGE_TAG_VERSION)) {
     return GHCR_IMAGE_TAG_VERSION;
   }
+  log.debug(
+    { image: GHCR_IMAGE_TAG_VERSION },
+    'Versioned GHCR image not found, falling back to latest',
+  );
 
   // Fall back to latest
+  onProgress?.('Pulling latest sandbox image');
   if (await tryPullImage(GHCR_IMAGE_TAG_LATEST)) {
     return GHCR_IMAGE_TAG_LATEST;
   }
+  log.error({ image: GHCR_IMAGE_TAG_LATEST }, 'Latest GHCR image not found');
+
   return null;
 }
 
 /**
- * Build docker image using a pulled image as cache
+ * Build docker image, optionally using a pulled image as cache
  */
-async function buildDockerImageWithCache(
-  cacheFromImage: string,
-): Promise<void> {
+async function buildDockerImage(cacheFromImage?: string | null): Promise<void> {
   const proc = Bun.spawn(
     [
       'docker',
       'build',
       '-q',
-      '--cache-from',
-      cacheFromImage,
+      ...(cacheFromImage ? ['--cache-from', cacheFromImage] : []),
       '-t',
       HASHED_SANDBOX_DOCKER_IMAGE,
       '-',
@@ -314,13 +163,12 @@ export type ImageBuildProgress =
 
 export interface EnsureDockerImageOptions {
   onProgress?: (progress: ImageBuildProgress) => void;
-  onCredentialsNeeded?: (error?: string) => Promise<GhcrCredentials | null>;
 }
 
 export async function ensureDockerImage(
   options: EnsureDockerImageOptions = {},
 ): Promise<void> {
-  const { onProgress, onCredentialsNeeded } = options;
+  const { onProgress } = options;
 
   onProgress?.({ type: 'checking' });
 
@@ -329,26 +177,20 @@ export async function ensureDockerImage(
     return;
   }
 
-  // Try to pull the GHCR image first for caching
+  // Try to pull the public GHCR image for caching
   onProgress?.({
     type: 'pulling-cache',
-    message: 'Checking GHCR credentials',
+    message: 'Pulling sandbox image from GHCR',
   });
-  const cacheImage = await pullGhcrImageForCache(
-    onCredentialsNeeded,
-    (message) => onProgress?.({ type: 'pulling-cache', message }),
+  const cacheImage = await pullGhcrImageForCache((message) =>
+    onProgress?.({ type: 'pulling-cache', message }),
   );
 
-  if (cacheImage) {
-    onProgress?.({
-      type: 'building',
-      message: `Building with cache from ${cacheImage}`,
-    });
-    await buildDockerImageWithCache(cacheImage);
-  } else {
-    onProgress?.({ type: 'building', message: 'Building from scratch' });
-    await buildDockerImage();
-  }
+  onProgress?.({
+    type: 'building',
+    message: 'Building sandbox docker image',
+  });
+  await buildDockerImage(cacheImage);
 
   onProgress?.({ type: 'done' });
 }

@@ -5,11 +5,7 @@
 import type { SelectOption } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ensureDockerImage,
-  type GhcrCredentials,
-  type ImageBuildProgress,
-} from '../services/docker';
+import { ensureDockerImage, type ImageBuildProgress } from '../services/docker';
 import {
   checkDockerStatus,
   type DockerProvider,
@@ -17,7 +13,6 @@ import {
   installProvider,
   startProvider,
 } from '../services/dockerSetup';
-import { GhcrCredentialsInput } from './GhcrCredentials';
 import { Loading } from './Loading';
 import { Selector } from './Selector';
 
@@ -50,7 +45,6 @@ type SetupState =
   | { type: 'select-provider'; status: DockerStatus }
   | { type: 'installing'; provider: DockerProvider }
   | { type: 'building-image'; message: string }
-  | { type: 'credentials-needed'; error?: string }
   | { type: 'error'; message: string };
 
 // ============================================================================
@@ -99,38 +93,9 @@ export function DockerSetup({
 }: DockerSetupProps) {
   const [state, setState] = useState<SetupState>({ type: 'checking' });
 
-  // Ref to store the resolver for credentials promise
-  const credentialsResolverRef = useRef<
-    ((creds: GhcrCredentials | null) => void) | null
-  >(null);
-
   // Helper to start image building after Docker is ready
   const startImageBuild = useCallback(() => {
     setState({ type: 'building-image', message: 'Checking Docker image' });
-  }, []);
-
-  // Handlers for credentials input
-  const handleCredentialsSubmit = useCallback(
-    (credentials: GhcrCredentials) => {
-      const resolver = credentialsResolverRef.current;
-      credentialsResolverRef.current = null;
-      // Don't set state here - let the progress callbacks handle message updates
-      // Just transition back to building-image state so the Loading component shows
-      setState({ type: 'building-image', message: 'Logging in to GHCR...' });
-      resolver?.(credentials);
-    },
-    [],
-  );
-
-  const handleCredentialsSkip = useCallback(() => {
-    const resolver = credentialsResolverRef.current;
-    credentialsResolverRef.current = null;
-    // Progress callbacks will update the message
-    setState({
-      type: 'building-image',
-      message: 'Skipping GHCR, building from scratch...',
-    });
-    resolver?.(null);
   }, []);
 
   // Check Docker status on mount
@@ -227,9 +192,6 @@ export function DockerSetup({
     unmountedRef.current = false;
 
     const handleProgress = (progress: ImageBuildProgress) => {
-      // Don't check unmountedRef for progress updates - we want to update
-      // the message even when transitioning through credentials-needed state.
-      // React will ignore setState on unmounted components anyway.
       switch (progress.type) {
         case 'checking':
           setState({
@@ -271,18 +233,8 @@ export function DockerSetup({
       }
     };
 
-    const handleCredentialsNeeded = (
-      error?: string,
-    ): Promise<GhcrCredentials | null> => {
-      return new Promise((resolve) => {
-        credentialsResolverRef.current = resolve;
-        setState({ type: 'credentials-needed', error });
-      });
-    };
-
     ensureDockerImage({
       onProgress: handleProgress,
-      onCredentialsNeeded: handleCredentialsNeeded,
     }).catch((err) => {
       if (unmountedRef.current) return;
       buildingRef.current = false;
@@ -382,19 +334,6 @@ export function DockerSetup({
         message={state.message}
         detail="This may take a few minutes on first run"
         onCancel={handleCancel}
-      />
-    );
-  }
-
-  // ---- Credentials Needed State ----
-  if (state.type === 'credentials-needed') {
-    return (
-      <GhcrCredentialsInput
-        title={title}
-        onSubmit={handleCredentialsSubmit}
-        onSkip={handleCredentialsSkip}
-        onCancel={handleCancel}
-        error={state.error}
       />
     );
   }
