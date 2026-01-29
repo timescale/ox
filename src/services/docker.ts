@@ -103,9 +103,11 @@ async function buildDockerImage(): Promise<void> {
 // GHCR (GitHub Container Registry) Authentication
 // ============================================================================
 
+export const GHCR_TOKEN_URL =
+  'https://github.com/settings/tokens/new?scopes=read:packages&description=hermes-ghcr-token';
 export const GHCR_LOGIN_INSTRUCTIONS = `To pull cached Docker images, you need to authenticate with GitHub Container Registry.
 
-1. Go to: https://github.com/settings/tokens/new?scopes=read:packages&description=hermes-ghcr
+1. Go to: ${GHCR_TOKEN_URL}
 2. Generate a new token with the "read:packages" scope
 3. Enter your GitHub username and the token below`;
 

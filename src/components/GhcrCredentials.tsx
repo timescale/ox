@@ -4,11 +4,14 @@
 
 import type { TextareaRenderable } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
-import { useCallback, useRef, useState } from 'react';
+import open from 'open';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   GHCR_LOGIN_INSTRUCTIONS,
+  GHCR_TOKEN_URL,
   type GhcrCredentials,
 } from '../services/docker';
+import { log } from '../services/logger';
 
 export interface GhcrCredentialsProps {
   title?: string;
@@ -89,6 +92,12 @@ export function GhcrCredentialsInput({
   });
 
   const canSubmit = username.length > 0 && password.length > 0;
+
+  useEffect(() => {
+    open(GHCR_TOKEN_URL).catch((err: unknown) =>
+      log.error({ err }, 'Failed to open GHCR token URL'),
+    );
+  }, []);
 
   return (
     <box flexDirection="column" padding={1} flexGrow={1}>
