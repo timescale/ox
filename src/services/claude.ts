@@ -13,17 +13,18 @@ import {
 const HERMES_DIR = join(process.cwd(), '.hermes');
 const CLAUDE_CONFIG_DIR = join(HERMES_DIR, '.claude');
 const CLAUDE_HOST_CONFIG_DIR = join(homedir(), '.claude');
-export const CLAUDE_CONFIG_VOLUME = `${CLAUDE_CONFIG_DIR}:/home/agent/.claude`;
+const CLAUDE_AUTH_FILE_NAME = '.credentials.json';
+export const CLAUDE_CONFIG_VOLUME = `${join(CLAUDE_CONFIG_DIR, CLAUDE_AUTH_FILE_NAME)}:/home/agent/.claude/${CLAUDE_AUTH_FILE_NAME}`;
 
 const checkConfig = async () => {
   await mkdir(CLAUDE_CONFIG_DIR, { recursive: true });
 
-  const hostCreds = file(join(CLAUDE_HOST_CONFIG_DIR, '.credentials.json'));
+  const hostCreds = file(join(CLAUDE_HOST_CONFIG_DIR, CLAUDE_AUTH_FILE_NAME));
   if (!(await hostCreds.exists())) {
     log.info('Claude credentials not found in host config directory');
     return;
   }
-  const localCreds = file(join(CLAUDE_CONFIG_DIR, '.credentials.json'));
+  const localCreds = file(join(CLAUDE_CONFIG_DIR, CLAUDE_AUTH_FILE_NAME));
   if (
     !(await localCreds.exists()) ||
     (await localCreds.json())?.claudeAiOauth?.expiresAt < Date.now()

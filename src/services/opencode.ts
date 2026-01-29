@@ -14,17 +14,20 @@ import {
 const HERMES_DIR = join(process.cwd(), '.hermes');
 const OPENCODE_CONFIG_DIR = join(HERMES_DIR, '.local', 'share', 'opencode');
 const OPENCODE_HOST_CONFIG_DIR = join(homedir(), '.local', 'share', 'opencode');
-export const OPENCODE_CONFIG_VOLUME = `${OPENCODE_CONFIG_DIR}:/home/agent/.local/share/opencode`;
+const OPENCODE_AUTH_FILE_NAME = 'auth.json';
+export const OPENCODE_CONFIG_VOLUME = `${join(OPENCODE_CONFIG_DIR, OPENCODE_AUTH_FILE_NAME)}:/home/agent/.local/share/opencode/${OPENCODE_AUTH_FILE_NAME}`;
 
 const checkConfig = async () => {
   await mkdir(OPENCODE_CONFIG_DIR, { recursive: true });
 
-  const hostAuth = file(join(OPENCODE_HOST_CONFIG_DIR, 'auth.json'));
+  const hostAuth = file(
+    join(OPENCODE_HOST_CONFIG_DIR, OPENCODE_AUTH_FILE_NAME),
+  );
   if (!(await hostAuth.exists())) {
     log.info('Opencode auth.json not found in host config directory');
     return;
   }
-  const localAuth = file(join(OPENCODE_CONFIG_DIR, 'auth.json'));
+  const localAuth = file(join(OPENCODE_CONFIG_DIR, OPENCODE_AUTH_FILE_NAME));
   if (!(await localAuth.exists())) {
     log.debug('Copying opencode auth.json from host to local config directory');
     await localAuth.write(await hostAuth.bytes());
@@ -44,7 +47,7 @@ const checkConfig = async () => {
           hostContent[key])
       ) {
         log.debug(
-          `Adding missing or outdated key "${key}" to local opencode auth.json from host`,
+          `Adding missing or outdated key "${key}" to local opencode ${OPENCODE_AUTH_FILE_NAME} from host`,
         );
         localContent[key] = hostContent[key];
         changed = true;
