@@ -58,7 +58,11 @@ export async function getRepoInfo(): Promise<RepoInfo> {
 export async function tryGetRepoInfo(): Promise<RepoInfo | null> {
   try {
     return await getRepoInfo();
-  } catch {
+  } catch (err) {
+    log.debug(
+      { err },
+      'Failed to get repo info (not in a git repo or no valid remote)',
+    );
     return null;
   }
 }

@@ -396,22 +396,13 @@ export function SessionsList({
       )}
 
       <HotkeysBar
-        keyList={
-          currentRepo
-            ? [
-                ['enter', 'view'],
-                ['tab', 'filter'],
-                ['ctrl+l', 'scope'],
-                ['ctrl+p', 'new'],
-                ['ctrl+r', 'refresh'],
-              ]
-            : [
-                ['enter', 'view'],
-                ['tab', 'filter'],
-                ['ctrl+p', 'new'],
-                ['ctrl+r', 'refresh'],
-              ]
-        }
+        keyList={[
+          ['enter', 'view'],
+          ['tab', 'filter'],
+          ...(currentRepo ? [['ctrl+l', 'scope'] as [string, string]] : []),
+          ['ctrl+p', 'new'],
+          ['ctrl+r', 'refresh'],
+        ]}
       />
 
       {/* Toast notifications */}
