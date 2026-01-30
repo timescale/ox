@@ -400,48 +400,81 @@ export function streamContainerLogs(nameOrId: string): LogStream {
   };
 
   async function* generateLines(): AsyncIterable<string> {
-    // Combine stdout and stderr
-    const decoder = new TextDecoder();
-    let buffer = '';
+    log.debug({ nameOrId }, 'Starting log stream for container');
 
-    // Helper to process a stream
-    async function* processStream(
-      stream: ReadableStream<Uint8Array>,
-    ): AsyncIterable<string> {
+    // Queue to collect lines from both streams as they arrive
+    const lineQueue: string[] = [];
+    let resolveWaiting: (() => void) | null = null;
+    let streamsComplete = 0;
+    const totalStreams = (proc.stdout ? 1 : 0) + (proc.stderr ? 1 : 0);
+
+    // Process a stream and push lines to the shared queue
+    async function processStream(stream: ReadableStream<Uint8Array>) {
+      const decoder = new TextDecoder();
+      let buffer = '';
       const reader = stream.getReader();
+
       try {
         while (!stopped) {
           const { done, value } = await reader.read();
           if (done) break;
-          // Normalize line endings as we receive data
+
           const chunk = normalizeLineEndings(
             decoder.decode(value, { stream: true }),
           );
           buffer += chunk;
 
-          // Split by newlines and yield complete lines
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
+
           for (const line of lines) {
-            yield line;
+            lineQueue.push(line);
+            // Wake up the generator if it's waiting
+            if (resolveWaiting) {
+              resolveWaiting();
+              resolveWaiting = null;
+            }
           }
         }
+
         // Yield any remaining content
         if (buffer) {
-          yield buffer;
-          buffer = '';
+          lineQueue.push(buffer);
+          if (resolveWaiting) {
+            resolveWaiting();
+            resolveWaiting = null;
+          }
         }
       } finally {
         reader.releaseLock();
+        streamsComplete++;
+        // Wake up generator when stream ends
+        if (resolveWaiting) {
+          resolveWaiting();
+          resolveWaiting = null;
+        }
       }
     }
 
-    // Process both stdout and stderr
-    if (proc.stdout) {
-      yield* processStream(proc.stdout);
-    }
-    if (proc.stderr) {
-      yield* processStream(proc.stderr);
+    // Start processing both streams concurrently (don't await)
+    if (proc.stdout) processStream(proc.stdout);
+    if (proc.stderr) processStream(proc.stderr);
+
+    // Yield lines as they arrive from either stream
+    while (!stopped) {
+      const nextLine = lineQueue.shift();
+      if (nextLine !== undefined) {
+        log.trace({ line: nextLine, stopped }, 'Log stream line received');
+        yield nextLine;
+      } else if (streamsComplete >= totalStreams) {
+        // Both streams are done and queue is empty
+        break;
+      } else {
+        // Wait for more data
+        await new Promise<void>((resolve) => {
+          resolveWaiting = resolve;
+        });
+      }
     }
   }
 

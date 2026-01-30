@@ -1,24 +1,18 @@
 import type { ScrollBoxRenderable } from '@opentui/core';
 import { flushSync, useKeyboard } from '@opentui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  getContainerLogs,
-  type LogStream,
-  streamContainerLogs,
-} from '../services/docker';
+import { type LogStream, streamContainerLogs } from '../services/docker';
 import { useTheme } from '../stores/themeStore';
 import { AnsiText } from './AnsiText';
 
 export interface LogViewerProps {
   containerId: string;
-  isRunning: boolean;
   isInteractive: boolean;
   onError?: (error: string) => void;
 }
 
 export function LogViewer({
   containerId,
-  isRunning,
   isInteractive,
   onError,
 }: LogViewerProps) {
@@ -60,33 +54,24 @@ export function LogViewer({
 
     async function loadLogs() {
       try {
-        // Get initial logs
-        const initialLogs = await getContainerLogs(containerId, 1000);
-        if (!mounted) return;
-
-        const initialLines = initialLogs.split('\n');
-        setLines(initialLines);
+        setLines([]);
+        const stream = streamContainerLogs(containerId);
+        streamRef.current = stream;
         setLoading(false);
 
-        // If running, start streaming
-        if (isRunning) {
-          const stream = streamContainerLogs(containerId);
-          streamRef.current = stream;
-
-          // Process stream in background
-          (async () => {
-            try {
-              for await (const line of stream.lines) {
-                if (!mounted) break;
-                setLines((prev) => [...prev, line]);
-              }
-            } catch (err) {
-              if (mounted && onError) {
-                onError(`Log stream error: ${err}`);
-              }
+        // Process stream in background
+        (async () => {
+          try {
+            for await (const line of stream.lines) {
+              if (!mounted) break;
+              setLines((prev) => [...prev, line]);
             }
-          })();
-        }
+          } catch (err) {
+            if (mounted && onError) {
+              onError(`Log stream error: ${err}`);
+            }
+          }
+        })();
       } catch (err) {
         if (mounted) {
           setLoading(false);
@@ -106,7 +91,7 @@ export function LogViewer({
         streamRef.current = null;
       }
     };
-  }, [containerId, isRunning, isInteractive, onError]);
+  }, [containerId, isInteractive, onError]);
 
   // Auto-scroll when following and new lines arrive
   useEffect(() => {
