@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import {
   AGENT_INFO,
   AGENT_INFO_MAP,
@@ -9,6 +9,18 @@ import {
   getModelsForAgent,
   openCodeIdToModel,
 } from './agents';
+
+// Mock runInDocker to avoid Docker dependency in tests
+mock.module('./runInDocker', () => ({
+  runInDocker: mock(() =>
+    Promise.resolve({
+      errorText: () => '',
+      text: () => 'anthropic/claude-3-sonnet\nopenai/gpt-4-turbo',
+      json: () => null,
+      exited: Promise.resolve(0),
+    }),
+  ),
+}));
 
 describe('openCodeIdToModel', () => {
   test('parses model with provider prefix', () => {
@@ -166,10 +178,20 @@ describe('getModelsForAgent', () => {
     expect(models).toBe(CLAUDE_MODELS);
   });
 
-  // Note: We can't easily test opencode models without Docker
-  // so we just test that it returns an array (possibly empty)
-  test('returns array for opencode agent', async () => {
+  // runInDocker is mocked to return mock model data
+  test('returns parsed models for opencode agent', async () => {
     const models = await getModelsForAgent('opencode');
     expect(Array.isArray(models)).toBe(true);
+    expect(models).toHaveLength(2);
+    expect(models[0]).toEqual({
+      id: 'anthropic/claude-3-sonnet',
+      name: 'claude-3-sonnet',
+      description: 'anthropic',
+    });
+    expect(models[1]).toEqual({
+      id: 'openai/gpt-4-turbo',
+      name: 'gpt-4-turbo',
+      description: 'openai',
+    });
   });
 });

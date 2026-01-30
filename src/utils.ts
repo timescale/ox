@@ -2,6 +2,8 @@
 // Shared CLI Utilities
 // ============================================================================
 
+import { log } from './services/logger';
+
 // ============================================================================
 // Console Output Utilities
 // ============================================================================
@@ -81,6 +83,6 @@ export async function ensureGitignore(): Promise<void> {
         : `${content}\n${entry}\n`;
 
     await Bun.write(gitignorePath, newContent);
-    console.log('  Added .hermes/ to .gitignore');
+    log.info('Added .hermes/ to .gitignore');
   }
 }
