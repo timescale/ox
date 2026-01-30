@@ -52,6 +52,17 @@ export async function getRepoInfo(): Promise<RepoInfo> {
   return parseGitHubUrl(remoteUrl);
 }
 
+/**
+ * Try to get repo info, returning null if not in a git repo or no valid remote.
+ */
+export async function tryGetRepoInfo(): Promise<RepoInfo | null> {
+  try {
+    return await getRepoInfo();
+  } catch {
+    return null;
+  }
+}
+
 export function isValidBranchName(name: string): [boolean, string] {
   // Must start with letter, contain only lowercase letters, numbers, hyphens
   // Must end with letter or number, max 50 chars

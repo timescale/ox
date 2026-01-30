@@ -10,11 +10,14 @@ import { HotkeysBar } from './HotkeysBar';
 import { Toast, type ToastType } from './Toast';
 
 export type FilterMode = 'all' | 'running' | 'completed';
+export type ScopeMode = 'local' | 'global';
 
 export interface SessionsListProps {
   onSelect: (session: HermesSession) => void;
   onQuit: () => void;
   onNewTask?: () => void;
+  /** Current repo fullName (e.g., "owner/repo") if in a git repo, undefined otherwise */
+  currentRepo?: string;
 }
 
 interface ToastState {
@@ -73,10 +76,18 @@ const FILTER_LABELS: Record<FilterMode, string> = {
 
 const FILTER_ORDER: FilterMode[] = ['all', 'running', 'completed'];
 
+const SCOPE_LABELS: Record<ScopeMode, string> = {
+  local: 'Local',
+  global: 'Global',
+};
+
+const SCOPE_ORDER: ScopeMode[] = ['local', 'global'];
+
 export function SessionsList({
   onSelect,
   onQuit,
   onNewTask,
+  currentRepo,
 }: SessionsListProps) {
   const { theme } = useTheme();
   const { selectedSessionId, setSelectedSessionId } = useSessionStore();
@@ -84,11 +95,20 @@ export function SessionsList({
   const [loading, setLoading] = useState(true);
   const [filterText, setFilterText] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  // Default to 'local' if in a repo, otherwise 'global'
+  const [scopeMode, setScopeMode] = useState<ScopeMode>(
+    currentRepo ? 'local' : 'global',
+  );
   const [toast, setToast] = useState<ToastState | null>(null);
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
 
-  // Filter sessions based on text and mode
+  // Filter sessions based on text, mode, and scope
   const filteredSessions = sessions.filter((session) => {
+    // Scope filter (only when in a repo)
+    if (currentRepo && scopeMode === 'local' && session.repo !== currentRepo) {
+      return false;
+    }
+
     // Mode filter
     if (filterMode === 'running' && session.status !== 'running') {
       return false;
@@ -224,6 +244,17 @@ export function SessionsList({
       return;
     }
 
+    // Ctrl+L to toggle scope (only when in a repo)
+    if (key.name === 'l' && key.ctrl && currentRepo) {
+      const currentIdx = SCOPE_ORDER.indexOf(scopeMode);
+      const nextIdx = (currentIdx + 1) % SCOPE_ORDER.length;
+      const nextScope = SCOPE_ORDER[nextIdx];
+      if (nextScope) {
+        setScopeMode(nextScope);
+      }
+      return;
+    }
+
     if (key.name === 'r' && key.ctrl) {
       setLoading(true);
       loadSessions().then(() => {
@@ -259,6 +290,7 @@ export function SessionsList({
   }
 
   const filterLabel = FILTER_LABELS[filterMode];
+  const scopeLabel = currentRepo ? SCOPE_LABELS[scopeMode] : null;
   const countText = `${filteredSessions.length} of ${sessions.length}`;
 
   return (
@@ -271,7 +303,7 @@ export function SessionsList({
         </text>
         <text height={1} flexGrow={1} />
         <text height={1} fg={theme.textMuted}>
-          [{filterLabel}] {countText}
+          {scopeLabel && `[${scopeLabel}] `}[{filterLabel}] {countText}
         </text>
       </box>
 
@@ -364,12 +396,22 @@ export function SessionsList({
       )}
 
       <HotkeysBar
-        keyList={[
-          ['enter', 'view'],
-          ['tab', 'filter'],
-          ['ctrl+p', 'new'],
-          ['ctrl+r', 'refresh'],
-        ]}
+        keyList={
+          currentRepo
+            ? [
+                ['enter', 'view'],
+                ['tab', 'filter'],
+                ['ctrl+l', 'scope'],
+                ['ctrl+p', 'new'],
+                ['ctrl+r', 'refresh'],
+              ]
+            : [
+                ['enter', 'view'],
+                ['tab', 'filter'],
+                ['ctrl+p', 'new'],
+                ['ctrl+r', 'refresh'],
+              ]
+        }
       />
 
       {/* Toast notifications */}

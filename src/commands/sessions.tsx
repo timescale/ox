@@ -34,7 +34,12 @@ import {
   startContainer,
   startShellContainer,
 } from '../services/docker';
-import { generateBranchName, getRepoInfo } from '../services/git';
+import {
+  generateBranchName,
+  getRepoInfo,
+  type RepoInfo,
+  tryGetRepoInfo,
+} from '../services/git';
 import { log } from '../services/logger';
 import { createTui } from '../services/tui.ts';
 import { ensureGitignore } from '../utils';
@@ -101,6 +106,8 @@ interface SessionsAppProps {
   initialModel?: string;
   serviceId?: string;
   dbFork?: boolean;
+  /** Current repo info if in a git repo, null otherwise */
+  currentRepoInfo: RepoInfo | null;
   onComplete: (result: SessionsResult) => void;
 }
 
@@ -111,6 +118,7 @@ function SessionsApp({
   initialModel,
   serviceId,
   dbFork = true,
+  currentRepoInfo,
   onComplete,
 }: SessionsAppProps) {
   const [view, setView] = useState<SessionsView>({ type: 'init' });
@@ -517,6 +525,7 @@ function SessionsApp({
         onSelect={(session) => setView({ type: 'detail', session })}
         onQuit={() => onComplete({ type: 'quit' })}
         onNewTask={() => setView({ type: 'prompt' })}
+        currentRepo={currentRepoInfo?.fullName}
       />
       {toast && (
         <Toast
@@ -544,6 +553,9 @@ export async function runSessionsTui({
   await ensureDockerSandbox();
   await ensureGhAuth();
 
+  // Try to detect current repo (returns null if not in a git repo)
+  const currentRepoInfo = await tryGetRepoInfo();
+
   let resolveResult: (result: SessionsResult) => void;
   const resultPromise = new Promise<SessionsResult>((resolve) => {
     resolveResult = resolve;
@@ -560,6 +572,7 @@ export async function runSessionsTui({
         initialModel={initialModel}
         serviceId={serviceId}
         dbFork={dbFork}
+        currentRepoInfo={currentRepoInfo}
         onComplete={(result) => resolveResult(result)}
       />
     </CopyOnSelect>,
