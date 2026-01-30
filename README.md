@@ -8,18 +8,26 @@ A CLI tool to run AI coding agents in isolated sandboxes per task.
 
 Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated:
 
+Install gh if you don't have it
+
 ```bash
-# Install gh if you don't have it
 brew install gh
+```
 
-# Authenticate with GitHub (if not already)
+Authenticate with GitHub (if not already)
+
+```bash
 gh auth login
+```
 
-# Install hermes
+Then run the installer script:
+
+```bash
 gh api repos/timescale/hermes/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
 ```
 
 The installer will prompt you to choose between:
+
 1. **Download pre-compiled binary** - Fast, no dependencies
 2. **Clone and link with bun** - For developers who want to modify the source
 
