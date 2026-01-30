@@ -4,18 +4,39 @@ A CLI tool to run AI coding agents in isolated sandboxes per task.
 
 ## Installation
 
-While this is still internal-only, you can install hermes by cloning the repo and linking it with bun:
+### Quick Install (Recommended)
+
+Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated:
+
+```bash
+# Install gh if you don't have it
+brew install gh
+
+# Authenticate with GitHub (if not already)
+gh auth login
+
+# Install hermes
+gh api repos/timescale/hermes/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
+```
+
+The installer will prompt you to choose between:
+1. **Download pre-compiled binary** - Fast, no dependencies
+2. **Clone and link with bun** - For developers who want to modify the source
+
+### Manual Installation (Developers)
+
+If you prefer to clone the repo directly:
 
 ```bash
 git clone git@github.com:timescale/hermes.git
 cd hermes
 ./bun i && ./bun link
 source ~/.zshrc # or restart your shell
-# you may need to link _again_ after restarting shell
-./bun link
 ```
 
-While any terminal should be usable, we recommend using a modern terminal like [Ghostty](https://ghostty.org/) for the best TUI experience.
+### Recommended Terminal
+
+While any terminal should be usable, we recommend [Ghostty](https://ghostty.org/) for the best TUI experience:
 
 ```bash
 brew install --cask ghostty
@@ -34,10 +55,20 @@ hermes "Build a new feature that ..."
 
 ## Updates
 
-Just pull the latest code to update:
+### Binary Installation
+
+Re-run the installer to get the latest version:
 
 ```bash
-cd hermes # wherever you cloned it above
+gh api repos/timescale/hermes/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
+```
+
+### Source Installation
+
+Pull the latest code:
+
+```bash
+cd hermes # wherever you cloned it
 git pull
 ./bun i # in case deps changed
 ```
