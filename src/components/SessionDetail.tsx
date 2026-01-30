@@ -17,6 +17,7 @@ import { Toast, type ToastType } from './Toast';
 export interface SessionDetailProps {
   session: HermesSession;
   onBack: () => void;
+  onQuit: () => void;
   onAttach: (containerId: string) => void;
   onResume: (session: HermesSession) => void;
   onSessionDeleted: () => void;
@@ -75,6 +76,7 @@ function getStatusText(session: HermesSession): string {
 export function SessionDetail({
   session: initialSession,
   onBack,
+  onQuit: _onQuit,
   onAttach,
   onResume,
   onSessionDeleted,

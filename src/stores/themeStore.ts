@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { create } from 'zustand';
-import { readConfigValue, writeConfigValue } from '../services/config.ts';
+import { userConfig } from '../services/config.ts';
 import { log } from '../services/logger.ts';
 import {
   DEFAULT_THEME_NAME,
@@ -18,7 +18,7 @@ import {
 
 async function loadPersistedTheme(): Promise<string | null> {
   try {
-    return (await readConfigValue('themeName')) || null;
+    return (await userConfig.readValue('themeName')) || null;
   } catch (error) {
     log.error({ error }, 'Failed to load persisted theme');
     // Ignore errors, use default
@@ -27,7 +27,7 @@ async function loadPersistedTheme(): Promise<string | null> {
 }
 
 function persistTheme(themeName: string): void {
-  writeConfigValue('themeName', themeName).catch((error) => {
+  userConfig.writeValue('themeName', themeName).catch((error) => {
     log.error({ error }, 'Failed to persist theme');
   });
 }

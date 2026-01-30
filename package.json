@@ -30,6 +30,7 @@
     "build-strap": "^5.2.0",
     "clipboardy": "^5.1.0",
     "commander": "^14.0.2",
+    "env-paths": "^4.0.0",
     "nanoid": "^5.1.6",
     "open": "^11.0.0",
     "pino": "^10.3.0",
