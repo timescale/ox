@@ -111,12 +111,12 @@ install_binary() {
   echo ""
   echo -e "${BLUE}Downloading pre-compiled binary...${NC}"
 
-  BINARY_FILE="hermes-${OS_TYPE}-${ARCH_TYPE}.gz"
+  BINARY_FILE="hermes-${OS_TYPE}-${ARCH_TYPE}"
 
   # Create install directory if it doesn't exist
   mkdir -p "$INSTALL_DIR"
 
-  # Download and extract binary
+  # Download binary
   TEMP_DIR=$(mktemp -d)
   trap 'rm -rf "$TEMP_DIR"' EXIT
 
@@ -132,10 +132,8 @@ install_binary() {
     exit 1
   fi
 
-  echo "Extracting..."
-  gunzip -f "$TEMP_DIR/$BINARY_FILE"
-  chmod +x "$TEMP_DIR/hermes-${OS_TYPE}-${ARCH_TYPE}"
-  mv "$TEMP_DIR/hermes-${OS_TYPE}-${ARCH_TYPE}" "$INSTALL_DIR/$BINARY_NAME"
+  chmod +x "$TEMP_DIR/$BINARY_FILE"
+  mv "$TEMP_DIR/$BINARY_FILE" "$INSTALL_DIR/$BINARY_NAME"
 
   echo -e "${GREEN}✓${NC} Installed to $INSTALL_DIR/$BINARY_NAME"
 
