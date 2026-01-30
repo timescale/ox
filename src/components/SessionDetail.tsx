@@ -20,6 +20,7 @@ export interface SessionDetailProps {
   onAttach: (containerId: string) => void;
   onResume: (session: HermesSession) => void;
   onSessionDeleted: () => void;
+  onNewPrompt?: () => void;
 }
 
 type ModalType = 'stop' | 'delete' | null;
@@ -78,6 +79,7 @@ export function SessionDetail({
   onAttach,
   onResume,
   onSessionDeleted,
+  onNewPrompt,
 }: SessionDetailProps) {
   const { theme } = useTheme();
   const [session, setSession] = useState(initialSession);
@@ -157,6 +159,11 @@ export function SessionDetail({
   useKeyboard((key) => {
     // Ignore if modal is open or action in progress
     if (modal || actionInProgress) return;
+
+    if (key.name === 'p' && key.ctrl && onNewPrompt) {
+      onNewPrompt();
+      return;
+    }
 
     if (key.name === 'escape' || key.name === 'backspace' || key.raw === 'b') {
       onBack();

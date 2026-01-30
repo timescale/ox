@@ -492,12 +492,12 @@ function SessionsApp({
         <SessionDetail
           session={view.session}
           onBack={() => setView({ type: 'list' })}
-          onQuit={() => onComplete({ type: 'quit' })}
           onAttach={(containerId) =>
             onComplete({ type: 'attach', containerId })
           }
           onResume={handleResume}
           onSessionDeleted={() => setView({ type: 'list' })}
+          onNewPrompt={() => setView({ type: 'prompt' })}
         />
         {toast && (
           <Toast
