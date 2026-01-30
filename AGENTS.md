@@ -207,3 +207,76 @@ Correct existing usages of `style` when editing components.
 ## CLI Framework
 
 Uses `commander` for argument parsing. Commands are in `src/commands/`.
+
+## TUI Testing with Pilotty
+
+Pilotty is a terminal automation tool for testing TUI applications. Use it to spawn the app in a managed PTY session and interact with it programmatically.
+
+### Basic Commands
+
+```bash
+# Spawn hermes in a pilotty session
+./bun run pilotty spawn --name hermes bash -c "cd $PWD && ./bun index.ts"
+
+# Get a text snapshot of the screen
+./bun run pilotty snapshot -s hermes
+
+# Type text at current cursor position
+./bun run pilotty type -s hermes "some text"
+
+# Send keyboard keys (enter, escape, up, down, tab, etc.)
+./bun run pilotty key -s hermes enter
+./bun run pilotty key -s hermes escape
+./bun run pilotty key -s hermes down
+
+# Kill the session when done
+./bun run pilotty kill -s hermes
+```
+
+### Testing Workflow
+
+1. **Spawn the app**: Start with `pilotty spawn` and give the session a name
+2. **Wait for startup**: Add `sleep 2` after spawn to let the app initialize
+3. **Interact**: Use `type` for text input and `key` for special keys
+4. **Verify**: Use `snapshot` to check the screen state
+5. **Cleanup**: Kill the session when done
+
+### Example Test Sequence
+
+```bash
+# Start the app
+./bun run pilotty spawn --name hermes bash -c "cd $PWD && ./bun index.ts"
+
+# Wait for startup, type "/", wait, then snapshot
+sleep 2 && ./bun run pilotty type -s hermes "/" && sleep 0.5 && ./bun run pilotty snapshot -s hermes
+
+# Navigate with arrow keys
+./bun run pilotty key -s hermes down
+
+# Select with enter
+./bun run pilotty key -s hermes enter
+
+# Close modal with escape
+./bun run pilotty key -s hermes escape
+
+# Cleanup
+./bun run pilotty kill -s hermes
+```
+
+### Snapshot Output
+
+The snapshot returns JSON with:
+
+- `text`: The full screen content as a string (rows separated by newlines)
+- `cursor`: Current cursor position `{row, col, visible}`
+- `size`: Terminal dimensions `{cols, rows}`
+- `elements`: Detected UI elements (buttons, inputs, etc.)
+
+**Note**: Colors are not visible in text snapshots. To verify color/styling, test the logic in code or visually inspect the running app.
+
+### Tips
+
+- Chain commands with `&&` and add `sleep` between actions for reliability
+- The snapshot text shows exactly what's rendered - useful for verifying layout
+- Use `--name` consistently to reference the same session
+- Always kill sessions when done to avoid orphaned processes
