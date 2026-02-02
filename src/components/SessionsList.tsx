@@ -1,11 +1,13 @@
 import type { ScrollBoxRenderable } from '@opentui/core';
 import { flushSync, useKeyboard } from '@opentui/react';
+import open from 'open';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type HermesSession,
   listHermesSessions,
   removeContainer,
 } from '../services/docker';
+import { getPrForBranch } from '../services/github';
 import { log } from '../services/logger';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
@@ -13,6 +15,9 @@ import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
 import { Toast, type ToastType } from './Toast';
+
+/** Cache TTL in milliseconds (60 seconds) */
+const PR_CACHE_TTL = 60_000;
 
 export type FilterMode = 'all' | 'running' | 'completed';
 export type ScopeMode = 'local' | 'global';
@@ -28,6 +33,7 @@ export interface SessionsListProps {
 interface ToastState {
   message: string;
   type: ToastType;
+  duration?: number;
 }
 
 function formatRelativeTime(isoDate: string): string {
@@ -95,7 +101,13 @@ export function SessionsList({
   currentRepo,
 }: SessionsListProps) {
   const { theme } = useTheme();
-  const { selectedSessionId, setSelectedSessionId } = useSessionStore();
+  const {
+    selectedSessionId,
+    setSelectedSessionId,
+    prCache,
+    setPrInfo,
+    clearPrCache,
+  } = useSessionStore();
   const [sessions, setSessions] = useState<HermesSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterText, setFilterText] = useState('');
@@ -107,6 +119,7 @@ export function SessionsList({
   const [toast, setToast] = useState<ToastState | null>(null);
   const [deleteModal, setDeleteModal] = useState<HermesSession | null>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
 
   // Filter sessions based on text, mode, and scope
@@ -175,6 +188,39 @@ export function SessionsList({
     }
   }, []);
 
+  // Fetch PR info for sessions that need it
+  const fetchPrInfo = useCallback(
+    async (sessionsToFetch: HermesSession[], forceRefresh = false) => {
+      const now = Date.now();
+      for (const session of sessionsToFetch) {
+        const cached = prCache[session.containerId];
+        const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
+
+        if (forceRefresh || isStale) {
+          const prInfo = await getPrForBranch(session.repo, session.branch);
+          setPrInfo(session.containerId, prInfo);
+        }
+      }
+    },
+    [prCache, setPrInfo],
+  );
+
+  // Mouse handlers for session rows
+  const handleRowClick = useCallback(
+    (session: HermesSession) => {
+      onSelect(session);
+    },
+    [onSelect],
+  );
+
+  const handleRowHover = useCallback((index: number) => {
+    setHoveredIndex(index);
+  }, []);
+
+  const handleMouseOut = useCallback(() => {
+    setHoveredIndex(null);
+  }, []);
+
   // Delete session handler
   const handleDelete = useCallback(async () => {
     if (!deleteModal) return;
@@ -215,6 +261,13 @@ export function SessionsList({
     const interval = setInterval(loadSessions, 60000);
     return () => clearInterval(interval);
   }, [loadSessions]);
+
+  // Fetch PR info for all sessions when sessions list changes
+  useEffect(() => {
+    if (sessions.length > 0) {
+      fetchPrInfo(sessions);
+    }
+  }, [sessions, fetchPrInfo]);
 
   // Keep selected index in bounds (update store if current selection is out of bounds)
   useEffect(() => {
@@ -306,9 +359,41 @@ export function SessionsList({
 
     if (key.name === 'r' && key.ctrl) {
       setLoading(true);
+      clearPrCache(); // Force re-fetch of PR info
       loadSessions().then(() => {
         setToast({ message: 'Refreshed', type: 'info' });
       });
+      return;
+    }
+
+    // Ctrl+O to open PR in browser
+    if (key.name === 'o' && key.ctrl) {
+      const session = filteredSessions[selectedIndex];
+      if (session) {
+        const prInfo = prCache[session.containerId]?.prInfo;
+        if (prInfo) {
+          open(prInfo.url)
+            .then(() => {
+              setToast({
+                message: `Opening PR #${prInfo.number}...`,
+                type: 'info',
+                duration: 1000,
+              });
+            })
+            .catch((err: unknown) => {
+              log.debug({ err }, 'Failed to open PR URL in browser');
+              setToast({
+                message: `Failed to open PR in browser`,
+                type: 'error',
+              });
+            });
+        } else {
+          setToast({
+            message: 'No PR found for this session',
+            type: 'warning',
+          });
+        }
+      }
       return;
     }
 
@@ -371,6 +456,9 @@ export function SessionsList({
         <text height={1} width={12} fg={theme.textMuted}>
           STATUS
         </text>
+        <text height={1} width={10} fg={theme.textMuted}>
+          PR
+        </text>
         <text
           height={1}
           flexGrow={1}
@@ -404,9 +492,15 @@ export function SessionsList({
           </text>
         </box>
       ) : (
-        <scrollbox ref={scrollboxRef} flexGrow={1} flexShrink={1}>
+        <scrollbox
+          ref={scrollboxRef}
+          flexGrow={1}
+          flexShrink={1}
+          onMouseOut={handleMouseOut}
+        >
           {filteredSessions.map((session, index) => {
             const isSelected = index === selectedIndex;
+            const isHovered = index === hoveredIndex;
             const statusIcon = getStatusIcon(session);
             const statusColor =
               {
@@ -418,6 +512,21 @@ export function SessionsList({
                 dead: theme.error,
               }[session.status] || theme.textMuted;
             const statusText = getStatusText(session);
+
+            // PR info from cache
+            const cachedPr = prCache[session.containerId];
+            const prInfo = cachedPr?.prInfo;
+            const prText = prInfo
+              ? `#${prInfo.number} ${prInfo.state.toLowerCase()}`
+              : '-';
+            const prColor = prInfo
+              ? {
+                  OPEN: theme.success,
+                  MERGED: theme.accent,
+                  CLOSED: theme.textMuted,
+                }[prInfo.state]
+              : theme.textMuted;
+
             const agent =
               {
                 claude: 'cc',
@@ -430,6 +539,12 @@ export function SessionsList({
               ? formatRelativeTime(session.created)
               : '';
 
+            // Background: selected > hovered > default
+            const bgColor = isSelected
+              ? theme.primary
+              : isHovered
+                ? theme.backgroundElement
+                : undefined;
             const itemFg = isSelected ? theme.background : theme.text;
             const itemFgMuted = isSelected
               ? theme.backgroundElement
@@ -439,10 +554,12 @@ export function SessionsList({
                 key={session.containerId}
                 height={1}
                 flexDirection="row"
-                backgroundColor={isSelected ? theme.primary : undefined}
+                backgroundColor={bgColor}
                 paddingLeft={1}
                 paddingRight={1}
                 gap={2}
+                onMouseDown={() => handleRowClick(session)}
+                onMouseOver={() => handleRowHover(index)}
               >
                 <text height={1} width={3} fg={statusColor}>
                   {statusIcon}
@@ -452,6 +569,9 @@ export function SessionsList({
                 </text>
                 <text height={1} width={12} fg={itemFgMuted}>
                   {statusText}
+                </text>
+                <text height={1} width={10} fg={isSelected ? itemFg : prColor}>
+                  {prText}
                 </text>
                 <text
                   height={1}
@@ -486,10 +606,9 @@ export function SessionsList({
 
       <HotkeysBar
         keyList={[
-          ['enter', 'view'],
           ['tab', 'filter'],
           ...(currentRepo ? [['ctrl+l', 'scope'] as [string, string]] : []),
-          ['ctrl+d', 'delete'],
+          ['ctrl+o', 'open PR'],
           ['ctrl+p', 'new'],
           ['ctrl+r', 'refresh'],
         ]}
@@ -513,6 +632,7 @@ export function SessionsList({
         <Toast
           message={toast.message}
           type={toast.type}
+          duration={toast.duration}
           onDismiss={() => setToast(null)}
         />
       )}

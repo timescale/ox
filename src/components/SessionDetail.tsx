@@ -1,4 +1,5 @@
 import { useKeyboard } from '@opentui/react';
+import open from 'open';
 import { useCallback, useEffect, useState } from 'react';
 import {
   getSession,
@@ -6,13 +7,18 @@ import {
   removeContainer,
   stopContainer,
 } from '../services/docker';
+import { getPrForBranch, type PrInfo } from '../services/github';
 import { log } from '../services/logger';
+import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
 import { LogViewer } from './LogViewer';
 import { Toast, type ToastType } from './Toast';
+
+/** Cache TTL in milliseconds (60 seconds) */
+const PR_CACHE_TTL = 60_000;
 
 export interface SessionDetailProps {
   session: HermesSession;
@@ -28,6 +34,7 @@ type ModalType = 'stop' | 'delete' | null;
 interface ToastState {
   message: string;
   type: ToastType;
+  duration?: number;
 }
 
 function formatRelativeTime(isoDate: string): string {
@@ -82,6 +89,7 @@ export function SessionDetail({
   onNewPrompt,
 }: SessionDetailProps) {
   const { theme } = useTheme();
+  const { prCache, setPrInfo } = useSessionStore();
   const [session, setSession] = useState(initialSession);
   const [modal, setModal] = useState<ModalType>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -89,6 +97,30 @@ export function SessionDetail({
 
   const isRunning = session.status === 'running';
   const isStopped = session.status === 'exited' || session.status === 'dead';
+
+  // Get PR info from cache
+  const cachedPr = prCache[session.containerId];
+  const prInfo: PrInfo | null = cachedPr?.prInfo ?? null;
+
+  // Hover state for PR indicator
+  const [prHovered, setPrHovered] = useState(false);
+
+  // Fetch PR info if not cached or stale
+  const fetchPrInfo = useCallback(async () => {
+    const now = Date.now();
+    const cached = prCache[session.containerId];
+    const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
+
+    if (isStale) {
+      const info = await getPrForBranch(session.repo, session.branch);
+      setPrInfo(session.containerId, info);
+    }
+  }, [session.containerId, session.repo, session.branch, prCache, setPrInfo]);
+
+  // Fetch PR info on mount
+  useEffect(() => {
+    fetchPrInfo();
+  }, [fetchPrInfo]);
 
   // Refresh session metadata periodically
   useEffect(() => {
@@ -101,10 +133,12 @@ export function SessionDetail({
         setToast({ message: 'Container no longer exists', type: 'error' });
         setTimeout(() => onSessionDeleted(), 1500);
       }
+      // Also refresh PR info if stale
+      fetchPrInfo();
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [session.containerId, onSessionDeleted]);
+  }, [session.containerId, onSessionDeleted, fetchPrInfo]);
 
   const showToast = useCallback((message: string, type: ToastType) => {
     setToast({ message, type });
@@ -155,6 +189,27 @@ export function SessionDetail({
     [showToast],
   );
 
+  // Handle PR click
+  const handlePrClick = useCallback(() => {
+    if (prInfo) {
+      open(prInfo.url)
+        .then(() => {
+          setToast({
+            message: `Opening PR #${prInfo.number}...`,
+            type: 'info',
+            duration: 1000,
+          });
+        })
+        .catch((err) => {
+          log.error({ err }, 'Failed to open PR URL in browser');
+          setToast({
+            message: `Failed to open PR in browser`,
+            type: 'error',
+          });
+        });
+    }
+  }, [prInfo]);
+
   // Keyboard shortcuts
   useKeyboard((key) => {
     // Ignore if modal is open or action in progress
@@ -175,6 +230,13 @@ export function SessionDetail({
       onAttach(session.containerId);
     } else if (key.raw === 'r' && isStopped) {
       handleResume();
+    } else if (key.raw === 'o') {
+      // Open PR in browser
+      if (!prInfo) {
+        setToast({ message: 'No PR found for this session', type: 'warning' });
+        return;
+      }
+      handlePrClick();
     }
   });
 
@@ -208,6 +270,7 @@ export function SessionDetail({
           ['d', 'elete'],
         ]
       : []),
+    ...(prInfo ? [['o', 'pen PR']] : []),
     ['b', 'ack'],
   ] as unknown as readonly [string, string][];
 
@@ -219,6 +282,28 @@ export function SessionDetail({
           <box flexDirection="row" gap={3}>
             <text fg={theme.textMuted}>repo</text>
             <text>{session.repo}</text>
+            {prInfo && (
+              <box
+                backgroundColor={
+                  prHovered ? theme.backgroundElement : undefined
+                }
+                onMouseDown={handlePrClick}
+                onMouseOver={() => setPrHovered(true)}
+                onMouseOut={() => setPrHovered(false)}
+              >
+                <text
+                  fg={
+                    {
+                      OPEN: theme.success,
+                      MERGED: theme.accent,
+                      CLOSED: theme.textMuted,
+                    }[prInfo.state]
+                  }
+                >
+                  #{prInfo.number} {prInfo.state.toLowerCase()}
+                </text>
+              </box>
+            )}
           </box>
           <box flexDirection="row" gap={1}>
             <text fg={theme.textMuted}>status</text>
@@ -307,6 +392,7 @@ export function SessionDetail({
         <Toast
           message={toast.message}
           type={toast.type}
+          duration={toast.duration}
           onDismiss={() => setToast(null)}
         />
       )}

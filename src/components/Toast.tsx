@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { ThemeColors } from '../services/theme.ts';
 import { useTheme } from '../stores/themeStore.ts';
 
-export type ToastType = 'error' | 'success' | 'info';
+export type ToastType = 'error' | 'success' | 'info' | 'warning';
 
 export interface ToastProps {
   message: string;
@@ -17,6 +17,8 @@ function getColor(type: ToastType, theme: ThemeColors): string {
       return theme.error;
     case 'success':
       return theme.success;
+    case 'warning':
+      return theme.warning;
     case 'info':
       return theme.textMuted;
   }
@@ -25,6 +27,7 @@ function getColor(type: ToastType, theme: ThemeColors): string {
 const ICONS: Record<ToastType, string> = {
   error: '\u2717',
   success: '\u2713',
+  warning: '\u26a0',
   info: '\u25cf',
 };
 
