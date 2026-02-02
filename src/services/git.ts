@@ -5,7 +5,9 @@
 import { nanoid } from 'nanoid';
 import { formatShellError, type ShellError } from '../utils';
 import { runClaudeInDocker } from './claude';
+import type { AgentType } from './config';
 import { log } from './logger';
+import { runOpencodeInDocker } from './opencode';
 
 export interface RepoInfo {
   owner: string;
@@ -128,11 +130,21 @@ async function getExistingContainers(): Promise<string[]> {
   }
 }
 
-export async function generateBranchName(
-  prompt: string,
-  onProgress?: (message: string) => void,
-  maxRetries: number = 3,
-): Promise<string> {
+export interface GenerateBranchNameOptions {
+  prompt: string;
+  agent?: AgentType;
+  model?: string;
+  onProgress?: (message: string) => void;
+  maxRetries?: number;
+}
+
+export async function generateBranchName({
+  prompt,
+  agent = 'claude',
+  model,
+  onProgress,
+  maxRetries = 3,
+}: GenerateBranchNameOptions): Promise<string> {
   // Gather all existing names to avoid conflicts
   const [existingBranches, existingServices, existingContainers] =
     await Promise.all([
@@ -149,8 +161,11 @@ export async function generateBranchName(
 
   let lastAttempt = '';
 
+  // Determine effective model - use fastest model for branch name generation if not specified
+  const effectiveModel = model ?? (agent === 'claude' ? 'haiku' : undefined);
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    let claudePrompt = `Generate a git branch name for the following task:
+    let llmPrompt = `Generate a git branch name for the following task:
 
 <task>
 \`\`\`markdown
@@ -167,23 +182,33 @@ Requirements:
 CRITICAL: Output ONLY the branch name, nothing else`;
 
     if (allExistingNames.size > 0) {
-      claudePrompt += `\n\nIMPORTANT: Do NOT use any of these names (they already exist):
+      llmPrompt += `\n\nIMPORTANT: Do NOT use any of these names (they already exist):
 ${[...allExistingNames].join(', ')}`;
     }
 
     if (lastAttempt) {
-      claudePrompt += `\n\nThe name '${lastAttempt}' is invalid. Suggest a different name.`;
+      llmPrompt += `\n\nThe name '${lastAttempt}' is invalid. Suggest a different name.`;
     }
 
     let result: string;
     try {
-      const proc = await runClaudeInDocker({
-        cmdArgs: ['--model', 'haiku', '-p', claudePrompt],
-      });
-      result = proc.text();
+      if (agent === 'claude') {
+        const cmdArgs = effectiveModel
+          ? ['--model', effectiveModel, '-p', llmPrompt]
+          : ['-p', llmPrompt];
+        const proc = await runClaudeInDocker({ cmdArgs });
+        result = proc.text();
+      } else {
+        // opencode
+        const cmdArgs = effectiveModel
+          ? ['run', '--model', effectiveModel, llmPrompt]
+          : ['run', llmPrompt];
+        const proc = await runOpencodeInDocker({ cmdArgs });
+        result = proc.text();
+      }
     } catch (err) {
-      log.error({ err }, 'Failed to generate branch name with Claude');
-      onProgress?.('Failed to generate branch name with Claude');
+      log.error({ err, agent }, 'Failed to generate branch name');
+      onProgress?.(`Failed to generate branch name with ${agent}`);
       break;
     }
     const branchName = result.trim().toLowerCase();

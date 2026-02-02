@@ -198,7 +198,11 @@ function SessionsApp({
         setView((v) =>
           v.type === 'starting' ? { ...v, step: 'Generating branch name' } : v,
         );
-        const branchName = await generateBranchName(prompt);
+        const branchName = await generateBranchName({
+          prompt,
+          agent,
+          model,
+        });
 
         await ensureGitignore();
 
