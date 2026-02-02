@@ -10,7 +10,7 @@ export interface LoadingProps {
 }
 
 export function Loading({
-  title = 'Loading',
+  title,
   message = 'Please wait',
   detail,
   onCancel,
@@ -23,32 +23,30 @@ export function Loading({
   });
 
   return (
-    <box flexDirection="column" padding={1} flexGrow={1}>
-      <box
-        title={title}
-        border={!!title}
-        borderStyle="single"
-        padding={1}
-        flexDirection="column"
-        flexGrow={1}
-        alignItems="center"
-        justifyContent="center"
-      >
-        <text fg={theme.primary}>
-          {message}
-          <Dots />
+    <box
+      title={title}
+      border={!!title}
+      borderStyle={title ? 'single' : undefined}
+      padding={1}
+      flexDirection="column"
+      flexGrow={1}
+      alignItems="center"
+      justifyContent="center"
+    >
+      <text fg={theme.primary}>
+        {message}
+        <Dots />
+      </text>
+      {detail ? (
+        <text fg={theme.secondary} marginTop={1}>
+          {detail}
         </text>
-        {detail ? (
-          <text fg={theme.secondary} marginTop={1}>
-            {detail}
-          </text>
-        ) : null}
-        {onCancel ? (
-          <text fg={theme.textMuted} marginTop={1}>
-            Press Esc to cancel
-          </text>
-        ) : null}
-      </box>
+      ) : null}
+      {onCancel ? (
+        <text fg={theme.textMuted} marginTop={1}>
+          Press Esc to cancel
+        </text>
+      ) : null}
     </box>
   );
 }

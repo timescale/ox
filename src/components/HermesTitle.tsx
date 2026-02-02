@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useWindowSize } from '../hooks/useWindowSize';
 import { useTheme } from '../stores/themeStore';
 
 const TITLE_MAX_WIDTH = 76;
@@ -70,18 +70,7 @@ const HERMES_TITLE_WIDE_WIDTH = getMaxLineLength(HERMES_TITLE_WIDE);
  */
 export function HermesTitle() {
   const { theme } = useTheme();
-  const [columns, setColumns] = useState(() => process.stdout.columns ?? 80);
-
-  useEffect(() => {
-    const handleResize = () => {
-      setColumns(process.stdout.columns ?? 80);
-    };
-
-    process.stdout.on('resize', handleResize);
-    return () => {
-      process.stdout.off('resize', handleResize);
-    };
-  }, []);
+  const { columns } = useWindowSize();
 
   const containerWidth = Math.min(
     Math.max(columns - TITLE_PADDING, 0),

@@ -1,6 +1,7 @@
 import { useKeyboard } from '@opentui/react';
 import open from 'open';
 import { useCallback, useEffect, useState } from 'react';
+import { useWindowSize } from '../hooks/useWindowSize';
 import {
   getSession,
   type HermesSession,
@@ -95,6 +96,7 @@ export function SessionDetail({
   const [modal, setModal] = useState<ModalType>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
+  const { isTall } = useWindowSize();
 
   const isRunning = session.status === 'running';
   const isStopped = session.status === 'exited' || session.status === 'dead';
@@ -269,10 +271,8 @@ export function SessionDetail({
     }[session.status] || theme.textMuted;
   const statusIcon = getStatusIcon(session);
   const statusText = getStatusText(session);
-  const agentDisplay = session.model
-    ? `${session.agent} (${session.model})`
-    : session.agent;
-  const metadataHeight = session.resumedFrom ? 3 : 2;
+  const model = session.model?.split('/').pop();
+  const agentDisplay = model ? `${session.agent} (${model})` : session.agent;
 
   // Build help text based on available actions
   const actions = [
@@ -296,69 +296,67 @@ export function SessionDetail({
   return (
     <Frame title={session.branch}>
       {/* Metadata section */}
-      <box height={metadataHeight} flexDirection="row" marginBottom={1}>
-        <box flexDirection="column" flexGrow={1}>
-          <box flexDirection="row" gap={3}>
-            <text fg={theme.textMuted}>repo</text>
-            <text>{session.repo}</text>
-            {prInfo && (
-              <box
-                backgroundColor={
-                  prHovered ? theme.backgroundElement : undefined
-                }
-                onMouseDown={handlePrClick}
-                onMouseOver={() => setPrHovered(true)}
-                onMouseOut={() => setPrHovered(false)}
-              >
-                <text
-                  fg={
-                    {
-                      OPEN: theme.success,
-                      MERGED: theme.accent,
-                      CLOSED: theme.textMuted,
-                    }[prInfo.state]
-                  }
-                >
-                  #{prInfo.number} {prInfo.state.toLowerCase()}
-                </text>
-              </box>
-            )}
-          </box>
-          <box flexDirection="row" gap={1}>
-            <text fg={theme.textMuted}>status</text>
-            <text fg={statusColor}>
-              {statusIcon} {statusText}
-            </text>
-          </box>
-          {session.resumedFrom && (
-            <box height={1} flexDirection="row" gap={1}>
-              <text fg={theme.textMuted}>resumed from</text>
-              <text>{session.resumedFrom}</text>
-            </box>
-          )}
+      <box flexDirection="row" gap={1} height={1} overflow="hidden">
+        <box flexDirection="row" gap={3}>
+          <text wrapMode="none" fg={theme.textMuted}>
+            repo
+          </text>
+          <text wrapMode="none">{session.repo}</text>
         </box>
-        <box
-          flexDirection="column"
-          flexGrow={1}
-          alignItems="flex-end"
-          paddingRight={1}
-        >
-          <box flexDirection="row" gap={1}>
-            <text fg={theme.textMuted}>created</text>
-            <text>
-              {session.created
-                ? formatRelativeTime(session.created)
-                : 'unknown'}
+        {prInfo && (
+          <box
+            backgroundColor={prHovered ? theme.backgroundElement : undefined}
+            onMouseDown={handlePrClick}
+            onMouseOver={() => setPrHovered(true)}
+            onMouseOut={() => setPrHovered(false)}
+          >
+            <text
+              fg={
+                {
+                  OPEN: theme.success,
+                  MERGED: theme.accent,
+                  CLOSED: theme.textMuted,
+                }[prInfo.state]
+              }
+              wrapMode="none"
+            >
+              #{prInfo.number} {prInfo.state.toLowerCase()}
             </text>
           </box>
-          <box>
-            <text>{agentDisplay}</text>
-          </box>
+        )}
+        <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-end">
+          <text fg={theme.textMuted}>created</text>
+          <text>
+            {session.created ? formatRelativeTime(session.created) : 'unknown'}
+          </text>
         </box>
       </box>
+      <box flexDirection="row" gap={3} height={1} overflow="hidden">
+        <box flexDirection="row" gap={1}>
+          <text fg={theme.textMuted}>status</text>
+          <text fg={statusColor}>
+            {statusIcon} {statusText}
+          </text>
+        </box>
+        <box flexDirection="row" flexGrow={1} justifyContent="flex-end">
+          <text>{agentDisplay}</text>
+        </box>
+      </box>
+      {session.resumedFrom && (
+        <box height={1} flexDirection="row" gap={1} overflow="hidden">
+          <text fg={theme.textMuted}>resumed from</text>
+          <text>{session.resumedFrom}</text>
+        </box>
+      )}
 
       {/* Prompt section */}
-      <box title="Prompt" border borderStyle="single" height={3}>
+      <box
+        title="Prompt"
+        border
+        borderStyle="single"
+        height={3}
+        marginTop={isTall ? 1 : 0}
+      >
         <text fg={theme.text} height={1} overflow="scroll">
           {session.prompt || '(no prompt)'}
         </text>
@@ -370,6 +368,7 @@ export function SessionDetail({
         border
         borderStyle="single"
         flexGrow={1}
+        flexShrink={1}
         flexDirection="column"
       >
         <LogViewer
