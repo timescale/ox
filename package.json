@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "test": "./bun test",
-    "check": "./bun run typecheck && ./bun run lint --write && ./bun run test --only-failures",
+    "check": "./bun i --silent && ./bun run typecheck && ./bun run lint --write && ./bun run test --only-failures",
     "pilotty": "pilotty"
   },
   "devDependencies": {
