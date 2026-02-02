@@ -11,6 +11,7 @@ import { getPrForBranch, type PrInfo } from '../services/github';
 import { log } from '../services/logger';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
+import { formatShellError, type ShellError } from '../utils';
 import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
@@ -210,6 +211,21 @@ export function SessionDetail({
     }
   }, [prInfo]);
 
+  const handleGitSwitch = useCallback(async () => {
+    const branchName = `hermes/${session.branch}`;
+    setActionInProgress(true);
+    try {
+      await Bun.$`git fetch && git switch ${branchName}`.quiet();
+      showToast(`Switched to branch ${branchName}`, 'success');
+    } catch (err) {
+      const formattedError = formatShellError(err as ShellError);
+      log.error({ err }, `Failed to switch to branch ${branchName}`);
+      showToast(formattedError.message, 'error');
+    } finally {
+      setActionInProgress(false);
+    }
+  }, [session.branch, showToast]);
+
   // Keyboard shortcuts
   useKeyboard((key) => {
     // Ignore if modal is open or action in progress
@@ -237,6 +253,8 @@ export function SessionDetail({
         return;
       }
       handlePrClick();
+    } else if (key.raw === 'g') {
+      handleGitSwitch();
     }
   });
 
@@ -271,6 +289,7 @@ export function SessionDetail({
         ]
       : []),
     ...(prInfo ? [['o', 'pen PR']] : []),
+    ['g', 'it switch'],
     ['b', 'ack'],
   ] as unknown as readonly [string, string][];
 
