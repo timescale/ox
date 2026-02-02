@@ -188,23 +188,6 @@ export function SessionsList({
     }
   }, []);
 
-  // Fetch PR info for sessions that need it
-  const fetchPrInfo = useCallback(
-    async (sessionsToFetch: HermesSession[], forceRefresh = false) => {
-      const now = Date.now();
-      for (const session of sessionsToFetch) {
-        const cached = prCache[session.containerId];
-        const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
-
-        if (forceRefresh || isStale) {
-          const prInfo = await getPrForBranch(session.repo, session.branch);
-          setPrInfo(session.containerId, prInfo);
-        }
-      }
-    },
-    [prCache, setPrInfo],
-  );
-
   // Mouse handlers for session rows
   const handleRowClick = useCallback(
     (session: HermesSession) => {
@@ -264,10 +247,24 @@ export function SessionsList({
 
   // Fetch PR info for all sessions when sessions list changes
   useEffect(() => {
-    if (sessions.length > 0) {
-      fetchPrInfo(sessions);
+    if (!sessions?.length) return;
+    const now = Date.now();
+    const cache = useSessionStore.getState().prCache;
+    for (const session of sessions) {
+      const cached = cache[session.containerId];
+      const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
+
+      if (isStale) {
+        getPrForBranch(session.repo, session.branch)
+          .then((prInfo) => {
+            setPrInfo(session.containerId, prInfo);
+          })
+          .catch((err) => {
+            log.error({ err }, 'Failed to fetch PR info');
+          });
+      }
     }
-  }, [sessions, fetchPrInfo]);
+  }, [sessions, setPrInfo]);
 
   // Keep selected index in bounds (update store if current selection is out of bounds)
   useEffect(() => {
