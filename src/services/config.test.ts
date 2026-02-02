@@ -252,23 +252,23 @@ agent: claude
 });
 
 describe('userConfig', () => {
-  const originalEnv = process.env.XDG_CONFIG_HOME;
+  const originalEnv = process.env.HERMES_USER_CONFIG_DIR;
   let testDir: string;
 
   beforeEach(async () => {
     // Create a temporary test directory for user config
     testDir = join(process.cwd(), '.user-config-test');
     await mkdir(testDir, { recursive: true });
-    // Override XDG_CONFIG_HOME to use test directory
-    process.env.XDG_CONFIG_HOME = testDir;
+    // Override HERMES_USER_CONFIG_DIR to use test directory
+    process.env.HERMES_USER_CONFIG_DIR = testDir;
   });
 
   afterEach(async () => {
     // Restore original env
     if (originalEnv !== undefined) {
-      process.env.XDG_CONFIG_HOME = originalEnv;
+      process.env.HERMES_USER_CONFIG_DIR = originalEnv;
     } else {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.HERMES_USER_CONFIG_DIR;
     }
     // Clean up test directory
     try {
@@ -349,7 +349,7 @@ describe('userConfig', () => {
 describe('readConfig (merged config)', () => {
   const testProjectDir = '.hermes-merged-test';
   const originalCwd = process.cwd();
-  const originalEnv = process.env.XDG_CONFIG_HOME;
+  const originalEnv = process.env.HERMES_USER_CONFIG_DIR;
   let projectTestDir: string;
   let userTestDir: string;
 
@@ -362,15 +362,15 @@ describe('readConfig (merged config)', () => {
     // Set up user config test directory
     userTestDir = join(originalCwd, '.user-config-merged-test');
     await mkdir(userTestDir, { recursive: true });
-    process.env.XDG_CONFIG_HOME = userTestDir;
+    process.env.HERMES_USER_CONFIG_DIR = userTestDir;
   });
 
   afterEach(async () => {
     process.chdir(originalCwd);
     if (originalEnv !== undefined) {
-      process.env.XDG_CONFIG_HOME = originalEnv;
+      process.env.HERMES_USER_CONFIG_DIR = originalEnv;
     } else {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.HERMES_USER_CONFIG_DIR;
     }
     try {
       await rm(projectTestDir, { recursive: true, force: true });
@@ -477,7 +477,7 @@ describe('readConfig (merged config)', () => {
 describe('config stores are independent', () => {
   const testProjectDir = '.hermes-project-test';
   const originalCwd = process.cwd();
-  const originalEnv = process.env.XDG_CONFIG_HOME;
+  const originalEnv = process.env.HERMES_USER_CONFIG_DIR;
   let projectTestDir: string;
   let userTestDir: string;
 
@@ -490,15 +490,15 @@ describe('config stores are independent', () => {
     // Set up user config test directory
     userTestDir = join(originalCwd, '.user-config-independence-test');
     await mkdir(userTestDir, { recursive: true });
-    process.env.XDG_CONFIG_HOME = userTestDir;
+    process.env.HERMES_USER_CONFIG_DIR = userTestDir;
   });
 
   afterEach(async () => {
     process.chdir(originalCwd);
     if (originalEnv !== undefined) {
-      process.env.XDG_CONFIG_HOME = originalEnv;
+      process.env.HERMES_USER_CONFIG_DIR = originalEnv;
     } else {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.HERMES_USER_CONFIG_DIR;
     }
     try {
       await rm(projectTestDir, { recursive: true, force: true });
