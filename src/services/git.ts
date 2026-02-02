@@ -138,16 +138,13 @@ export interface GenerateBranchNameOptions {
   maxRetries?: number;
 }
 
-export async function generateBranchName(
-  options: GenerateBranchNameOptions,
-): Promise<string> {
-  const {
-    prompt,
-    agent = 'claude',
-    model,
-    onProgress: progressCallback,
-    maxRetries = 3,
-  } = options;
+export async function generateBranchName({
+  prompt,
+  agent = 'claude',
+  model,
+  onProgress,
+  maxRetries = 3,
+}: GenerateBranchNameOptions): Promise<string> {
   // Gather all existing names to avoid conflicts
   const [existingBranches, existingServices, existingContainers] =
     await Promise.all([
@@ -211,7 +208,7 @@ ${[...allExistingNames].join(', ')}`;
       }
     } catch (err) {
       log.error({ err, agent }, 'Failed to generate branch name');
-      progressCallback?.(`Failed to generate branch name with ${agent}`);
+      onProgress?.(`Failed to generate branch name with ${agent}`);
       break;
     }
     const branchName = result.trim().toLowerCase();
@@ -221,13 +218,13 @@ ${[...allExistingNames].join(', ')}`;
 
     const [isValid, reason] = isValidBranchName(cleaned);
     if (!isValid) {
-      progressCallback?.(`Attempt ${attempt} is invalid (${reason})`);
+      onProgress?.(`Attempt ${attempt} is invalid (${reason})`);
       lastAttempt = cleaned.slice(0, 100);
       continue;
     }
 
     if (allExistingNames.has(cleaned)) {
-      progressCallback?.(`Attempt ${attempt}: '${cleaned}' already exists`);
+      onProgress?.(`Attempt ${attempt}: '${cleaned}' already exists`);
       lastAttempt = cleaned;
       allExistingNames.add(cleaned); // Add to set to avoid suggesting again
       continue;
@@ -236,9 +233,7 @@ ${[...allExistingNames].join(', ')}`;
     return cleaned;
   }
 
-  progressCallback?.(
-    'Failed to generate a valid branch name, using a random name.',
-  );
+  onProgress?.('Failed to generate a valid branch name, using a random name.');
   // Fallback: use a generic name with random suffix
   let fallbackName: string;
   do {
