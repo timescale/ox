@@ -22,25 +22,6 @@ export function LogViewer({
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
   const streamRef = useRef<LogStream | null>(null);
 
-  // Scroll to bottom and re-enable sticky scroll
-  const scrollToBottom = useCallback(() => {
-    if (scrollboxRef.current) {
-      const contentHeight = lines.length;
-      const viewportHeight = scrollboxRef.current.viewport?.height ?? 10;
-      scrollboxRef.current.scrollTo({
-        x: 0,
-        y: Math.max(0, contentHeight - viewportHeight),
-      });
-    }
-  }, [lines.length]);
-
-  // Scroll up/down by one line
-  const scrollBy = useCallback((delta: number) => {
-    if (scrollboxRef.current) {
-      scrollboxRef.current.scrollBy({ x: 0, y: delta });
-    }
-  }, []);
-
   // Load initial logs and start streaming for running containers
   // Skip for interactive sessions since their logs are TUI state, not text
   useEffect(() => {
@@ -92,21 +73,15 @@ export function LogViewer({
     };
   }, [containerId, isInteractive, onError]);
 
-  // Keyboard navigation
-  // Note: stickyScroll handles auto-scroll behavior automatically.
-  // When user scrolls away from bottom, sticky scroll detaches.
-  // When user scrolls back to bottom (manually or via 'G'), it re-attaches.
   useKeyboard((key) => {
     if (key.name === 'up' || key.raw === 'k') {
-      scrollBy(-1);
+      scrollboxRef.current?.scrollBy({ x: 0, y: -1 });
     } else if (key.name === 'down' || key.raw === 'j') {
-      scrollBy(1);
+      scrollboxRef.current?.scrollBy({ x: 0, y: 1 });
     } else if (key.raw === 'g') {
-      if (scrollboxRef.current) {
-        scrollboxRef.current.scrollTo({ x: 0, y: 0 });
-      }
+      scrollboxRef.current?.scrollTo({ x: 0, y: 0 });
     } else if (key.raw === 'G') {
-      scrollToBottom();
+      scrollboxRef.current?.scrollTo(Infinity);
     }
   });
 
