@@ -1,5 +1,5 @@
 import type { ScrollBoxRenderable } from '@opentui/core';
-import { flushSync, useKeyboard } from '@opentui/react';
+import { useKeyboard } from '@opentui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type LogStream, streamContainerLogs } from '../services/docker';
 import { useTheme } from '../stores/themeStore';
@@ -18,29 +18,9 @@ export function LogViewer({
 }: LogViewerProps) {
   const { theme } = useTheme();
   const [lines, setLines] = useState<string[]>([]);
-  const [following, setFollowing] = useState(true);
   const [loading, setLoading] = useState(true);
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
   const streamRef = useRef<LogStream | null>(null);
-
-  // Scroll to bottom
-  const scrollToBottom = useCallback(() => {
-    if (scrollboxRef.current) {
-      const contentHeight = lines.length;
-      const viewportHeight = scrollboxRef.current.viewport?.height ?? 10;
-      scrollboxRef.current.scrollTo({
-        x: 0,
-        y: Math.max(0, contentHeight - viewportHeight),
-      });
-    }
-  }, [lines.length]);
-
-  // Scroll up/down by one line
-  const scrollBy = useCallback((delta: number) => {
-    if (scrollboxRef.current) {
-      scrollboxRef.current.scrollBy({ x: 0, y: delta });
-    }
-  }, []);
 
   // Load initial logs and start streaming for running containers
   // Skip for interactive sessions since their logs are TUI state, not text
@@ -93,28 +73,15 @@ export function LogViewer({
     };
   }, [containerId, isInteractive, onError]);
 
-  // Auto-scroll when following and new lines arrive
-  useEffect(() => {
-    if (following) {
-      scrollToBottom();
-    }
-  }, [following, scrollToBottom]);
-
-  // Keyboard navigation
   useKeyboard((key) => {
     if (key.name === 'up' || key.raw === 'k') {
-      flushSync(() => setFollowing(false));
-      scrollBy(-1);
+      scrollboxRef.current?.scrollBy({ x: 0, y: -1 });
     } else if (key.name === 'down' || key.raw === 'j') {
-      scrollBy(1);
+      scrollboxRef.current?.scrollBy({ x: 0, y: 1 });
     } else if (key.raw === 'g') {
-      flushSync(() => setFollowing(false));
-      if (scrollboxRef.current) {
-        scrollboxRef.current.scrollTo({ x: 0, y: 0 });
-      }
+      scrollboxRef.current?.scrollTo({ x: 0, y: 0 });
     } else if (key.raw === 'G') {
-      flushSync(() => setFollowing(true));
-      scrollToBottom();
+      scrollboxRef.current?.scrollTo(Infinity);
     }
   });
 
@@ -147,7 +114,13 @@ export function LogViewer({
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      <scrollbox ref={scrollboxRef} flexGrow={1} flexShrink={1}>
+      <scrollbox
+        ref={scrollboxRef}
+        flexGrow={1}
+        flexShrink={1}
+        stickyScroll
+        stickyStart="bottom"
+      >
         {lines.map((line, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: log lines are append-only with no stable ID
           <text key={i} wrapMode="word">
@@ -155,11 +128,6 @@ export function LogViewer({
           </text>
         ))}
       </scrollbox>
-      {following && (
-        <box position="absolute" bottom={0} right={1}>
-          <text fg={theme.success}>[F]</text>
-        </box>
-      )}
     </box>
   );
 }
