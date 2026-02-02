@@ -17,6 +17,7 @@ import type { RepoInfo } from './git';
 import { log } from './logger';
 import { OPENCODE_CONFIG_VOLUME } from './opencode';
 import { runInDocker } from './runInDocker';
+import { ensureToolsDirectory, TOOLS_VOLUME_MOUNT } from './tools';
 
 // Compute MD5 hash of the Dockerfile content for versioned tagging
 const hasher = new Bun.CryptoHasher('md5');
@@ -91,7 +92,7 @@ export const ensureDockerSandbox = async (): Promise<void> => {
  */
 async function tryPullImage(imageTag: string): Promise<boolean> {
   try {
-    await $`docker pull ${imageTag}`.quiet();
+    await $`docker pull -q ${imageTag}`.quiet();
     return true;
   } catch {
     return false;
@@ -110,7 +111,7 @@ async function pullGhcrImageForCache(
   onProgress?: ProgressCallback,
 ): Promise<string | null> {
   // Try version-tagged image first (closer cache match)
-  onProgress?.('Pulling versioned sandbox image');
+  onProgress?.('Pulling sandbox image from registry...');
   if (await tryPullImage(GHCR_IMAGE_TAG_VERSION)) {
     return GHCR_IMAGE_TAG_VERSION;
   }
@@ -120,7 +121,6 @@ async function pullGhcrImageForCache(
   );
 
   // Fall back to latest
-  onProgress?.('Pulling latest sandbox image');
   if (await tryPullImage(GHCR_IMAGE_TAG_LATEST)) {
     return GHCR_IMAGE_TAG_LATEST;
   }
@@ -137,7 +137,7 @@ async function buildDockerImage(cacheFromImage?: string | null): Promise<void> {
     [
       'docker',
       'build',
-      '-q',
+      '--progress=plain',
       ...(cacheFromImage ? ['--cache-from', cacheFromImage] : []),
       '-t',
       HASHED_SANDBOX_DOCKER_IMAGE,
@@ -145,8 +145,8 @@ async function buildDockerImage(cacheFromImage?: string | null): Promise<void> {
     ],
     {
       stdin: Buffer.from(SANDBOX_DOCKERFILE),
-      stdout: 'ignore',
-      stderr: 'ignore',
+      stdout: 'inherit',
+      stderr: 'inherit',
     },
   );
 
@@ -546,11 +546,15 @@ export async function resumeSession(
     envArgs.push('-e', envVar);
   }
 
+  // Ensure tools directory exists for lazy-loaded tools
+  await ensureToolsDirectory();
+
   // Mount config volumes for agent credentials and session continuity
   const volumeArgs = toVolumeArgs([
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
+    TOOLS_VOLUME_MOUNT,
   ]);
 
   const baseName = container.Name.replace(/\//g, '').trim();
@@ -752,10 +756,14 @@ export async function startContainer(
     envArgs.push('-e', `${key}=${value}`);
   }
 
+  // Ensure tools directory exists for lazy-loaded tools
+  await ensureToolsDirectory();
+
   const volumeArgs = toVolumeArgs([
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
+    TOOLS_VOLUME_MOUNT,
   ]);
 
   // Build the agent command based on the selected agent type, model, and mode
@@ -897,10 +905,14 @@ export async function startShellContainer(
     }
   }
 
+  // Ensure tools directory exists for lazy-loaded tools
+  await ensureToolsDirectory();
+
   const volumeArgs = toVolumeArgs([
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
+    TOOLS_VOLUME_MOUNT,
   ]);
 
   // Shell startup script: clone repo to default branch and drop into bash
