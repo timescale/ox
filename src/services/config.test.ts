@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  type ProjectConfig,
+  type HermesConfig,
   projectConfig,
   readConfig,
-  type UserConfig,
   userConfig,
 } from './config';
 
@@ -128,7 +127,7 @@ agent: claude
 
   describe('write', () => {
     test('writes config with all fields', async () => {
-      const config: ProjectConfig = {
+      const config: HermesConfig = {
         tigerServiceId: 'svc-456',
         agent: 'opencode',
         model: 'gpt-4',
@@ -143,7 +142,7 @@ agent: claude
     });
 
     test('writes config and creates .hermes directory', async () => {
-      const config: ProjectConfig = {
+      const config: HermesConfig = {
         agent: 'claude',
       };
 
@@ -154,7 +153,7 @@ agent: claude
     });
 
     test('writes config with null tigerServiceId', async () => {
-      const config: ProjectConfig = {
+      const config: HermesConfig = {
         tigerServiceId: null,
         agent: 'claude',
       };
@@ -225,7 +224,7 @@ agent: claude
 
   describe('roundtrip', () => {
     test('config can be written and read back', async () => {
-      const original: ProjectConfig = {
+      const original: HermesConfig = {
         tigerServiceId: 'svc-roundtrip',
         agent: 'claude',
         model: 'opus',
@@ -238,7 +237,7 @@ agent: claude
     });
 
     test('config with undefined fields can be written and read back', async () => {
-      const original: ProjectConfig = {
+      const original: HermesConfig = {
         agent: 'opencode',
       };
 
@@ -299,7 +298,7 @@ describe('userConfig', () => {
 
   describe('write', () => {
     test('writes user config with theme', async () => {
-      const config: UserConfig = {
+      const config: HermesConfig = {
         themeName: 'nord',
       };
 
@@ -312,7 +311,7 @@ describe('userConfig', () => {
     });
 
     test('creates config directory if it does not exist', async () => {
-      const config: UserConfig = {
+      const config: HermesConfig = {
         themeName: 'gruvbox',
       };
 
@@ -335,7 +334,7 @@ describe('userConfig', () => {
 
   describe('roundtrip', () => {
     test('user config can be written and read back', async () => {
-      const original: UserConfig = {
+      const original: HermesConfig = {
         themeName: 'rosepine',
       };
 

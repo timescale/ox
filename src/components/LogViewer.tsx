@@ -1,6 +1,6 @@
 import type { ScrollBoxRenderable } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type LogStream, streamContainerLogs } from '../services/docker';
 import { useTheme } from '../stores/themeStore';
 import { AnsiText } from './AnsiText';

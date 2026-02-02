@@ -17,7 +17,7 @@ import { Toast, type ToastType } from '../components/Toast';
 import { hasLocalGhAuth } from '../services/auth';
 import {
   type AgentType,
-  type Config,
+  type HermesConfig,
   projectConfig,
   readConfig,
 } from '../services/config';
@@ -128,12 +128,12 @@ function SessionsApp({
   onComplete,
 }: SessionsAppProps) {
   const [view, setView] = useState<SessionsView>({ type: 'init' });
-  const [config, setConfig] = useState<Config | null>(null);
+  const [config, setConfig] = useState<HermesConfig | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
 
   // Use refs to store props/config that we need in async functions
   // This avoids dependency issues with useCallback/useEffect
-  const configRef = useRef<Config | null>(null);
+  const configRef = useRef<HermesConfig | null>(null);
   const propsRef = useRef({
     initialView,
     initialPrompt,

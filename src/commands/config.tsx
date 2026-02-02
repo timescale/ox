@@ -20,7 +20,7 @@ import {
 import { checkClaudeCredentials, runClaudeInDocker } from '../services/claude';
 import {
   type AgentType,
-  type ProjectConfig,
+  type HermesConfig,
   projectConfig,
 } from '../services/config';
 import {
@@ -36,9 +36,9 @@ import { ensureGitignore } from '../utils';
 // ============================================================================
 
 export type ConfigWizardResult =
-  | { type: 'completed'; config: ProjectConfig }
-  | { type: 'needs-agent-auth'; config: ProjectConfig; agent: AgentType }
-  | { type: 'needs-opencode-provider'; config: ProjectConfig }
+  | { type: 'completed'; config: HermesConfig }
+  | { type: 'needs-agent-auth'; config: HermesConfig; agent: AgentType }
+  | { type: 'needs-opencode-provider'; config: HermesConfig }
   | { type: 'cancelled' }
   | { type: 'error'; message: string };
 
@@ -48,7 +48,7 @@ export type ConfigWizardResult =
 
 export interface ConfigWizardProps {
   onComplete: (result: ConfigWizardResult) => void;
-  initialConfig?: ProjectConfig;
+  initialConfig?: HermesConfig;
   skipToStep?: 'model' | 'agent-auth-check' | 'gh-auth-check';
 }
 
@@ -70,7 +70,7 @@ export function ConfigWizard({
     | 'gh-auth-check'
     | 'gh-auth'
   >(skipToStep ?? 'docker');
-  const [config, setConfig] = useState<ProjectConfig | null>(
+  const [config, setConfig] = useState<HermesConfig | null>(
     initialConfig ?? null,
   );
 
@@ -456,7 +456,7 @@ export function ConfigWizard({
 // ============================================================================
 
 export async function configAction(): Promise<void> {
-  let currentConfig: ProjectConfig | undefined;
+  let currentConfig: HermesConfig | undefined;
   let skipToStep: 'model' | 'agent-auth-check' | 'gh-auth-check' | undefined;
 
   // Loop to handle interactive login flows that require exiting and re-entering the wizard
