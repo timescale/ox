@@ -1,28 +1,28 @@
 import { describe, expect, test } from 'bun:test';
-import { HASHED_SANDBOX_DOCKER_IMAGE } from './docker';
+import { resolveSandboxImage } from './docker';
 
 describe('docker service', () => {
-  describe('HASHED_SANDBOX_DOCKER_IMAGE', () => {
-    test('returns a valid image tag', () => {
-      const tag = HASHED_SANDBOX_DOCKER_IMAGE;
-      expect(tag).toBeDefined();
-      expect(typeof tag).toBe('string');
+  describe('resolveSandboxImage', () => {
+    test('returns a valid image config', async () => {
+      const config = await resolveSandboxImage();
+      expect(config).toBeDefined();
+      expect(config.image).toBeDefined();
+      expect(typeof config.image).toBe('string');
+      expect(typeof config.needsBuild).toBe('boolean');
     });
 
-    test('tag starts with hermes-sandbox', () => {
-      const tag = HASHED_SANDBOX_DOCKER_IMAGE;
-      expect(tag.startsWith('hermes-sandbox:')).toBe(true);
+    test('returns GHCR image by default (no config)', async () => {
+      // With no config, should return GHCR sandbox-slim image
+      const config = await resolveSandboxImage();
+      expect(config.needsBuild).toBe(false);
+      expect(config.image).toMatch(/ghcr\.io\/timescale\/hermes\/sandbox-slim/);
     });
 
-    test('tag includes md5 hash', () => {
-      const tag = HASHED_SANDBOX_DOCKER_IMAGE;
-      expect(tag).toMatch(/hermes-sandbox:md5-[a-f0-9]{12}/);
-    });
-
-    test('returns consistent value', () => {
-      const tag1 = HASHED_SANDBOX_DOCKER_IMAGE;
-      const tag2 = HASHED_SANDBOX_DOCKER_IMAGE;
-      expect(tag1).toBe(tag2);
+    test('returns consistent values for same config', async () => {
+      const config1 = await resolveSandboxImage();
+      const config2 = await resolveSandboxImage();
+      expect(config1.image).toBe(config2.image);
+      expect(config1.needsBuild).toBe(config2.needsBuild);
     });
   });
 });

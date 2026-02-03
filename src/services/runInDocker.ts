@@ -1,5 +1,5 @@
 import { $, spawn } from 'bun';
-import { HASHED_SANDBOX_DOCKER_IMAGE, printArgs } from './docker';
+import { printArgs, resolveSandboxImage } from './docker';
 import { log } from './logger';
 
 export interface RunInDockerOptionsBase {
@@ -25,25 +25,35 @@ export const runInDocker = async ({
   dockerArgs = ['--rm'],
   cmdArgs = [],
   cmdName,
-  dockerImage = HASHED_SANDBOX_DOCKER_IMAGE,
+  dockerImage,
   interactive = false,
   shouldThrow = true,
 }: RunInDockerOptions): Promise<RunInDockerResult> => {
+  // Resolve the sandbox image if not explicitly provided
+  const resolvedImage = dockerImage ?? (await resolveSandboxImage()).image;
   log.debug(
     {
       dockerArgs,
       cmdArgs,
       cmdName,
-      dockerImage,
+      dockerImage: resolvedImage,
       interactive,
       shouldThrow,
-      cmd: `docker run${interactive ? ' -it' : ''} ${printArgs(dockerArgs)} ${dockerImage} ${cmdName} ${printArgs(cmdArgs)}`,
+      cmd: `docker run${interactive ? ' -it' : ''} ${printArgs(dockerArgs)} ${resolvedImage} ${cmdName} ${printArgs(cmdArgs)}`,
     },
     'runInDocker',
   );
   if (interactive) {
     const proc = spawn(
-      ['docker', 'run', '-it', ...dockerArgs, dockerImage, cmdName, ...cmdArgs],
+      [
+        'docker',
+        'run',
+        '-it',
+        ...dockerArgs,
+        resolvedImage,
+        cmdName,
+        ...cmdArgs,
+      ],
       {
         stdio: ['inherit', 'inherit', 'inherit'],
       },
@@ -63,7 +73,7 @@ export const runInDocker = async ({
   }
 
   const proc =
-    await $`docker run ${dockerArgs} ${dockerImage} ${cmdName} ${cmdArgs}`
+    await $`docker run ${dockerArgs} ${resolvedImage} ${cmdName} ${cmdArgs}`
       .quiet()
       .throws(shouldThrow);
   return {

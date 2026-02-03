@@ -2,7 +2,6 @@ import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { file } from 'bun';
-import { HASHED_SANDBOX_DOCKER_IMAGE } from './docker';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
@@ -14,7 +13,7 @@ const HERMES_DIR = join(process.cwd(), '.hermes');
 const CLAUDE_CONFIG_DIR = join(HERMES_DIR, '.claude');
 const CLAUDE_HOST_CONFIG_DIR = join(homedir(), '.claude');
 const CLAUDE_AUTH_FILE_NAME = '.credentials.json';
-export const CLAUDE_CONFIG_VOLUME = `${join(CLAUDE_CONFIG_DIR, CLAUDE_AUTH_FILE_NAME)}:/home/agent/.claude/${CLAUDE_AUTH_FILE_NAME}`;
+export const CLAUDE_CONFIG_VOLUME = `${join(CLAUDE_CONFIG_DIR, CLAUDE_AUTH_FILE_NAME)}:/home/hermes/.claude/${CLAUDE_AUTH_FILE_NAME}`;
 
 const checkConfig = async () => {
   await mkdir(CLAUDE_CONFIG_DIR, { recursive: true });
@@ -36,7 +35,7 @@ const checkConfig = async () => {
 export const runClaudeInDocker = async ({
   dockerArgs = ['--rm'],
   cmdArgs = [],
-  dockerImage = HASHED_SANDBOX_DOCKER_IMAGE,
+  dockerImage,
   interactive = false,
   shouldThrow = true,
 }: RunInDockerOptionsBase): Promise<RunInDockerResult> => {

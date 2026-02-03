@@ -30,6 +30,24 @@ export interface HermesConfig {
 
   // UI theme
   themeName?: string;
+
+  /**
+   * Override the Docker image used for sandbox containers.
+   * When set, this exact image:tag is pulled and used.
+   * Fails if the image is not available (no fallback).
+   */
+  sandboxBaseImage?: string;
+
+  /**
+   * Build sandbox image from Dockerfile instead of pulling.
+   * - false/undefined (default): pull from GHCR, don't build
+   * - true | 'slim': build using embedded slim.Dockerfile
+   * - 'full': build using embedded full.Dockerfile
+   * - other string: path to custom Dockerfile to build from
+   *
+   * When set, takes precedence over sandboxBaseImage.
+   */
+  buildSandboxFromDockerfile?: boolean | 'slim' | 'full' | string;
 }
 
 // ============================================================================

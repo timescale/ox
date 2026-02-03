@@ -3,7 +3,6 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { file } from 'bun';
 import { readConfig } from './config';
-import { HASHED_SANDBOX_DOCKER_IMAGE } from './docker';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
@@ -15,7 +14,7 @@ const HERMES_DIR = join(process.cwd(), '.hermes');
 const OPENCODE_CONFIG_DIR = join(HERMES_DIR, '.local', 'share', 'opencode');
 const OPENCODE_HOST_CONFIG_DIR = join(homedir(), '.local', 'share', 'opencode');
 const OPENCODE_AUTH_FILE_NAME = 'auth.json';
-export const OPENCODE_CONFIG_VOLUME = `${join(OPENCODE_CONFIG_DIR, OPENCODE_AUTH_FILE_NAME)}:/home/agent/.local/share/opencode/${OPENCODE_AUTH_FILE_NAME}`;
+export const OPENCODE_CONFIG_VOLUME = `${join(OPENCODE_CONFIG_DIR, OPENCODE_AUTH_FILE_NAME)}:/home/hermes/.local/share/opencode/${OPENCODE_AUTH_FILE_NAME}`;
 
 const checkConfig = async () => {
   await mkdir(OPENCODE_CONFIG_DIR, { recursive: true });
@@ -62,7 +61,7 @@ const checkConfig = async () => {
 export const runOpencodeInDocker = async ({
   dockerArgs = ['--rm'],
   cmdArgs = [],
-  dockerImage = HASHED_SANDBOX_DOCKER_IMAGE,
+  dockerImage,
   interactive = false,
   shouldThrow = true,
 }: RunInDockerOptionsBase): Promise<RunInDockerResult> => {

@@ -5,6 +5,7 @@ FROM ubuntu:24.04
 
 LABEL maintainer="Tiger Data"
 LABEL description="Comprehensive sandbox environment for AI agents"
+LABEL org.opencontainers.image.source=https://github.com/timescale/hermes
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -160,7 +161,7 @@ RUN curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | tee /etc/apt/tru
 # ============================================================================
 
 # Create non-root user (required for claude --dangerously-skip-permissions)
-ARG USER_NAME=agent
+ARG USER_NAME=hermes
 ARG USER_UID=10000
 ARG USER_GID=10000
 

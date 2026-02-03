@@ -6,22 +6,22 @@ import { dockerIsRunning } from 'build-strap';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
 import packageJson from '../../package.json' with { type: 'json' };
-// Import the Dockerfile as text - Bun's bundler embeds this in the binary
-import SANDBOX_DOCKERFILE from '../../sandbox/Dockerfile' with { type: 'text' };
+// Import both Dockerfiles as text - Bun's bundler embeds these in the binary
+import FULL_DOCKERFILE from '../../sandbox/full.Dockerfile' with {
+  type: 'text',
+};
+import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
+  type: 'text',
+};
 import { runDockerSetupScreen } from '../components/DockerSetup';
 import { formatShellError, type ShellError } from '../utils';
 import { ghConfigVolume } from './auth';
 import { CLAUDE_CONFIG_VOLUME } from './claude';
-import type { AgentType } from './config';
+import { type AgentType, readConfig } from './config';
 import type { RepoInfo } from './git';
 import { log } from './logger';
 import { OPENCODE_CONFIG_VOLUME } from './opencode';
 import { runInDocker } from './runInDocker';
-
-// Compute MD5 hash of the Dockerfile content for versioned tagging
-const hasher = new Bun.CryptoHasher('md5');
-hasher.update(SANDBOX_DOCKERFILE);
-const dockerfileHash = hasher.digest('hex').slice(0, 12);
 
 /**
  * Escape a string for safe use in shell commands using base64 encoding.
@@ -43,32 +43,193 @@ exec ${cmd} "$HERMES_PROMPT"
 `.trim()
     : `exec ${cmd}`;
 
+// ============================================================================
+// Sandbox Image Configuration
+// ============================================================================
+
 const DOCKER_IMAGE_NAME = 'hermes-sandbox';
-const DOCKER_IMAGE_TAG = `md5-${dockerfileHash}`;
-export const HASHED_SANDBOX_DOCKER_IMAGE = `${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}`;
 
-// GHCR (GitHub Container Registry) configuration for public image cache
-const GHCR_IMAGE_NAME = 'ghcr.io/timescale/hermes/sandbox';
-const GHCR_IMAGE_TAG_LATEST = `${GHCR_IMAGE_NAME}:latest`;
-const GHCR_IMAGE_TAG_VERSION = `${GHCR_IMAGE_NAME}:${packageJson.version}`;
+// GHCR (GitHub Container Registry) base path
+const GHCR_BASE = 'ghcr.io/timescale/hermes';
+
+type DockerfileVariant = 'slim' | 'full';
+
+function computeDockerfileHash(content: string): string {
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(content);
+  return hasher.digest('hex').slice(0, 12);
+}
+
+function getGhcrImageTags(variant: DockerfileVariant): {
+  version: string;
+  latest: string;
+} {
+  const imageName = `${GHCR_BASE}/sandbox-${variant}`;
+  return {
+    version: `${imageName}:${packageJson.version}`,
+    latest: `${imageName}:latest`,
+  };
+}
+
+/**
+ * Get the Dockerfile content based on config.
+ * Returns null if building is not configured.
+ */
+async function getDockerfileContent(
+  which?: string | boolean | null,
+): Promise<{ content: string; variant: DockerfileVariant | 'custom' } | null> {
+  if (!which) return null;
+
+  if (which === true || which === 'slim') {
+    return { content: SLIM_DOCKERFILE, variant: 'slim' };
+  }
+
+  if (which === 'full') {
+    return { content: FULL_DOCKERFILE, variant: 'full' };
+  }
+
+  // Custom path - read file
+  const file = Bun.file(which);
+  if (!(await file.exists())) {
+    throw new Error(`Dockerfile not found: ${which}`);
+  }
+  return { content: await file.text(), variant: 'custom' };
+}
+
+async function getDockerfileInfo(
+  which?: string | boolean | null,
+): Promise<null | {
+  image: string;
+  tag: string;
+  content: string;
+  variant: DockerfileVariant | 'custom';
+}> {
+  const result = await getDockerfileContent(which);
+  if (!result) return null;
+  const { content, variant } = result;
+  const hash = computeDockerfileHash(content);
+  const tag = `md5-${hash}`;
+  return {
+    image: `${DOCKER_IMAGE_NAME}:md5-${hash}`,
+    tag,
+    content,
+    variant,
+  };
+}
+
+/**
+ * Configuration for resolved sandbox image.
+ */
+export interface SandboxImageConfig {
+  /** The image:tag to use for running containers */
+  image: string;
+  /** Whether this image needs to be built (vs just pulled) */
+  needsBuild: boolean;
+  /** Dockerfile content if building */
+  dockerfileContent?: string;
+  /** Which GHCR variant to use for cache ('slim' | 'full') */
+  cacheVariant: DockerfileVariant;
+}
+
+/**
+ * Resolve which Docker image to use based on configuration.
+ *
+ * Priority:
+ * 1. buildSandboxFromDockerfile - build from Dockerfile (highest)
+ * 2. sandboxBaseImage - use explicit image
+ * 3. Default - pull GHCR sandbox-slim image
+ */
+export async function resolveSandboxImage(): Promise<SandboxImageConfig> {
+  const config = await readConfig();
+
+  // Highest precedence: buildSandboxFromDockerfile
+  if (config.buildSandboxFromDockerfile) {
+    const dockerfile = await getDockerfileInfo(
+      config.buildSandboxFromDockerfile,
+    );
+    if (!dockerfile) {
+      throw new Error('Failed to get Dockerfile content');
+    }
+
+    const variant: DockerfileVariant =
+      dockerfile.variant === 'full' ? 'full' : 'slim';
+
+    return {
+      image: dockerfile.image,
+      needsBuild: true,
+      dockerfileContent: dockerfile.content,
+      cacheVariant: variant,
+    };
+  }
+
+  // Second precedence: sandboxBaseImage (explicit override)
+  if (config.sandboxBaseImage) {
+    return {
+      image: config.sandboxBaseImage,
+      needsBuild: false,
+      cacheVariant: 'slim', // Not used when needsBuild is false
+    };
+  }
+
+  // Default: use GHCR sandbox-slim image
+  // Check what's actually available locally, with fallback order:
+  // 1. Version-tagged image (preferred)
+  // 2. Latest image (fallback)
+  // 3. Return version-tagged if neither exists (will need to be pulled)
+  const ghcrTags = getGhcrImageTags('slim');
+
+  if (await imageExists(ghcrTags.version)) {
+    return {
+      image: ghcrTags.version,
+      needsBuild: false,
+      cacheVariant: 'slim',
+    };
+  }
+
+  if (await imageExists(ghcrTags.latest)) {
+    return {
+      image: ghcrTags.latest,
+      needsBuild: false,
+      cacheVariant: 'slim',
+    };
+  }
+
+  // Neither exists locally - return version-tagged (caller will need to pull)
+  return {
+    image: ghcrTags.version,
+    needsBuild: false,
+    cacheVariant: 'slim',
+  };
+}
 
 // ============================================================================
-// Docker Image Management
-// ============================================================================
-
-export async function dockerImageExists(): Promise<boolean> {
+/**
+ * Check if a specific Docker image exists locally.
+ */
+async function imageExists(imageName: string): Promise<boolean> {
   try {
-    const proc =
-      await $`docker image ls --format json ${HASHED_SANDBOX_DOCKER_IMAGE}`.quiet();
+    const proc = await $`docker image ls --format json ${imageName}`.quiet();
     const output = proc.json();
-    log.debug({ output }, 'dockerImageExists');
-    return output.Tag === DOCKER_IMAGE_TAG;
+    const exists =
+      proc.exitCode === 0 && imageName === `${output.Repository}:${output.Tag}`;
+    log.debug({ output, imageName, exists }, 'imageExists');
+    return exists;
   } catch {
     return false;
   }
 }
 
+/**
+ * Check if the resolved sandbox Docker image exists locally.
+ */
+export async function dockerImageExists(): Promise<boolean> {
+  const imageConfig = await resolveSandboxImage();
+  return imageExists(imageConfig.image);
+}
+
 export const ensureDockerSandbox = async (): Promise<void> => {
+  // Check if Docker is running and image exists
+  // If either is false, run the setup screen which handles both
   if (!(await dockerIsRunning()) || !(await dockerImageExists())) {
     const dockerResult = await runDockerSetupScreen();
     log.debug({ dockerResult }, 'ensureDockerSandbox');
@@ -101,38 +262,42 @@ async function tryPullImage(imageTag: string): Promise<boolean> {
 type ProgressCallback = (message: string) => void;
 
 /**
- * Pull GHCR image for use as build cache
- * The image is public, so no authentication is needed.
+ * Pull GHCR image for use as build cache.
  * Tries version-tagged image first, falls back to latest.
  * Returns the image tag that was successfully pulled, or null if all pulls failed.
  */
 async function pullGhcrImageForCache(
+  ghcrTags: { version: string; latest: string },
   onProgress?: ProgressCallback,
 ): Promise<string | null> {
   // Try version-tagged image first (closer cache match)
   onProgress?.('Pulling versioned sandbox image');
-  if (await tryPullImage(GHCR_IMAGE_TAG_VERSION)) {
-    return GHCR_IMAGE_TAG_VERSION;
+  if (await tryPullImage(ghcrTags.version)) {
+    return ghcrTags.version;
   }
-  log.debug(
-    { image: GHCR_IMAGE_TAG_VERSION },
+  log.warn(
+    { image: ghcrTags.version },
     'Versioned GHCR image not found, falling back to latest',
   );
 
   // Fall back to latest
   onProgress?.('Pulling latest sandbox image');
-  if (await tryPullImage(GHCR_IMAGE_TAG_LATEST)) {
-    return GHCR_IMAGE_TAG_LATEST;
+  if (await tryPullImage(ghcrTags.latest)) {
+    return ghcrTags.latest;
   }
-  log.error({ image: GHCR_IMAGE_TAG_LATEST }, 'Latest GHCR image not found');
+  log.error({ image: ghcrTags.latest }, 'Latest GHCR image not found');
 
   return null;
 }
 
 /**
- * Build docker image, optionally using a pulled image as cache
+ * Build docker image from Dockerfile content, optionally using a pulled image as cache.
  */
-async function buildDockerImage(cacheFromImage?: string | null): Promise<void> {
+async function buildDockerImage(
+  imageName: string,
+  dockerfileContent: string,
+  cacheFromImage?: string | null,
+): Promise<void> {
   const proc = Bun.spawn(
     [
       'docker',
@@ -140,11 +305,11 @@ async function buildDockerImage(cacheFromImage?: string | null): Promise<void> {
       '-q',
       ...(cacheFromImage ? ['--cache-from', cacheFromImage] : []),
       '-t',
-      HASHED_SANDBOX_DOCKER_IMAGE,
+      imageName,
       '-',
     ],
     {
-      stdin: Buffer.from(SANDBOX_DOCKERFILE),
+      stdin: Buffer.from(dockerfileContent),
       stdout: 'ignore',
       stderr: 'ignore',
     },
@@ -160,6 +325,7 @@ async function buildDockerImage(cacheFromImage?: string | null): Promise<void> {
 export type ImageBuildProgress =
   | { type: 'checking' }
   | { type: 'exists' }
+  | { type: 'pulling'; message: string }
   | { type: 'pulling-cache'; message: string }
   | { type: 'building'; message: string }
   | { type: 'done' };
@@ -168,34 +334,125 @@ export interface EnsureDockerImageOptions {
   onProgress?: (progress: ImageBuildProgress) => void;
 }
 
+/**
+ * Ensure the sandbox Docker image is available.
+ * Handles three flows based on configuration:
+ * 1. buildSandboxFromDockerfile - build from Dockerfile (uses GHCR for cache)
+ * 2. sandboxBaseImage - pull explicit image (fails if unavailable)
+ * 3. Default - pull GHCR sandbox-slim image (version first, then latest)
+ *
+ * @returns The resolved image name that was ensured
+ */
 export async function ensureDockerImage(
   options: EnsureDockerImageOptions = {},
-): Promise<void> {
+): Promise<string> {
   const { onProgress } = options;
+  const imageConfig = await resolveSandboxImage();
+  const config = await readConfig();
 
   onProgress?.({ type: 'checking' });
 
-  if (await dockerImageExists()) {
-    onProgress?.({ type: 'exists' });
-    return;
+  // Flow 1: Build from Dockerfile
+  if (imageConfig.needsBuild) {
+    // Check if image already exists locally
+    if (await imageExists(imageConfig.image)) {
+      onProgress?.({ type: 'exists' });
+      return imageConfig.image;
+    }
+
+    // Try to pull GHCR image for cache
+    onProgress?.({
+      type: 'pulling-cache',
+      message: 'Pulling sandbox image for cache',
+    });
+    const ghcrTags = getGhcrImageTags(imageConfig.cacheVariant);
+    const cacheImage = await pullGhcrImageForCache(ghcrTags, (message) =>
+      onProgress?.({ type: 'pulling-cache', message }),
+    );
+
+    // Build from Dockerfile
+    onProgress?.({
+      type: 'building',
+      message: 'Building sandbox docker image',
+    });
+    if (!imageConfig.dockerfileContent) {
+      throw new Error('Dockerfile content is required for building');
+    }
+    await buildDockerImage(
+      imageConfig.image,
+      imageConfig.dockerfileContent,
+      cacheImage,
+    );
+
+    onProgress?.({ type: 'done' });
+    return imageConfig.image;
   }
 
-  // Try to pull the public GHCR image for caching
-  onProgress?.({
-    type: 'pulling-cache',
-    message: 'Pulling sandbox image from GHCR',
-  });
-  const cacheImage = await pullGhcrImageForCache((message) =>
-    onProgress?.({ type: 'pulling-cache', message }),
-  );
+  // Flow 2: sandboxBaseImage configured - must pull, fail if unavailable
+  if (config.sandboxBaseImage) {
+    // Check if already exists locally
+    if (await imageExists(imageConfig.image)) {
+      onProgress?.({ type: 'exists' });
+      return imageConfig.image;
+    }
 
-  onProgress?.({
-    type: 'building',
-    message: 'Building sandbox docker image',
-  });
-  await buildDockerImage(cacheImage);
+    onProgress?.({
+      type: 'pulling',
+      message: `Pulling ${imageConfig.image}`,
+    });
+    const pulled = await tryPullImage(imageConfig.image);
+    if (!pulled) {
+      throw new Error(
+        `Failed to pull configured sandbox image: ${imageConfig.image}`,
+      );
+    }
+    onProgress?.({ type: 'done' });
+    return imageConfig.image;
+  }
 
+  // Flow 3: Default - pull GHCR image (version first, then latest)
+  const ghcrTags = getGhcrImageTags('slim');
+
+  // Check if versioned image exists locally
+  if (await imageExists(ghcrTags.version)) {
+    onProgress?.({ type: 'exists' });
+    return ghcrTags.version;
+  }
+
+  // Pull versioned image
+  onProgress?.({
+    type: 'pulling',
+    message: 'Pulling versioned sandbox image',
+  });
+  if (await tryPullImage(ghcrTags.version)) {
+    onProgress?.({ type: 'done' });
+    return ghcrTags.version;
+  }
+
+  // Check if latest image exists locally
+  if (await imageExists(ghcrTags.latest)) {
+    onProgress?.({ type: 'exists' });
+    return ghcrTags.latest;
+  }
+
+  // Fall back to latest
+  onProgress?.({
+    type: 'pulling',
+    message: 'Pulling latest sandbox image',
+  });
+  if (await tryPullImage(ghcrTags.latest)) {
+    onProgress?.({ type: 'done' });
+    return ghcrTags.latest;
+  }
+
+  // Final fallback, built the slim image locally
+  const info = await getDockerfileInfo('slim');
+  if (!info) {
+    throw new Error('Failed to get Dockerfile content embedded slim image.');
+  }
+  await buildDockerImage(info.image, info.content);
   onProgress?.({ type: 'done' });
+  return info.image;
 }
 
 // ============================================================================
@@ -755,6 +1012,10 @@ export async function startContainer(
     envVars,
   } = options;
 
+  // Get the resolved sandbox image
+  const imageConfig = await resolveSandboxImage();
+  const dockerImage = imageConfig.image;
+
   const hermesEnvPath = '.hermes/.env';
   const hermesEnvFile = Bun.file(hermesEnvPath);
 
@@ -849,7 +1110,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
         --env-file ${hermesEnvPath} \
         ${printArgs(envArgs)} \
         ${printArgs(volumeArgs)} \
-        ${HASHED_SANDBOX_DOCKER_IMAGE} \
+        ${dockerImage} \
         bash -c ${$.escape(startupScript)}`,
         },
         'Starting docker container in detached mode',
@@ -861,7 +1122,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
         --env-file ${hermesEnvPath} \
         ${envArgs} \
         ${volumeArgs} \
-        ${HASHED_SANDBOX_DOCKER_IMAGE} \
+        ${dockerImage} \
         bash -c ${startupScript}`.quiet();
       return result.stdout.toString().trim();
     }
@@ -879,7 +1140,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
       hermesEnvPath,
       ...envArgs,
       ...volumeArgs,
-      HASHED_SANDBOX_DOCKER_IMAGE,
+      dockerImage,
       'bash',
       '-c',
       startupScript,

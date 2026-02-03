@@ -6,11 +6,11 @@ import { chmod, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { YAML } from 'bun';
 import { projectConfigDir } from './config';
-import { HASHED_SANDBOX_DOCKER_IMAGE } from './docker';
+import { resolveSandboxImage } from './docker';
 
 const ghConfigDir = () => join(projectConfigDir(), 'gh');
 const GH_HOSTS_FILENAME = 'hosts.yml';
-export const ghConfigVolume = () => `${ghConfigDir()}:/home/agent/.config/gh`;
+export const ghConfigVolume = () => `${ghConfigDir()}:/home/hermes/.config/gh`;
 
 // ============================================================================
 // Types
@@ -202,6 +202,9 @@ export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
   // Ensure the gh config directory exists
   await mkdir(ghConfigDir(), { recursive: true });
 
+  // Resolve the sandbox image
+  const imageConfig = await resolveSandboxImage();
+
   const proc = Bun.spawn(
     [
       'docker',
@@ -210,7 +213,7 @@ export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
       '--rm',
       '-v',
       ghConfigVolume(),
-      HASHED_SANDBOX_DOCKER_IMAGE,
+      imageConfig.image,
       'gh',
       'auth',
       'login',

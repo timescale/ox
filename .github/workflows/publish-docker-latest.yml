@@ -6,7 +6,8 @@ on:
     branches:
       - main
     paths:
-      - "sandbox/Dockerfile"
+      - "sandbox/full.Dockerfile"
+      - "sandbox/slim.Dockerfile"
 
 permissions:
   packages: write
@@ -16,6 +17,13 @@ jobs:
   publish-docker:
     name: Publish Latest Docker Image
     runs-on: non-prod
+    strategy:
+      matrix:
+        include:
+          - dockerfile: full.Dockerfile
+            image: sandbox-full
+          - dockerfile: slim.Dockerfile
+            image: sandbox-slim
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -33,8 +41,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./sandbox
+          file: ./sandbox/${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/timescale/hermes/sandbox:latest
+          tags: ghcr.io/timescale/hermes/${{ matrix.image }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

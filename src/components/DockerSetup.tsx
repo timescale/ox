@@ -213,12 +213,8 @@ export function DockerSetup({
             }, 500);
           }
           break;
+        case 'pulling':
         case 'pulling-cache':
-          setState({
-            type: 'building-image',
-            message: progress.message,
-          });
-          break;
         case 'building':
           setState({
             type: 'building-image',

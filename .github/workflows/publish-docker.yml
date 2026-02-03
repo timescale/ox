@@ -13,6 +13,13 @@ jobs:
   publish-docker:
     name: Publish Docker Images
     runs-on: non-prod
+    strategy:
+      matrix:
+        include:
+          - dockerfile: full.Dockerfile
+            image: sandbox-full
+          - dockerfile: slim.Dockerfile
+            image: sandbox-slim
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -21,7 +28,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/timescale/hermes/sandbox
+            ghcr.io/timescale/hermes/${{ matrix.image }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -40,6 +47,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./sandbox
+          file: ./sandbox/${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
