@@ -15,7 +15,6 @@ import { logsCommand } from './commands/logs';
 import { opencodeCommand } from './commands/opencode';
 import { resumeCommand } from './commands/resume';
 import { runSessionsTui, sessionsCommand } from './commands/sessions';
-import { setupCommand } from './commands/setup';
 import { log } from './services/logger';
 
 program
@@ -67,6 +66,5 @@ program.addCommand(logsCommand);
 program.addCommand(opencodeCommand);
 program.addCommand(resumeCommand);
 program.addCommand(sessionsCommand);
-program.addCommand(setupCommand);
 
 program.parse();

@@ -1,6 +1,16 @@
 // ============================================================================
 // Docker Container Service
 // ============================================================================
+//
+// MINIMAL IMAGE APPROACH:
+// The sandbox uses a minimal base image containing only essential tools:
+// - Ubuntu 24.04, build tools, Git, Node.js, Bun, Python, psql, GitHub CLI
+// - Claude Code, OpenCode, Tiger CLI
+//
+// Tools like Go, Docker, ngrok are NOT pre-installed. If an agent needs them,
+// it should install them on-demand using apt-get or download scripts.
+// This keeps the base image small (~1.5GB smaller) for faster pulls.
+// ============================================================================
 
 import { dockerIsRunning } from 'build-strap';
 import { $ } from 'bun';
@@ -8,6 +18,10 @@ import { nanoid } from 'nanoid';
 import packageJson from '../../package.json' with { type: 'json' };
 // Import the Dockerfile as text - Bun's bundler embeds this in the binary
 import SANDBOX_DOCKERFILE from '../../sandbox/Dockerfile' with { type: 'text' };
+
+// Export for testing
+export { SANDBOX_DOCKERFILE };
+
 import { runDockerSetupScreen } from '../components/DockerSetup';
 import { formatShellError, type ShellError } from '../utils';
 import { ghConfigVolume } from './auth';
@@ -17,7 +31,6 @@ import type { RepoInfo } from './git';
 import { log } from './logger';
 import { OPENCODE_CONFIG_VOLUME } from './opencode';
 import { runInDocker } from './runInDocker';
-import { ensureToolsDirectory, TOOLS_VOLUME_MOUNT } from './tools';
 
 // Compute MD5 hash of the Dockerfile content for versioned tagging
 const hasher = new Bun.CryptoHasher('md5');
@@ -145,8 +158,8 @@ async function buildDockerImage(cacheFromImage?: string | null): Promise<void> {
     ],
     {
       stdin: Buffer.from(SANDBOX_DOCKERFILE),
-      stdout: 'inherit',
-      stderr: 'inherit',
+      stdout: 'ignore',
+      stderr: 'ignore',
     },
   );
 
@@ -546,15 +559,11 @@ export async function resumeSession(
     envArgs.push('-e', envVar);
   }
 
-  // Ensure tools directory exists for lazy-loaded tools
-  await ensureToolsDirectory();
-
   // Mount config volumes for agent credentials and session continuity
   const volumeArgs = toVolumeArgs([
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
-    TOOLS_VOLUME_MOUNT,
   ]);
 
   const baseName = container.Name.replace(/\//g, '').trim();
@@ -756,14 +765,10 @@ export async function startContainer(
     envArgs.push('-e', `${key}=${value}`);
   }
 
-  // Ensure tools directory exists for lazy-loaded tools
-  await ensureToolsDirectory();
-
   const volumeArgs = toVolumeArgs([
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
-    TOOLS_VOLUME_MOUNT,
   ]);
 
   // Build the agent command based on the selected agent type, model, and mode
@@ -905,14 +910,10 @@ export async function startShellContainer(
     }
   }
 
-  // Ensure tools directory exists for lazy-loaded tools
-  await ensureToolsDirectory();
-
   const volumeArgs = toVolumeArgs([
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
-    TOOLS_VOLUME_MOUNT,
   ]);
 
   // Shell startup script: clone repo to default branch and drop into bash
