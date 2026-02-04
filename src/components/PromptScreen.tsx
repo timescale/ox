@@ -36,11 +36,15 @@ export interface PromptScreenProps {
   defaultAgent: AgentType;
   defaultModel?: string | null;
   resumeSession?: HermesSession; // If set, we're resuming this session
+  /** Initial mount directory from CLI flag (enables mount mode if set) */
+  initialMountDir?: string | null;
   onSubmit: (result: {
     prompt: string;
     agent: AgentType;
     model: string;
     mode: SubmitMode;
+    /** If set, mount this directory instead of git clone */
+    mountDir?: string;
   }) => void;
   onShell: () => void; // Launch bash shell
   onCancel: () => void;
@@ -85,6 +89,7 @@ export function PromptScreen({
   defaultAgent,
   defaultModel = null,
   resumeSession,
+  initialMountDir,
   onSubmit,
   onShell,
   onViewSessions,
@@ -104,6 +109,11 @@ export function PromptScreen({
   const [slashQuery, setSlashQuery] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
   const [submitMode, setSubmitMode] = useState<SubmitMode>('async');
+  // Mount mode state - enabled when initialMountDir is set or toggled via Ctrl+M
+  const [mountMode, setMountMode] = useState<boolean>(!!initialMountDir);
+  const [mountDir, setMountDir] = useState<string | null>(
+    initialMountDir ?? null,
+  );
   const modelsMap = useAgentModels();
   const currentModels = modelsMap[agent];
   const agentInfo: AgentInfo = AGENT_INFO_MAP[agent];
@@ -184,8 +194,28 @@ export function PromptScreen({
           onViewSessions?.();
         },
       },
+      {
+        name: 'mount',
+        description: mountMode
+          ? 'Disable mount mode (use git clone)'
+          : 'Enable mount mode (use local directory)',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          setMountMode((m) => {
+            if (!m) {
+              // Enabling mount mode - set default mount dir to cwd
+              setMountDir(process.cwd());
+            }
+            return !m;
+          });
+        },
+      },
     ],
-    [resumeSession, currentModels, onViewSessions, switchAgent],
+    [resumeSession, currentModels, onViewSessions, switchAgent, mountMode],
   );
 
   // Handle model selection from modal
@@ -222,8 +252,17 @@ export function PromptScreen({
       setToast({ message: 'Please select a model', type: 'error' });
       return;
     }
-    log.debug({ agent, model: modelId, mode: submitMode }, 'Submitting prompt');
-    onSubmit({ prompt: promptText, agent, model: modelId, mode: submitMode });
+    log.debug(
+      { agent, model: modelId, mode: submitMode, mountMode, mountDir },
+      'Submitting prompt',
+    );
+    onSubmit({
+      prompt: promptText,
+      agent,
+      model: modelId,
+      mode: submitMode,
+      mountDir: mountMode ? (mountDir ?? process.cwd()) : undefined,
+    });
   };
 
   // Use a ref to avoid stale closure issues with @opentui/react's textarea.
@@ -330,6 +369,17 @@ export function PromptScreen({
       setShowThemePicker(true);
       return;
     }
+
+    if (key.name === 'd' && key.ctrl) {
+      setMountMode((m) => {
+        if (!m) {
+          // Enabling mount mode - set default mount dir to cwd
+          setMountDir(process.cwd());
+        }
+        return !m;
+      });
+      return;
+    }
   });
 
   // Build model selector options
@@ -416,6 +466,7 @@ export function PromptScreen({
                 {submitMode === 'interactive' ? (
                   <text fg={theme.success}>[interactive]</text>
                 ) : null}
+                {mountMode ? <text fg={theme.warning}>[mount]</text> : null}
                 <text fg={model?.name ? theme.text : theme.textMuted}>
                   {model?.name || modelId || 'Loading...'}
                 </text>
@@ -450,6 +501,7 @@ export function PromptScreen({
               ...(resumeSession ? [] : [['tab', 'agents'] as [string, string]]),
               ['ctrl+l', 'models'],
               ['ctrl+a', 'mode'],
+              ['ctrl+d', 'mount'],
               ['ctrl+b', 'shell'],
               ['ctrl+s', 'sessions'],
             ]}

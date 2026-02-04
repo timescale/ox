@@ -2,6 +2,7 @@
 // Docker Container Service
 // ============================================================================
 
+import { resolve } from 'node:path';
 import { dockerIsRunning } from 'build-strap';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
@@ -468,6 +469,8 @@ export interface StartContainerOptions {
   detach: boolean;
   interactive: boolean;
   envVars?: Record<string, string>;
+  /** If set, mount this local directory into the container instead of git clone */
+  mountDir?: string;
 }
 
 // ============================================================================
@@ -486,6 +489,8 @@ export interface HermesSession {
   created: string;
   resumedFrom?: string;
   interactive: boolean;
+  /** If set, the local directory that was mounted into the container */
+  mountDir?: string;
   status: 'running' | 'exited' | 'paused' | 'restarting' | 'dead' | 'created';
   exitCode?: number;
   startedAt?: string;
@@ -566,6 +571,7 @@ export async function listHermesSessions(): Promise<HermesSession[]> {
         created: labels['hermes.created'] || '',
         resumedFrom: labels['hermes.resumed-from'],
         interactive: labels['hermes.interactive'] === 'true',
+        mountDir: labels['hermes.mount'],
         status,
         exitCode: status === 'exited' ? state.ExitCode : undefined,
         startedAt: state.StartedAt,
@@ -760,6 +766,8 @@ export interface ResumeSessionOptions {
   mode: 'interactive' | 'detached' | 'shell';
   prompt?: string;
   model?: string; // Allow overriding model on resume
+  /** If set, mount this local directory into the container */
+  mountDir?: string;
 }
 
 function buildResumeAgentCommand(
@@ -837,11 +845,22 @@ export async function resumeSession(
   }
 
   // Mount config volumes for agent credentials and session continuity
-  const volumeArgs = toVolumeArgs([
+  // If mountDir is provided, add it as a volume mount
+  const volumes = [
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
-  ]);
+  ];
+
+  // Resolve mount directory to absolute path if provided
+  const absoluteMountDir = options.mountDir
+    ? resolve(options.mountDir)
+    : undefined;
+  if (absoluteMountDir) {
+    volumes.push(`${absoluteMountDir}:/work/app`);
+  }
+
+  const volumeArgs = toVolumeArgs(volumes);
 
   const baseName = container.Name.replace(/\//g, '').trim();
   const containerName = `${baseName}-resumed-${resumeSuffix}`;
@@ -886,6 +905,10 @@ ${escapePrompt(buildResumeAgentCommand(agent, mode, model), prompt)}
   ];
   if (model) {
     labelArgs.push('--label', `hermes.model=${model}`);
+  }
+  // Track mount mode in labels
+  if (absoluteMountDir) {
+    labelArgs.push('--label', `hermes.mount=${absoluteMountDir}`);
   }
 
   try {
@@ -980,6 +1003,7 @@ export async function getSession(
       created: labels['hermes.created'] || '',
       resumedFrom: labels['hermes.resumed-from'],
       interactive: labels['hermes.interactive'] === 'true',
+      mountDir: labels['hermes.mount'],
       status,
       exitCode: status === 'exited' ? state.ExitCode : undefined,
       startedAt: state.StartedAt,
@@ -1010,6 +1034,7 @@ export async function startContainer(
     detach,
     interactive,
     envVars,
+    mountDir,
   } = options;
 
   // Get the resolved sandbox image
@@ -1046,11 +1071,21 @@ export async function startContainer(
     envArgs.push('-e', `${key}=${value}`);
   }
 
-  const volumeArgs = toVolumeArgs([
+  // Build volume arguments - config volumes plus optional mount
+  const volumes = [
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
-  ]);
+  ];
+
+  // Resolve mount directory to absolute path if provided
+  const absoluteMountDir = mountDir ? resolve(mountDir) : undefined;
+  if (absoluteMountDir) {
+    // Mount local directory to /work/app in the container
+    volumes.push(`${absoluteMountDir}:/work/app`);
+  }
+
+  const volumeArgs = toVolumeArgs(volumes);
 
   // Build the agent command based on the selected agent type, model, and mode
   const modelArg = model ? ` --model ${model}` : '';
@@ -1066,7 +1101,20 @@ export async function startContainer(
 ---
 Unless otherwise instructed above, use the \`gh\` command to create a PR when done.`;
 
-  const startupScript = `
+  // Different startup script for mount mode vs clone mode
+  const startupScript = absoluteMountDir
+    ? `
+set -e
+cd /work/app
+gh auth setup-git
+# Only create branch if on main/master
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
+  git switch -c "hermes/${branchName}"
+fi
+${escapePrompt(agentCommand, fullPrompt)}
+`.trim()
+    : `
 set -e
 cd /work
 gh auth setup-git
@@ -1095,6 +1143,10 @@ ${escapePrompt(agentCommand, fullPrompt)}
   ];
   if (model) {
     labelArgs.push('--label', `hermes.model=${model}`);
+  }
+  // Track mount mode in labels
+  if (absoluteMountDir) {
+    labelArgs.push('--label', `hermes.mount=${absoluteMountDir}`);
   }
   // Store the full prompt in label (truncation is done only at display time)
   labelArgs.push('--label', `hermes.prompt=${prompt}`);
@@ -1159,6 +1211,8 @@ ${escapePrompt(agentCommand, fullPrompt)}
 
 export interface StartShellContainerOptions {
   repoInfo: RepoInfo;
+  /** If set, mount this local directory instead of git clone */
+  mountDir?: string;
 }
 
 /**
@@ -1168,7 +1222,7 @@ export interface StartShellContainerOptions {
 export async function startShellContainer(
   options: StartShellContainerOptions,
 ): Promise<void> {
-  const { repoInfo } = options;
+  const { repoInfo, mountDir } = options;
 
   const hermesEnvPath = '.hermes/.env';
   const hermesEnvFile = Bun.file(hermesEnvPath);
@@ -1191,14 +1245,30 @@ export async function startShellContainer(
     }
   }
 
-  const volumeArgs = toVolumeArgs([
+  // Build volume arguments - config volumes plus optional mount
+  const volumes = [
     CLAUDE_CONFIG_VOLUME,
     OPENCODE_CONFIG_VOLUME,
     ghConfigVolume(),
-  ]);
+  ];
 
-  // Shell startup script: clone repo to default branch and drop into bash
-  const startupScript = `
+  // Resolve mount directory to absolute path if provided
+  const absoluteMountDir = mountDir ? resolve(mountDir) : undefined;
+  if (absoluteMountDir) {
+    volumes.push(`${absoluteMountDir}:/work/app`);
+  }
+
+  const volumeArgs = toVolumeArgs(volumes);
+
+  // Shell startup script: different for mount vs clone mode
+  const startupScript = absoluteMountDir
+    ? `
+set -e
+cd /work/app
+gh auth setup-git
+exec bash
+`.trim()
+    : `
 set -e
 cd /work
 gh auth setup-git
@@ -1226,6 +1296,10 @@ exec bash
     '--label',
     'hermes.prompt=Interactive shell session',
   ];
+  // Track mount mode in labels
+  if (absoluteMountDir) {
+    labelArgs.push('--label', `hermes.mount=${absoluteMountDir}`);
+  }
 
   await runInDocker({
     interactive: true,

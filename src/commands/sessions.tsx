@@ -74,8 +74,12 @@ interface SessionsResult {
   containerId?: string;
   // For resume: optional model override
   resumeModel?: string;
+  // For resume: optional mount directory
+  resumeMountDir?: string;
   // For shell: container ID if resuming, undefined if fresh shell
   resumeContainerId?: string;
+  // For shell: optional mount directory for fresh shell
+  shellMountDir?: string;
   // For start-interactive: info needed to start the container
   startInfo?: {
     prompt: string;
@@ -83,6 +87,7 @@ interface SessionsResult {
     model: string;
     branchName: string;
     envVars?: Record<string, string>;
+    mountDir?: string;
   };
 }
 
@@ -99,6 +104,8 @@ export interface RunSessionsTuiOptions {
   // Options for starting flow
   serviceId?: string;
   dbFork?: boolean;
+  /** Mount local directory instead of git clone */
+  mountDir?: string;
 }
 
 // ============================================================================
@@ -112,6 +119,8 @@ interface SessionsAppProps {
   initialModel?: string;
   serviceId?: string;
   dbFork?: boolean;
+  /** Mount local directory instead of git clone */
+  initialMountDir?: string;
   /** Current repo info if in a git repo, null otherwise */
   currentRepoInfo: RepoInfo | null;
   onComplete: (result: SessionsResult) => void;
@@ -124,6 +133,7 @@ function SessionsApp({
   initialModel,
   serviceId,
   dbFork = true,
+  initialMountDir,
   currentRepoInfo,
   onComplete,
 }: SessionsAppProps) {
@@ -141,6 +151,7 @@ function SessionsApp({
     initialModel,
     serviceId,
     dbFork,
+    initialMountDir,
   });
 
   // Keep refs up to date
@@ -152,6 +163,7 @@ function SessionsApp({
     initialModel,
     serviceId,
     dbFork,
+    initialMountDir,
   };
 
   const showToast = useCallback((message: string, type: ToastType) => {
@@ -165,9 +177,13 @@ function SessionsApp({
       agent: AgentType,
       model: string,
       mode: SubmitMode = 'async',
+      mountDir?: string,
     ) => {
       try {
-        log.debug({ agent, model, prompt, mode }, 'startSession received');
+        log.debug(
+          { agent, model, prompt, mode, mountDir },
+          'startSession received',
+        );
 
         setView({
           type: 'starting',
@@ -232,6 +248,7 @@ function SessionsApp({
               model,
               branchName,
               envVars: forkResult?.envVars,
+              mountDir,
             },
           });
           return;
@@ -239,7 +256,12 @@ function SessionsApp({
 
         setView((v) =>
           v.type === 'starting'
-            ? { ...v, step: 'Starting agent container' }
+            ? {
+                ...v,
+                step: mountDir
+                  ? 'Starting agent container (mount mode)'
+                  : 'Starting agent container',
+              }
             : v,
         );
         await startContainer({
@@ -251,6 +273,7 @@ function SessionsApp({
           detach: true,
           interactive: false,
           envVars: forkResult?.envVars,
+          mountDir,
         });
 
         setView((v) =>
@@ -282,10 +305,11 @@ function SessionsApp({
       prompt: string,
       model: string,
       mode: SubmitMode = 'async',
+      mountDir?: string,
     ) => {
       try {
         log.debug(
-          { session: session.name, model, prompt, mode },
+          { session: session.name, model, prompt, mode, mountDir },
           'resumeSessionFlow received',
         );
 
@@ -307,6 +331,7 @@ function SessionsApp({
             type: 'resume',
             containerId: session.containerId,
             resumeModel: model,
+            resumeMountDir: mountDir,
           });
           return;
         }
@@ -331,6 +356,7 @@ function SessionsApp({
           mode: 'detached',
           prompt,
           model,
+          mountDir,
         });
 
         setView((v) =>
@@ -516,13 +542,14 @@ function SessionsApp({
           }
           defaultModel={resumeSess?.model ?? initialModel ?? config?.model}
           resumeSession={resumeSess}
-          onSubmit={({ prompt, agent, model, mode }) => {
+          initialMountDir={resumeSess?.mountDir ?? initialMountDir}
+          onSubmit={({ prompt, agent, model, mode, mountDir }) => {
             if (resumeSess) {
               // Resume flow - use resumeSessionFlow for loading screen
-              resumeSessionFlow(resumeSess, prompt, model, mode);
+              resumeSessionFlow(resumeSess, prompt, model, mode, mountDir);
             } else {
               // Fresh session
-              startSession(prompt, agent, model, mode);
+              startSession(prompt, agent, model, mode, mountDir);
             }
           }}
           onShell={() => {
@@ -623,6 +650,7 @@ export async function runSessionsTui({
   initialModel,
   serviceId,
   dbFork,
+  mountDir,
 }: RunSessionsTuiOptions = {}): Promise<void> {
   await ensureDockerSandbox();
   await ensureGhAuth();
@@ -646,6 +674,7 @@ export async function runSessionsTui({
         initialModel={initialModel}
         serviceId={serviceId}
         dbFork={dbFork}
+        initialMountDir={mountDir}
         currentRepoInfo={currentRepoInfo}
         onComplete={(result) => resolveResult(result)}
       />
@@ -666,6 +695,7 @@ export async function runSessionsTui({
       await resumeSession(result.containerId, {
         mode: 'interactive',
         model: result.resumeModel,
+        mountDir: result.resumeMountDir,
       });
     } catch (err) {
       log.error({ err }, 'Failed to resume session');
@@ -692,7 +722,14 @@ export async function runSessionsTui({
 
   // Handle start-interactive action - start container attached to terminal
   if (result.type === 'start-interactive' && result.startInfo) {
-    const { prompt, agent, model, branchName, envVars } = result.startInfo;
+    const {
+      prompt,
+      agent,
+      model,
+      branchName,
+      envVars,
+      mountDir: startMountDir,
+    } = result.startInfo;
     try {
       const repoInfo = await getRepoInfo();
       await startContainer({
@@ -704,6 +741,7 @@ export async function runSessionsTui({
         detach: false,
         interactive: true,
         envVars,
+        mountDir: startMountDir,
       });
     } catch (err) {
       log.error({ err }, 'Failed to start session interactively');

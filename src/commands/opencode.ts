@@ -1,5 +1,6 @@
 // Pass-through to the opencode CLI, running in docker
 
+import { resolve } from 'node:path';
 import { Command } from 'commander';
 import { ensureDockerSandbox } from '../services/docker';
 import { log } from '../services/logger';
@@ -9,14 +10,37 @@ import {
 } from '../services/opencode';
 import type { ShellError } from '../utils';
 
+interface OpencodeOptions {
+  mount?: string | true;
+}
+
 export const opencodeCommand = new Command('opencode')
   .description('Pass-through commands to the opencode CLI')
   .allowUnknownOption(true)
+  .option(
+    '--mount [dir]',
+    'Mount local directory into container (defaults to cwd)',
+  )
   .argument('[args...]', 'Arguments to pass to the opencode CLI')
-  .action(async (args: string[]) => {
+  .action(async (args: string[], options: OpencodeOptions) => {
     try {
       await ensureDockerSandbox();
+
+      // Build docker args with optional mount
+      const dockerArgs: string[] = ['--rm'];
+      if (options.mount) {
+        const mountDir = options.mount === true ? process.cwd() : options.mount;
+        const absoluteMountDir = resolve(mountDir);
+        dockerArgs.push(
+          '-v',
+          `${absoluteMountDir}:/work/app`,
+          '-w',
+          '/work/app',
+        );
+      }
+
       const proc = await runOpencodeInDocker({
+        dockerArgs,
         cmdArgs: args,
         interactive: true,
       });

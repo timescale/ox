@@ -22,6 +22,8 @@ interface BranchOptions {
   model?: string;
   print: boolean;
   interactive: boolean;
+  /** Mount local directory instead of git clone. True = cwd, string = specific path */
+  mount?: string | true;
 }
 
 function printSummary(
@@ -111,9 +113,17 @@ export async function branchAction(
     console.log(`  Database fork created: ${forkResult.name}`);
   }
 
-  // Step 9: Start container (repo will be cloned inside container)
+  // Step 9: Start container (repo will be cloned or mounted)
+  // Resolve mount directory: true means cwd, string means specific path
+  const mountDir =
+    options.mount === true
+      ? process.cwd()
+      : typeof options.mount === 'string'
+        ? options.mount
+        : undefined;
+
   console.log(
-    `Starting agent container (using ${effectiveAgent}${effectiveModel ? ` with ${effectiveModel}` : ''})...`,
+    `Starting agent container (using ${effectiveAgent}${effectiveModel ? ` with ${effectiveModel}` : ''})${mountDir ? ' [mount mode]' : ''}...`,
   );
   // Default to detached mode unless --print or --interactive is specified
   const detach = !options.print && !options.interactive;
@@ -127,6 +137,7 @@ export async function branchAction(
     detach,
     interactive: options.interactive,
     envVars: forkResult?.envVars,
+    mountDir,
   });
 
   if (detach) {
@@ -161,7 +172,11 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
       '-p, --print',
       'Attach container output to console (default: detached)',
     )
-    .option('-i, --interactive', 'Run agent in full TUI mode') as T;
+    .option('-i, --interactive', 'Run agent in full TUI mode')
+    .option(
+      '--mount [dir]',
+      'Mount local directory into container instead of git clone (defaults to cwd)',
+    ) as T;
 }
 
 export const branchCommand = withBranchOptions(
@@ -178,6 +193,14 @@ export const branchCommand = withBranchOptions(
   }
 
   // Default: use unified TUI
+  // Resolve mount directory: true means cwd, string means specific path
+  const mountDir =
+    options.mount === true
+      ? process.cwd()
+      : typeof options.mount === 'string'
+        ? options.mount
+        : undefined;
+
   const { runSessionsTui } = await import('./sessions.tsx');
   await runSessionsTui({
     initialView: 'starting',
@@ -186,5 +209,6 @@ export const branchCommand = withBranchOptions(
     initialModel: options.model,
     serviceId: options.serviceId,
     dbFork: options.dbFork,
+    mountDir,
   });
 });
