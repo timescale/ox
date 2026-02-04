@@ -33,7 +33,7 @@ function base64Encode(text: string): string {
   return Buffer.from(text, 'utf8').toString('base64');
 }
 
-const toVolumeArgs = (volumes: string[]): string[] =>
+export const toVolumeArgs = (volumes: string[]): string[] =>
   volumes.flatMap((v) => ['-v', v]);
 
 /**
@@ -41,7 +41,7 @@ const toVolumeArgs = (volumes: string[]): string[] =>
  * Ensures credential files exist (creating empty JSON files if needed)
  * so Docker mounts them as files, not directories.
  */
-const getCredentialVolumes = async (): Promise<string[]> => {
+export const getCredentialVolumes = async (): Promise<string[]> => {
   const [claudeVolume, opencodeVolume] = await Promise.all([
     getClaudeConfigVolume(),
     getOpencodeConfigVolume(),
