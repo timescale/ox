@@ -16,9 +16,9 @@ import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
 };
 import { runDockerSetupScreen } from '../components/DockerSetup';
 import { formatShellError, type ShellError } from '../utils';
-import { ghConfigVolume } from './auth';
 import { getClaudeConfigVolume } from './claude';
 import { type AgentType, readConfig } from './config';
+import { getGhConfigVolume } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
 import { getOpencodeConfigVolume } from './opencode';
@@ -42,12 +42,11 @@ export const toVolumeArgs = (volumes: string[]): string[] =>
  * so Docker mounts them as files, not directories.
  */
 export const getCredentialVolumes = async (): Promise<string[]> => {
-  const [claudeVolume, opencodeVolume] = await Promise.all([
+  return Promise.all([
     getClaudeConfigVolume(),
     getOpencodeConfigVolume(),
+    getGhConfigVolume(),
   ]);
-
-  return [claudeVolume, opencodeVolume, ghConfigVolume()];
 };
 
 const escapePrompt = (cmd: string, prompt?: string | null): string =>

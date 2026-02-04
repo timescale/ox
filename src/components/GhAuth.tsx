@@ -5,8 +5,9 @@
 import { useKeyboard } from '@opentui/react';
 import open from 'open';
 import { useEffect, useState } from 'react';
-import { startContainerGhAuth, tryHostGhAuth } from '../services/auth';
 import { copyToClipboard } from '../services/clipboard';
+import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
+import { startContainerGhAuth } from '../services/ghAuth';
 import { log } from '../services/logger';
 import { createTui } from '../services/tui';
 import { useTheme } from '../stores/themeStore';
@@ -117,11 +118,15 @@ export const runGhAuthScreen = async (): Promise<boolean> => {
 };
 
 export const ensureGhAuth = async (): Promise<void> => {
-  const existingAuth = await tryHostGhAuth();
-  if (existingAuth?.success) return;
+  if (await checkGhCredentials()) {
+    return;
+  }
+  log.warn('GitHub credentials are missing or expired.');
 
-  const success = await runGhAuthScreen();
-  if (!success) {
+  if (await applyHostGhCreds()) return;
+
+  if (!(await runGhAuthScreen())) {
+    // Show the TUI for interactive login
     throw new Error('GitHub authentication failed or was cancelled');
   }
 };

@@ -14,7 +14,6 @@ import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
 import { StartingScreen } from '../components/StartingScreen';
 import { Toast, type ToastType } from '../components/Toast';
-import { hasLocalGhAuth } from '../services/auth';
 import { checkClaudeCredentials, runClaudeInDocker } from '../services/claude';
 import {
   type AgentType,
@@ -35,6 +34,7 @@ import {
   startContainer,
   startShellContainer,
 } from '../services/docker';
+import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
   getRepoInfo,
@@ -250,7 +250,7 @@ function SessionsApp({
           forkResult = await forkDatabase(branchName, effectiveServiceId);
         }
 
-        if (!(await hasLocalGhAuth())) {
+        if (!(await checkGhCredentials())) {
           throw new Error(
             'GitHub authentication not configured. Run `hermes config` to set up.',
           );

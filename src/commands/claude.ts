@@ -1,4 +1,4 @@
-// Pass-through to the Tiger CLI, running in docker
+// Pass-through to the claude CLI, running in docker
 
 import { resolve } from 'node:path';
 import { Command } from 'commander';

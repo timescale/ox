@@ -12,17 +12,14 @@ import { GhAuth } from '../components/GhAuth';
 import { Loading } from '../components/Loading';
 import { Selector } from '../components/Selector';
 import { AGENT_SELECT_OPTIONS, useAgentModels } from '../services/agents';
-import {
-  type GhAuthProcess,
-  startContainerGhAuth,
-  tryHostGhAuth,
-} from '../services/auth';
 import { checkClaudeCredentials, runClaudeInDocker } from '../services/claude';
 import {
   type AgentType,
   type HermesConfig,
   projectConfig,
 } from '../services/config';
+import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
+import { type GhAuthProcess, startContainerGhAuth } from '../services/ghAuth';
 import {
   checkOpencodeCredentials,
   runOpencodeInDocker,
@@ -153,10 +150,16 @@ export function ConfigWizard({
     let cancelled = false;
 
     const checkAuth = async () => {
-      // Try host auth first
-      const hostResult = await tryHostGhAuth();
+      const existingAuth = await checkGhCredentials();
       if (cancelled) return;
+      if (existingAuth) {
+        onComplete({ type: 'completed', config: config ?? {} });
+        return;
+      }
 
+      // Try host auth first
+      const hostResult = await applyHostGhCreds();
+      if (cancelled) return;
       if (hostResult) {
         // Already have auth, complete the wizard
         onComplete({ type: 'completed', config: config ?? {} });

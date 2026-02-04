@@ -1,48 +1,49 @@
+// Pass-through to the gh CLI, running in docker
+
 import { resolve } from 'node:path';
 import { Command } from 'commander';
-import {
-  ensureDockerSandbox,
-  getCredentialVolumes,
-  toVolumeArgs,
-} from '../services/docker';
+import { ensureDockerSandbox } from '../services/docker';
+import { runGhInDocker } from '../services/gh';
 import { log } from '../services/logger';
-import { runInDocker } from '../services/runInDocker';
 import type { ShellError } from '../utils';
 
-interface ShellOptions {
+interface Options {
   mount?: string | true;
 }
 
-export const shellCommand = new Command('shell')
-  .description('start an interactive shell in a new sandbox')
+export const ghCommand = new Command('gh')
+  .description('Pass-through commands to the gh CLI')
+  .allowUnknownOption(true)
   .option(
     '--mount [dir]',
     'Mount local directory into container (defaults to cwd)',
   )
-  .action(async (options: ShellOptions) => {
+  .argument('[args...]', 'Arguments to pass to the gh CLI')
+  .action(async (args: string[], options: Options) => {
     try {
       await ensureDockerSandbox();
 
-      const volumes = await getCredentialVolumes();
       // Build docker args with optional mount
       const dockerArgs: string[] = ['--rm'];
       if (options.mount) {
         const mountDir = options.mount === true ? process.cwd() : options.mount;
         const absoluteMountDir = resolve(mountDir);
-        volumes.push(`${absoluteMountDir}:/work/app`);
-        dockerArgs.push('-w', '/work/app');
+        dockerArgs.push(
+          '-v',
+          `${absoluteMountDir}:/work/app`,
+          '-w',
+          '/work/app',
+        );
       }
 
-      dockerArgs.push(...toVolumeArgs(volumes));
-
-      const proc = await runInDocker({
-        cmdName: 'bash',
+      const proc = await runGhInDocker({
         dockerArgs,
+        cmdArgs: args,
         interactive: true,
       });
       process.exit(await proc.exited);
     } catch (err) {
-      log.error({ err }, 'Error starting shell');
+      log.error({ err }, 'Error executing gh command');
       process.exit((err as ShellError).exitCode || 1);
     }
   });

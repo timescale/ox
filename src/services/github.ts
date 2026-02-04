@@ -2,9 +2,8 @@
 // GitHub Service - PR operations via gh CLI in docker container
 // ============================================================================
 
-import { ghConfigVolume } from './auth';
+import { runGhInDocker } from './gh';
 import { log } from './logger';
-import { runInDocker } from './runInDocker';
 
 // ============================================================================
 // Types
@@ -45,8 +44,7 @@ export async function getPrForBranch(
     : `hermes/${sessionName}`;
 
   try {
-    const result = await runInDocker({
-      cmdName: 'gh',
+    const result = await runGhInDocker({
       cmdArgs: [
         'pr',
         'list',
@@ -61,7 +59,6 @@ export async function getPrForBranch(
         '--state',
         'all',
       ],
-      dockerArgs: ['--rm', '-v', ghConfigVolume()],
       shouldThrow: false,
     });
 

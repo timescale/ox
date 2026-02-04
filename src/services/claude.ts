@@ -42,11 +42,26 @@ const ensureCredentialsFile = async (): Promise<void> => {
   await mkdir(CLAUDE_CONFIG_DIR, { recursive: true });
   await fixBrokenCredentialsDir();
 
-  const localCreds = file(CLAUDE_LOCAL_CREDS_PATH);
-  if (!(await localCreds.exists())) {
-    // Create empty JSON file so Docker mounts it as a file, not a directory
-    await Bun.write(CLAUDE_LOCAL_CREDS_PATH, '{}');
+  const localCredsFile = file(CLAUDE_LOCAL_CREDS_PATH);
+  const localCredsExist = await localCredsFile.exists();
+  const localCreds = localCredsExist ? await localCredsFile.json() : null;
+  const hostCredsFile = file(
+    join(CLAUDE_HOST_CONFIG_DIR, CLAUDE_AUTH_FILE_NAME),
+  );
+  const hostCredsExist = await hostCredsFile.exists();
+  if (
+    hostCredsExist &&
+    (!localCredsExist || localCreds?.claudeAiOauth?.expiresAt < Date.now())
+  ) {
+    await localCredsFile.write(await hostCredsFile.bytes());
+    return;
   }
+  if (localCredsExist) return;
+
+  if (!hostCredsExist) {
+    log.info('Claude credentials not found in host config directory');
+  }
+  await localCredsFile.write('{}');
 };
 
 /**
@@ -58,23 +73,6 @@ export const getClaudeConfigVolume = async (): Promise<string> => {
   return `${CLAUDE_LOCAL_CREDS_PATH}:/home/hermes/.claude/${CLAUDE_AUTH_FILE_NAME}`;
 };
 
-const checkConfig = async () => {
-  await ensureCredentialsFile();
-
-  const hostCreds = file(join(CLAUDE_HOST_CONFIG_DIR, CLAUDE_AUTH_FILE_NAME));
-  if (!(await hostCreds.exists())) {
-    log.info('Claude credentials not found in host config directory');
-    return;
-  }
-  const localCreds = file(CLAUDE_LOCAL_CREDS_PATH);
-  if (
-    !(await localCreds.exists()) ||
-    (await localCreds.json())?.claudeAiOauth?.expiresAt < Date.now()
-  ) {
-    await localCreds.write(await hostCreds.bytes());
-  }
-};
-
 export const runClaudeInDocker = async ({
   dockerArgs = ['--rm'],
   cmdArgs = [],
@@ -82,8 +80,6 @@ export const runClaudeInDocker = async ({
   interactive = false,
   shouldThrow = true,
 }: RunInDockerOptionsBase): Promise<RunInDockerResult> => {
-  await checkConfig();
-
   const configVolume = await getClaudeConfigVolume();
 
   return runInDocker({
