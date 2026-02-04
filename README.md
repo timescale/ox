@@ -24,7 +24,7 @@ The installer will prompt you to choose between:
 1. **Download pre-compiled binary** - Fast, no dependencies
 2. **Clone and link with bun** - For developers who want to modify the source
 
-After installation, restart your shell or run `source ~/.zshrc` (or `source ~/.bashrc` on Linux) to update your PATH.
+After installation, restart your shell or run `source ~/.zshrc` (or `source ~/.bashrc`) to update your PATH.
 
 ### Manual Installation (Developers)
 
