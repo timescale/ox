@@ -96,8 +96,12 @@ async function getExistingBranches(): Promise<string[]> {
       .map((line) => line.replace(/^\*?\s*/, '').trim())
       .filter(Boolean);
   } catch (err) {
-    log.error({ err }, 'Failed to get existing git branches');
-    throw formatShellError(err as ShellError);
+    log.debug(
+      { err },
+      'Failed to get existing git branches (not in a git repo)',
+    );
+    // Not in a git repo or git not available, return empty array
+    return [];
   }
 }
 
