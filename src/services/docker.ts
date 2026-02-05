@@ -17,7 +17,7 @@ import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
 import { runDockerSetupScreen } from '../components/DockerSetup';
 import { formatShellError, type ShellError } from '../utils';
 import { getClaudeConfigVolume } from './claude';
-import { type AgentType, readConfig } from './config';
+import { type AgentType, type HermesConfig, readConfig } from './config';
 import { getGhConfigVolume } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
@@ -152,9 +152,13 @@ export interface SandboxImageConfig {
  * 1. buildSandboxFromDockerfile - build from Dockerfile (highest)
  * 2. sandboxBaseImage - use explicit image
  * 3. Default - pull GHCR sandbox-slim image
+ *
+ * @param configOverride - Optional config to use instead of reading from filesystem (useful for testing)
  */
-export async function resolveSandboxImage(): Promise<SandboxImageConfig> {
-  const config = await readConfig();
+export async function resolveSandboxImage(
+  configOverride?: HermesConfig,
+): Promise<SandboxImageConfig> {
+  const config = configOverride ?? (await readConfig());
 
   // Highest precedence: buildSandboxFromDockerfile
   if (config.buildSandboxFromDockerfile) {

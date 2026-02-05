@@ -4,7 +4,8 @@ import { resolveSandboxImage } from './docker';
 describe('docker service', () => {
   describe('resolveSandboxImage', () => {
     test('returns a valid image config', async () => {
-      const config = await resolveSandboxImage();
+      // Pass empty config to avoid reading from filesystem
+      const config = await resolveSandboxImage({});
       expect(config).toBeDefined();
       expect(config.image).toBeDefined();
       expect(typeof config.image).toBe('string');
@@ -13,14 +14,14 @@ describe('docker service', () => {
 
     test('returns GHCR image by default (no config)', async () => {
       // With no config, should return GHCR sandbox-slim image
-      const config = await resolveSandboxImage();
+      const config = await resolveSandboxImage({});
       expect(config.needsBuild).toBe(false);
       expect(config.image).toMatch(/ghcr\.io\/timescale\/hermes\/sandbox-slim/);
     });
 
     test('returns consistent values for same config', async () => {
-      const config1 = await resolveSandboxImage();
-      const config2 = await resolveSandboxImage();
+      const config1 = await resolveSandboxImage({});
+      const config2 = await resolveSandboxImage({});
       expect(config1.image).toBe(config2.image);
       expect(config1.needsBuild).toBe(config2.needsBuild);
     });
