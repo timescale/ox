@@ -80,8 +80,6 @@ program.addCommand(shellCommand);
 
 // Handle `hermes complete <shell>` before parseAsync for tab library
 // This must happen after all commands are added so tab can introspect them
-if (handleCompletionRequest(program)) {
-  // Completion request was handled, process will exit
+if (!handleCompletionRequest(program)) {
+  program.parse();
 }
-
-program.parse();
