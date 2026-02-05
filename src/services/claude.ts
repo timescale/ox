@@ -2,6 +2,7 @@ import { mkdir, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { file } from 'bun';
+import { runClaudeAuthScreen } from '../components/ClaudeAuth';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
@@ -110,23 +111,26 @@ export const checkClaudeCredentials = async (
  * Returns true if credentials are valid after the check/login, false if login failed or was cancelled.
  */
 export const ensureClaudeAuth = async (model?: string): Promise<boolean> => {
-  const isValid = await checkClaudeCredentials(model);
-  if (isValid) {
+  if (await checkClaudeCredentials(model)) {
     return true;
   }
 
-  console.log('\nClaude credentials are missing or expired.');
-  console.log('Starting Claude login...\n');
+  log.warn('Claude credentials are missing or expired.');
 
-  const proc = await runClaudeInDocker({
-    cmdArgs: ['/login'],
-    interactive: true,
-  });
-
-  const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    console.error('\nError: Claude login failed');
-    return false;
+  // Use TUI-based auth flow
+  if (
+    !(await runClaudeAuthScreen()) ||
+    !(await checkClaudeCredentials(model))
+  ) {
+    // fallback to claude's interface
+    const proc = await runClaudeInDocker({
+      cmdArgs: ['/login'],
+      interactive: true,
+    });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      log.error(`claude /login exited with code ${exitCode}`);
+    }
   }
 
   // Verify credentials after login

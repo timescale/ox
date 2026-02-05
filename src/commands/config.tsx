@@ -12,7 +12,7 @@ import { GhAuth } from '../components/GhAuth';
 import { Loading } from '../components/Loading';
 import { Selector } from '../components/Selector';
 import { AGENT_SELECT_OPTIONS, useAgentModels } from '../services/agents';
-import { checkClaudeCredentials, runClaudeInDocker } from '../services/claude';
+import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
 import {
   type AgentType,
   type HermesConfig,
@@ -22,6 +22,7 @@ import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
 import { type GhAuthProcess, startContainerGhAuth } from '../services/ghAuth';
 import {
   checkOpencodeCredentials,
+  ensureOpencodeAuth,
   runOpencodeInDocker,
 } from '../services/opencode';
 import { listServices, type TigerService } from '../services/tiger';
@@ -486,22 +487,12 @@ export async function configAction(): Promise<void> {
     await destroy();
 
     if (result.type === 'needs-agent-auth') {
-      // Run interactive login
-      const agentName = result.agent === 'claude' ? 'Claude' : 'Opencode';
-      console.log(`\nStarting ${agentName} login...\n`);
-
-      const proc =
+      const authResult =
         result.agent === 'claude'
-          ? await runClaudeInDocker({ cmdArgs: ['/login'], interactive: true })
-          : await runOpencodeInDocker({
-              cmdArgs: ['auth', 'login'],
-              interactive: true,
-            });
-
-      const exitCode = await proc.exited;
-
-      if (exitCode !== 0) {
-        console.error(`\nError: ${agentName} login failed`);
+          ? await ensureClaudeAuth()
+          : await ensureOpencodeAuth();
+      if (!authResult) {
+        console.error(`\nError: ${result.agent} login failed`);
         process.exit(1);
       }
 
