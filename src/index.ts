@@ -11,6 +11,7 @@ import {
   withBranchOptions,
 } from './commands/branch';
 import { claudeCommand } from './commands/claude';
+import { completionCommand } from './commands/completion';
 import { configCommand } from './commands/config';
 import { ghCommand } from './commands/gh';
 import { logsCommand } from './commands/logs';
@@ -65,6 +66,7 @@ withBranchOptions(program)
 program.addCommand(authCommand);
 program.addCommand(branchCommand);
 program.addCommand(claudeCommand);
+program.addCommand(completionCommand);
 program.addCommand(configCommand);
 program.addCommand(ghCommand);
 program.addCommand(logsCommand);
