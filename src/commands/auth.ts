@@ -73,13 +73,21 @@ authCommand
       await ensureDockerSandbox();
       switch (provider) {
         case 'claude': {
-          await ensureClaudeAuth();
-          console.log('Claude credentials are valid.');
+          if (await ensureClaudeAuth()) {
+            console.log('Claude credentials are valid.');
+            break;
+          }
+          console.error('Claude login failed or was cancelled.');
+          process.exit(1);
           break;
         }
         case 'opencode': {
-          await ensureOpencodeAuth();
-          console.log('OpenCode credentials are valid.');
+          if (await ensureOpencodeAuth()) {
+            console.log('OpenCode credentials are valid.');
+            break;
+          }
+          console.error('OpenCode login failed or was cancelled.');
+          process.exit(1);
           break;
         }
         case 'gh': {

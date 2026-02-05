@@ -14,7 +14,7 @@ import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
 import { StartingScreen } from '../components/StartingScreen';
 import { Toast, type ToastType } from '../components/Toast';
-import { checkClaudeCredentials, runClaudeInDocker } from '../services/claude';
+import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
 import {
   type AgentType,
   type HermesConfig,
@@ -44,7 +44,7 @@ import {
 import { log } from '../services/logger';
 import {
   checkOpencodeCredentials,
-  runOpencodeInDocker,
+  ensureOpencodeAuth,
 } from '../services/opencode';
 import { createTui } from '../services/tui.ts';
 import { ensureGitignore } from '../utils';
@@ -224,6 +224,31 @@ function SessionsApp({
           },
         });
 
+        // Check agent credentials before starting container
+        setView((v) =>
+          v.type === 'starting'
+            ? { ...v, step: `Checking ${agent} credentials` }
+            : v,
+        );
+        const agentAuthValid =
+          agent === 'claude'
+            ? await checkClaudeCredentials(model || undefined)
+            : await checkOpencodeCredentials(model || undefined);
+
+        if (!agentAuthValid) {
+          // Exit TUI to run interactive login, then retry
+          onComplete({
+            type: 'needs-agent-auth',
+            authInfo: {
+              agent,
+              model,
+              prompt,
+              mountDir,
+            },
+          });
+          return;
+        }
+
         setView((v) =>
           v.type === 'starting' ? { ...v, step: 'Getting repository info' } : v,
         );
@@ -254,31 +279,6 @@ function SessionsApp({
           throw new Error(
             'GitHub authentication not configured. Run `hermes config` to set up.',
           );
-        }
-
-        // Check agent credentials before starting container
-        setView((v) =>
-          v.type === 'starting'
-            ? { ...v, step: `Checking ${agent} credentials` }
-            : v,
-        );
-        const agentAuthValid =
-          agent === 'claude'
-            ? await checkClaudeCredentials(model || undefined)
-            : await checkOpencodeCredentials(model || undefined);
-
-        if (!agentAuthValid) {
-          // Exit TUI to run interactive login, then retry
-          onComplete({
-            type: 'needs-agent-auth',
-            authInfo: {
-              agent,
-              model,
-              prompt,
-              mountDir,
-            },
-          });
-          return;
         }
 
         // For interactive mode, exit TUI and let the caller start the container
@@ -800,31 +800,13 @@ export async function runSessionsTui({
     console.log(`\n${agentName} credentials are missing or expired.`);
     console.log(`Starting ${agentName} login...\n`);
 
-    const proc =
+    const authResult =
       agent === 'claude'
-        ? await runClaudeInDocker({ cmdArgs: ['/login'], interactive: true })
-        : await runOpencodeInDocker({
-            cmdArgs: ['auth', 'login'],
-            interactive: true,
-          });
+        ? await ensureClaudeAuth()
+        : await ensureOpencodeAuth();
 
-    const exitCode = await proc.exited;
-
-    if (exitCode !== 0) {
+    if (!authResult) {
       console.error(`\nError: ${agentName} login failed`);
-      process.exit(1);
-    }
-
-    // Verify credentials after login
-    const authValid =
-      agent === 'claude'
-        ? await checkClaudeCredentials(model || undefined)
-        : await checkOpencodeCredentials(model || undefined);
-
-    if (!authValid) {
-      console.error(
-        `\nError: ${agentName} credentials still invalid after login`,
-      );
       process.exit(1);
     }
 
