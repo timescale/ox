@@ -79,6 +79,39 @@ ensure_path_configured() {
   fi
 }
 
+configure_shell_completions() {
+  echo ""
+  echo -e "${BLUE}Configuring shell completions...${NC}"
+
+  # Determine shell type from SHELL_RC
+  local shell_type=""
+  case "$SHELL_RC" in
+    *zshrc*) shell_type="zsh" ;;
+    *bashrc*|*bash_profile*) shell_type="bash" ;;
+  esac
+
+  if [ -z "$shell_type" ]; then
+    echo -e "${YELLOW}!${NC} Could not detect shell type, skipping completion setup"
+    echo "  Run 'hermes completions' for manual setup instructions"
+    return
+  fi
+
+  # Check if completion is already configured
+  if grep -q 'hermes complete' "$SHELL_RC" 2>/dev/null; then
+    echo -e "${GREEN}✓${NC} Shell completions already configured in $SHELL_RC"
+    return
+  fi
+
+  # Add completion to shell rc
+  {
+    echo ""
+    echo "# Hermes shell completions"
+    echo "source <(hermes complete $shell_type)"
+  } >> "$SHELL_RC"
+
+  echo -e "${GREEN}✓${NC} Added shell completions to $SHELL_RC"
+}
+
 verify_installation() {
   echo ""
   echo -e "${BLUE}Verifying installation...${NC}"
@@ -151,6 +184,9 @@ install_binary() {
   # Ensure ~/.local/bin is in PATH
   ensure_path_configured
 
+  # Configure shell completions
+  configure_shell_completions
+
   verify_installation
 }
 
@@ -198,6 +234,10 @@ install_dev() {
   ./bun link
 
   echo -e "${GREEN}✓${NC} Cloned to $CLONE_DIR and linked globally"
+
+  # Configure shell completions
+  configure_shell_completions
+
   echo ""
   echo -e "${YELLOW}Note:${NC} You may need to restart your shell or run:"
   echo "  source $SHELL_RC"

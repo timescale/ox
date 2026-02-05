@@ -26,6 +26,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@bomb.sh/tab": "^0.0.12",
     "@opentui/react": "^0.1.77",
     "build-strap": "^5.2.0",
     "clipboardy": "^5.2.1",

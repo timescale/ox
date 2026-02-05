@@ -11,7 +11,10 @@ import {
   withBranchOptions,
 } from './commands/branch';
 import { claudeCommand } from './commands/claude';
-import { completionCommand } from './commands/completion';
+import {
+  completionCommand,
+  handleCompletionRequest,
+} from './commands/completion';
 import { configCommand } from './commands/config';
 import { ghCommand } from './commands/gh';
 import { logsCommand } from './commands/logs';
@@ -74,5 +77,11 @@ program.addCommand(opencodeCommand);
 program.addCommand(resumeCommand);
 program.addCommand(sessionsCommand);
 program.addCommand(shellCommand);
+
+// Handle `hermes complete <shell>` before parseAsync for tab library
+// This must happen after all commands are added so tab can introspect them
+if (handleCompletionRequest(program)) {
+  // Completion request was handled, process will exit
+}
 
 program.parse();
