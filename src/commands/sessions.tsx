@@ -616,7 +616,7 @@ function SessionsApp({
           defaultModel={resumeSess?.model ?? initialModel ?? config?.model}
           resumeSession={resumeSess}
           initialMountDir={resumeSess?.mountDir ?? initialMountDir}
-          isNonGitRepo={!isGitRepo}
+          forceMountMode={!isGitRepo}
           onSubmit={({ prompt, agent, model, mode, mountDir }) => {
             if (resumeSess) {
               // Resume flow - use resumeSessionFlow for loading screen
