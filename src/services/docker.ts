@@ -2,7 +2,8 @@
 // Docker Container Service
 // ============================================================================
 
-import { resolve } from 'node:path';
+import { mkdir, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { dockerIsRunning } from 'build-strap';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
@@ -17,7 +18,12 @@ import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
 import { runDockerSetupScreen } from '../components/DockerSetup';
 import { formatShellError, type ShellError } from '../utils';
 import { getClaudeConfigVolume } from './claude';
-import { type AgentType, type HermesConfig, readConfig } from './config';
+import {
+  type AgentType,
+  type HermesConfig,
+  projectConfigDir,
+  readConfig,
+} from './config';
 import { getGhConfigVolume } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
@@ -48,6 +54,54 @@ export const getCredentialVolumes = async (): Promise<string[]> => {
     getGhConfigVolume(),
   ]);
 };
+
+/**
+ * Create local directories for overlay mounts and return volume mount strings.
+ * Overlay mounts are stored in .hermes/overlayMounts/<containerName>/<path>
+ * and bind-mounted into the container at /work/app/<path>.
+ */
+async function createOverlayDirs(
+  containerName: string,
+  overlayMounts?: string[],
+): Promise<string[]> {
+  if (!overlayMounts?.length) return [];
+  const volumes: string[] = [];
+  for (const overlayPath of overlayMounts) {
+    const hostDir = join(
+      projectConfigDir(),
+      'overlayMounts',
+      containerName,
+      overlayPath,
+    );
+    await mkdir(hostDir, { recursive: true });
+    volumes.push(`${resolve(hostDir)}:/work/app/${overlayPath}`);
+  }
+  return volumes;
+}
+
+/**
+ * Clean up overlay mount directories for a container.
+ * Runs cleanup inside a Docker container first to handle files owned by
+ * the container UID (10000), then removes the empty directory from the host.
+ */
+async function cleanupOverlayDirs(containerName: string): Promise<void> {
+  const overlaysRoot = join(projectConfigDir(), 'overlayMounts');
+  try {
+    // Clean up inside a Docker container to handle files owned by container UID
+    await $`docker run --rm -v ${resolve(overlaysRoot)}:/cleanup alpine rm -rf /cleanup/${containerName}`.quiet();
+  } catch {
+    // Ignore docker cleanup errors
+  }
+  try {
+    // Remove the directory from the host (may already be gone after docker cleanup)
+    await rm(join(overlaysRoot, containerName), {
+      recursive: true,
+      force: true,
+    });
+  } catch {
+    // Ignore host cleanup errors
+  }
+}
 
 const escapePrompt = (cmd: string, prompt?: string | null): string =>
   prompt
@@ -609,6 +663,7 @@ export async function listHermesSessions(): Promise<HermesSession[]> {
  */
 export async function removeContainer(nameOrId: string): Promise<void> {
   let resumeImage: string | null = null;
+  let containerName: string | null = null;
   try {
     const result = await $`docker inspect ${nameOrId}`.quiet();
     const containers: DockerInspectResult[] = JSON.parse(
@@ -617,6 +672,7 @@ export async function removeContainer(nameOrId: string): Promise<void> {
     const container = containers[0];
     if (container) {
       resumeImage = container.Config.Labels?.['hermes.resume-image'] ?? null;
+      containerName = container.Name.replace(/^\//, '') ?? null;
     }
   } catch {
     resumeImage = null;
@@ -630,6 +686,11 @@ export async function removeContainer(nameOrId: string): Promise<void> {
     } catch {
       // Ignore image removal errors
     }
+  }
+
+  // Clean up overlay mount directories for this container
+  if (containerName) {
+    await cleanupOverlayDirs(containerName);
   }
 }
 
@@ -863,6 +924,12 @@ export async function resumeSession(
     envArgs.push('-e', envVar);
   }
 
+  // Read config for overlay mounts and init script
+  const config = await readConfig();
+
+  const baseName = container.Name.replace(/\//g, '').trim();
+  const containerName = `${baseName}-resumed-${resumeSuffix}`;
+
   // Mount config volumes for agent credentials and session continuity
   // If mountDir is provided, add it as a volume mount
   const volumes = await getCredentialVolumes();
@@ -873,12 +940,16 @@ export async function resumeSession(
     : undefined;
   if (absoluteMountDir) {
     volumes.push(`${absoluteMountDir}:/work/app`);
+
+    // Add overlay bind mounts for paths that need container isolation
+    const overlayVolumes = await createOverlayDirs(
+      containerName,
+      config.overlayMounts,
+    );
+    volumes.push(...overlayVolumes);
   }
 
   const volumeArgs = toVolumeArgs(volumes);
-
-  const baseName = container.Name.replace(/\//g, '').trim();
-  const containerName = `${baseName}-resumed-${resumeSuffix}`;
 
   const resumePrompt =
     mode === 'detached' ? prompt?.trim() || '' : labels['hermes.prompt'] || '';
@@ -889,10 +960,16 @@ export async function resumeSession(
   // For shell mode, just run bash; otherwise run the agent
   const resumeScript =
     mode === 'shell'
-      ? 'cd /work/app && exec bash'
+      ? `
+set -e
+cd /work/app
+${config.initScript || ''}
+exec bash
+`.trim()
       : `
 set -e
 cd /work/app
+${config.initScript || ''}
 ${escapePrompt(buildResumeAgentCommand(agent, mode, model), prompt)}
 `.trim();
 
@@ -1087,6 +1164,9 @@ export async function startContainer(
     envArgs.push('-e', `${key}=${value}`);
   }
 
+  // Read config for overlay mounts and init script
+  const config = await readConfig();
+
   // Build volume arguments - config volumes plus optional mount
   const volumes = await getCredentialVolumes();
 
@@ -1095,6 +1175,14 @@ export async function startContainer(
   if (absoluteMountDir) {
     // Mount local directory to /work/app in the container
     volumes.push(`${absoluteMountDir}:/work/app`);
+
+    // Add overlay bind mounts for paths that need container isolation
+    // These must come after the bind mount so they overlay on top
+    const overlayVolumes = await createOverlayDirs(
+      containerName,
+      config.overlayMounts,
+    );
+    volumes.push(...overlayVolumes);
   }
 
   const volumeArgs = toVolumeArgs(volumes);
@@ -1129,6 +1217,7 @@ current_branch=$(git rev-parse --abbrev-ref HEAD)
 if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
   git switch -c "hermes/${branchName}"
 fi
+${config.initScript || ''}
 ${escapePrompt(agentCommand, fullPrompt)}
 `.trim();
     } else {
@@ -1136,6 +1225,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
       startupScript = `
 set -e
 cd /work/app
+${config.initScript || ''}
 ${escapePrompt(agentCommand, fullPrompt)}
 `.trim();
     }
@@ -1151,6 +1241,7 @@ gh auth setup-git
 gh repo clone ${repoInfo.fullName} app
 cd app
 git switch -c "hermes/${branchName}"
+${config.initScript || ''}
 ${escapePrompt(agentCommand, fullPrompt)}
 `.trim();
   }
@@ -1281,6 +1372,8 @@ export async function startShellContainer(
       hostEnvArgs.push('-e', `${key}=${value}`);
     }
   }
+  // Read config for overlay mounts and init script
+  const config = await readConfig();
 
   // Build volume arguments - config volumes plus optional mount
   const volumes = await getCredentialVolumes();
@@ -1289,6 +1382,13 @@ export async function startShellContainer(
   const absoluteMountDir = mountDir ? resolve(mountDir) : undefined;
   if (absoluteMountDir) {
     volumes.push(`${absoluteMountDir}:/work/app`);
+
+    // Add overlay bind mounts for paths that need container isolation
+    const overlayVolumes = await createOverlayDirs(
+      containerName,
+      config.overlayMounts,
+    );
+    volumes.push(...overlayVolumes);
   }
 
   const volumeArgs = toVolumeArgs(volumes);
@@ -1302,6 +1402,7 @@ export async function startShellContainer(
 set -e
 cd /work/app
 gh auth setup-git
+${config.initScript || ''}
 exec bash
 `.trim();
     } else {
@@ -1309,6 +1410,7 @@ exec bash
       startupScript = `
 set -e
 cd /work/app
+${config.initScript || ''}
 exec bash
 `.trim();
     }
@@ -1323,6 +1425,7 @@ cd /work
 gh auth setup-git
 gh repo clone ${repoInfo.fullName} app
 cd app
+${config.initScript || ''}
 exec bash
 `.trim();
   }

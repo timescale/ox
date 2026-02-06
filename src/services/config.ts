@@ -48,6 +48,21 @@ export interface HermesConfig {
    * When set, takes precedence over sandboxBaseImage.
    */
   buildSandboxFromDockerfile?: boolean | 'slim' | 'full' | string;
+
+  /**
+   * Relative paths to overlay with isolated Docker volume mounts (mount mode only).
+   * These paths get their own anonymous volumes so container-installed dependencies
+   * don't conflict with host files. Cleaned up when the session is deleted.
+   * Example: ['node_modules', 'download']
+   */
+  overlayMounts?: string[];
+
+  /**
+   * Shell command to run inside the container before starting the agent.
+   * Runs after cd into the working directory, in all modes.
+   * Example: './bun i'
+   */
+  initScript?: string;
 }
 
 // ============================================================================
