@@ -38,6 +38,24 @@ describe('parseGitHubUrl', () => {
     });
   });
 
+  test('parses SSH URL with ssh:// prefix and .git suffix', () => {
+    const result = parseGitHubUrl('ssh://git@github.com/owner/repo.git');
+    expect(result).toEqual({
+      owner: 'owner',
+      repo: 'repo',
+      fullName: 'owner/repo',
+    });
+  });
+
+  test('parses SSH URL with ssh:// prefix without .git suffix', () => {
+    const result = parseGitHubUrl('ssh://git@github.com/owner/repo');
+    expect(result).toEqual({
+      owner: 'owner',
+      repo: 'repo',
+      fullName: 'owner/repo',
+    });
+  });
+
   test('handles repo names with hyphens', () => {
     const result = parseGitHubUrl('https://github.com/my-org/my-repo.git');
     expect(result).toEqual({

@@ -17,13 +17,15 @@ export interface RepoInfo {
 
 /**
  * Parse a GitHub remote URL into owner/repo components.
- * Supports both HTTPS and SSH formats:
+ * Supports HTTPS and SSH formats:
  * - https://github.com/owner/repo.git
  * - git@github.com:owner/repo.git
+ * - ssh://git@github.com/owner/repo.git
  */
 export function parseGitHubUrl(remoteUrl: string): RepoInfo {
   let repoPath = remoteUrl;
   repoPath = repoPath.replace(/^https:\/\/github\.com\//, '');
+  repoPath = repoPath.replace(/^ssh:\/\/git@github\.com\//, '');
   repoPath = repoPath.replace(/^git@github\.com:/, '');
   repoPath = repoPath.replace(/\.git$/, '');
 
