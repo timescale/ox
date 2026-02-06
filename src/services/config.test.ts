@@ -248,6 +248,57 @@ agent: claude
       expect(readBack?.tigerServiceId).toBeUndefined();
       expect(readBack?.model).toBeUndefined();
     });
+
+    test('config with overlayMounts array can be written and read back', async () => {
+      const original: HermesConfig = {
+        agent: 'claude',
+        overlayMounts: ['node_modules', 'download'],
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack).toEqual(original);
+      expect(readBack?.overlayMounts).toEqual(['node_modules', 'download']);
+    });
+
+    test('config with initScript can be written and read back', async () => {
+      const original: HermesConfig = {
+        agent: 'claude',
+        initScript: './bun i',
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack).toEqual(original);
+      expect(readBack?.initScript).toBe('./bun i');
+    });
+
+    test('config with overlayMounts and initScript together', async () => {
+      const original: HermesConfig = {
+        agent: 'opencode',
+        overlayMounts: ['node_modules', '.cache', 'vendor/bundle'],
+        initScript: 'npm install && npm run build',
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack).toEqual(original);
+    });
+
+    test('config with empty overlayMounts array', async () => {
+      const original: HermesConfig = {
+        agent: 'claude',
+        overlayMounts: [],
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack?.overlayMounts).toEqual([]);
+    });
   });
 });
 
@@ -471,6 +522,41 @@ describe('readConfig (merged config)', () => {
     const config = await readConfig();
     expect(config?.tigerServiceId).toBeNull(); // project override with null
     expect(config?.agent).toBe('opencode');
+  });
+
+  test('project overlayMounts and initScript override user config', async () => {
+    await userConfig.write({
+      agent: 'claude',
+      overlayMounts: ['node_modules'],
+      initScript: 'npm install',
+    });
+
+    await projectConfig.write({
+      overlayMounts: ['node_modules', 'download'],
+      initScript: './bun i',
+    });
+
+    const config = await readConfig();
+    expect(config.agent).toBe('claude'); // from user
+    expect(config.overlayMounts).toEqual(['node_modules', 'download']); // project override
+    expect(config.initScript).toBe('./bun i'); // project override
+  });
+
+  test('user overlayMounts and initScript used when project does not set them', async () => {
+    await userConfig.write({
+      agent: 'claude',
+      overlayMounts: ['node_modules'],
+      initScript: 'npm install',
+    });
+
+    await projectConfig.write({
+      agent: 'opencode',
+    });
+
+    const config = await readConfig();
+    expect(config.agent).toBe('opencode'); // project override
+    expect(config.overlayMounts).toEqual(['node_modules']); // from user
+    expect(config.initScript).toBe('npm install'); // from user
   });
 });
 
