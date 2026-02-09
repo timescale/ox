@@ -52,15 +52,22 @@ export async function readFileFromContainer(
   const ex = extract();
 
   const result = new Promise<string>((resolve, reject) => {
+    let resolved = false;
     ex.on('entry', (_header, stream, next) => {
       const chunks: Buffer[] = [];
       stream.on('data', (c: Buffer) => chunks.push(c));
       stream.on('end', () => {
         resolve(Buffer.concat(chunks).toString('utf-8'));
+        resolved = true;
         next();
       });
     });
     ex.on('error', reject);
+    ex.on('finish', () => {
+      if (!resolved) {
+        reject(new Error('File not found in container'));
+      }
+    });
   });
 
   await proc.stdout.pipeTo(
