@@ -36,11 +36,12 @@ const claudeCredsValid = (creds?: ClaudeCredentialsJson | null): boolean => {
 };
 
 const readHostCredentials = async (): Promise<ClaudeCredentialsJson | null> => {
+  const { username } = userInfo();
   if (isMac()) {
     // Prefer this method on mac, to avoid any prompt for credentials
     try {
       const secretResult =
-        await Bun.$`security find-generic-password -s "Claude Code-credentials" -a "$USER" -w`.quiet();
+        await Bun.$`security find-generic-password -s "Claude Code-credentials" -a "${username}" -w`.quiet();
       const creds = secretResult.json() as ClaudeCredentialsJson;
       if (claudeCredsValid(creds)) {
         log.debug('Found valid claude credentials in macOS keychain');
@@ -57,10 +58,7 @@ const readHostCredentials = async (): Promise<ClaudeCredentialsJson | null> => {
 
   // Look in the OS keyring
   try {
-    const credsEntry = new AsyncEntry(
-      'Claude Code-credentials',
-      userInfo().username,
-    );
+    const credsEntry = new AsyncEntry('Claude Code-credentials', username);
     const creds = JSON.parse(
       (await credsEntry.getPassword()) || '{}',
     ) as ClaudeCredentialsJson;
