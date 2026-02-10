@@ -27,7 +27,7 @@ import {
 import { getGhConfigVolume } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
-import { getOpencodeConfigVolume } from './opencode';
+import { getOpencodeConfigFiles } from './opencode';
 import { runInDocker, type VirtualFile } from './runInDocker';
 
 /**
@@ -48,11 +48,15 @@ export const toVolumeArgs = (volumes: string[]): string[] =>
  * so Docker mounts them as files, not directories.
  */
 export const getCredentialVolumes = async (): Promise<string[]> => {
-  return Promise.all([getOpencodeConfigVolume(), getGhConfigVolume()]);
+  return Promise.all([getGhConfigVolume()]);
 };
 
 export const getCredentialFiles = async (): Promise<VirtualFile[]> => {
-  return getClaudeConfigFiles();
+  const [claudeFiles, opencodeFiles] = await Promise.all([
+    getClaudeConfigFiles(),
+    getOpencodeConfigFiles(),
+  ]);
+  return [...claudeFiles, ...opencodeFiles];
 };
 
 /**

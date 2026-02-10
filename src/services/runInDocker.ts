@@ -34,7 +34,7 @@ export interface RunInDockerResult {
   removed: Promise<void>;
   json: () => unknown;
   text: () => string;
-  rm: () => Promise<void>;
+  rm: (shouldThrow?: boolean) => Promise<void>;
 }
 
 export const runInDocker = async ({
@@ -136,7 +136,8 @@ export const runInDocker = async ({
         errorText: () => '',
         text: () => '',
         json: () => null,
-        rm: () => deferredRemoved.wrap(dockerContainerRm(containerId)),
+        rm: (shouldThrow) =>
+          deferredRemoved.wrap(dockerContainerRm(containerId, shouldThrow)),
         removed: deferredRemoved.promise,
       };
     });
@@ -151,7 +152,8 @@ export const runInDocker = async ({
           text: () => proc.text(),
           json: () => proc.json(),
           exited: Promise.resolve(proc.exitCode),
-          rm: () => deferredRemoved.wrap(dockerContainerRm(containerId)),
+          rm: (shouldThrow) =>
+            deferredRemoved.wrap(dockerContainerRm(containerId, shouldThrow)),
           removed: deferredRemoved.promise,
         })),
     );
@@ -162,7 +164,8 @@ export const runInDocker = async ({
       text: () => containerProc.text(),
       json: () => containerProc.json(),
       exited: Promise.resolve(containerProc.exitCode),
-      rm: () => deferredRemoved.wrap(dockerContainerRm(containerId)),
+      rm: (shouldThrow) =>
+        deferredRemoved.wrap(dockerContainerRm(containerId, shouldThrow)),
       removed: deferredRemoved.promise,
     });
   }

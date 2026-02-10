@@ -1,121 +1,207 @@
-import { mkdir, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { AsyncEntry } from '@napi-rs/keyring';
 import { file } from 'bun';
+import { Deferred } from '../types/deferred';
 import { readConfig } from './config';
+import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
   type RunInDockerResult,
   runInDocker,
+  type VirtualFile,
 } from './runInDocker';
 
-const HERMES_DIR = join(process.cwd(), '.hermes');
-const OPENCODE_CONFIG_DIR = join(HERMES_DIR, '.local', 'share', 'opencode');
-const OPENCODE_HOST_CONFIG_DIR = join(homedir(), '.local', 'share', 'opencode');
-const OPENCODE_AUTH_FILE_NAME = 'auth.json';
-const OPENCODE_LOCAL_AUTH_PATH = join(
-  OPENCODE_CONFIG_DIR,
-  OPENCODE_AUTH_FILE_NAME,
-);
+const homePaths = {
+  authJson: join(homedir(), '.local', 'share', 'opencode', 'auth.json'),
+};
+
+const containerPaths = {
+  authJson: join(CONTAINER_HOME, '.local', 'share', 'opencode', 'auth.json'),
+};
+
+// Keyed by provider name; each value has at least an optional `expires` timestamp
+type OpencodeAuthJson = Partial<Record<string, { expires?: number }>>;
+
+const authCredsValid = (creds?: OpencodeAuthJson | null): boolean => {
+  if (!creds) return false;
+  const entries = Object.entries(creds);
+  if (entries.length === 0) return false;
+  // At least one key with a non-expired entry
+  return entries.some(([_key, entry]) => {
+    if (!entry) return false;
+    if (entry.expires && entry.expires < Date.now()) return false;
+    return true;
+  });
+};
 
 /**
- * Check if the auth path is a directory (broken state from Docker mount bug)
- * and remove it if so.
+ * Read opencode credentials from the host system's config directory.
+ * This is a read-only source — opencode itself manages this file.
  */
-const fixBrokenAuthDir = async (): Promise<void> => {
+const readHostCredentials = async (): Promise<OpencodeAuthJson | null> => {
   try {
-    const stats = await stat(OPENCODE_LOCAL_AUTH_PATH);
-    if (stats.isDirectory()) {
-      log.warn('Found auth.json as a directory (broken state), removing it');
-      await rm(OPENCODE_LOCAL_AUTH_PATH, { recursive: true });
+    const hostAuth = file(homePaths.authJson);
+    if (!(await hostAuth.exists())) {
+      log.debug('Opencode auth.json not found in host config directory');
+      return null;
     }
-  } catch {
-    // Path doesn't exist, which is fine
+    const creds = (await hostAuth.json()) as OpencodeAuthJson;
+    if (authCredsValid(creds)) {
+      log.debug('Found valid opencode credentials in host config directory');
+      return creds;
+    }
+    log.debug(
+      'Opencode auth.json present in host config directory, but invalid.',
+    );
+  } catch (err) {
+    log.debug({ err }, 'Failed to read opencode auth.json from host.');
   }
+  return null;
+};
+
+const credsEntry = new AsyncEntry('hermes', 'opencode/auth.json');
+
+const readHermesCredentialCache =
+  async (): Promise<OpencodeAuthJson | null> => {
+    try {
+      const creds = JSON.parse(
+        (await credsEntry.getPassword()) || '{}',
+      ) as OpencodeAuthJson;
+      if (authCredsValid(creds)) {
+        log.debug('Found valid opencode credentials in hermes keyring');
+        return creds;
+      }
+      log.debug('Opencode credentials present in hermes keyring, but invalid.');
+    } catch {
+      log.debug('No opencode/auth.json found in hermes keyring');
+    }
+    return null;
+  };
+
+const writeHermesCredentialCache = async (
+  creds: OpencodeAuthJson,
+): Promise<void> => {
+  await credsEntry.setPassword(JSON.stringify(creds));
 };
 
 /**
- * Ensure the auth file exists (at minimum as an empty JSON object).
- * This is required so Docker can mount it as a file, not a directory.
- * The login flow will populate it with actual credentials.
+ * Merge host credentials into the cached credentials.
+ * Copies keys from host that are missing or expired locally.
+ * Returns the merged result (or the best available).
  */
-const ensureAuthFile = async (): Promise<void> => {
-  await mkdir(OPENCODE_CONFIG_DIR, { recursive: true });
-  await fixBrokenAuthDir();
+const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
+  const host = (await readHostCredentials()) || {};
+  const cached = (await readHermesCredentialCache()) || {};
 
-  const localAuth = file(OPENCODE_LOCAL_AUTH_PATH);
-  if (!(await localAuth.exists())) {
-    // Create empty JSON file so Docker mounts it as a file, not a directory
-    await Bun.write(OPENCODE_LOCAL_AUTH_PATH, '{}');
-  }
-};
-
-/**
- * Returns the Docker volume mount string for Opencode credentials.
- * Always returns a valid volume string since ensureAuthFile creates the file if needed.
- */
-export const getOpencodeConfigVolume = async (): Promise<string> => {
-  await ensureAuthFile();
-  return `${OPENCODE_LOCAL_AUTH_PATH}:/home/hermes/.local/share/opencode/${OPENCODE_AUTH_FILE_NAME}`;
-};
-
-const checkConfig = async () => {
-  await ensureAuthFile();
-
-  const hostAuth = file(
-    join(OPENCODE_HOST_CONFIG_DIR, OPENCODE_AUTH_FILE_NAME),
-  );
-  if (!(await hostAuth.exists())) {
-    log.info('Opencode auth.json not found in host config directory');
-    return;
-  }
-  const localAuth = file(OPENCODE_LOCAL_AUTH_PATH);
-  const localContent = await localAuth.json();
-  const hostContent = await hostAuth.json();
-  const keys = new Set([
-    ...Object.keys(localContent),
-    ...Object.keys(hostContent),
-  ]);
+  const keys = new Set([...Object.keys(cached), ...Object.keys(host)]);
   let changed = false;
   for (const key of keys) {
     if (
-      !localContent[key] ||
-      (localContent[key].expires &&
-        localContent[key].expires < Date.now() &&
-        hostContent[key])
+      host[key] &&
+      (!cached[key] || (cached[key]?.expires || 0) < (host[key]?.expires || 0))
     ) {
       log.debug(
-        `Adding missing or outdated key "${key}" to local opencode ${OPENCODE_AUTH_FILE_NAME} from host`,
+        `Adding missing or outdated key "${key}" to opencode credential cache from host`,
       );
-      localContent[key] = hostContent[key];
+      cached[key] = host[key];
       changed = true;
     }
   }
   if (changed) {
-    await localAuth.write(JSON.stringify(localContent, null, 2));
+    await writeHermesCredentialCache(cached);
   }
+  return cached;
+};
+
+const captureOpencodeCredentialsFromContainer = async (
+  containerId: string,
+): Promise<boolean> => {
+  try {
+    const content = await readFileFromContainer(
+      containerId,
+      containerPaths.authJson,
+    );
+    const creds = JSON.parse(content) as OpencodeAuthJson;
+    if (authCredsValid(creds)) {
+      log.debug('Valid opencode credentials found in container');
+      await writeHermesCredentialCache(creds);
+      return true;
+    }
+    log.debug('Invalid opencode credentials found in container');
+  } catch {
+    log.debug('No opencode/auth.json found in container');
+  }
+  return false;
+};
+
+/**
+ * Get the opencode auth config as VirtualFile(s) to write into containers.
+ */
+export const getOpencodeConfigFiles = async (): Promise<VirtualFile[]> => {
+  const creds = await mergeCredentials();
+  return [
+    {
+      path: containerPaths.authJson,
+      value: JSON.stringify(creds),
+    },
+  ];
 };
 
 export const runOpencodeInDocker = async ({
-  dockerArgs = ['--rm'],
+  dockerArgs = [],
   cmdArgs = [],
   dockerImage,
   interactive = false,
   shouldThrow = true,
-}: RunInDockerOptionsBase): Promise<RunInDockerResult> => {
-  await checkConfig();
+  files = [],
+}: RunInDockerOptionsBase): Promise<
+  RunInDockerResult & { credsCaptured: Promise<boolean> }
+> => {
+  const configFiles = await getOpencodeConfigFiles();
 
-  const configVolume = await getOpencodeConfigVolume();
-
-  return runInDocker({
-    dockerArgs: ['-v', configVolume, ...dockerArgs],
+  const result = await runInDocker({
+    dockerArgs,
     cmdArgs,
     cmdName: 'opencode',
     dockerImage,
     interactive,
     shouldThrow,
+    files: [...configFiles, ...files],
   });
+
+  const deferredCredsCaptured = new Deferred<boolean>();
+  const { containerId } = result;
+  if (containerId) {
+    result.exited
+      .then(async (code) => {
+        if (code) {
+          log.debug(
+            `Opencode exited with code ${code}, not saving credentials`,
+          );
+          deferredCredsCaptured.resolve(false);
+          return;
+        }
+        deferredCredsCaptured.wrap(
+          captureOpencodeCredentialsFromContainer(containerId),
+        );
+      })
+      .catch((err) => {
+        log.error({ err }, 'Failed to read credentials file from container');
+        deferredCredsCaptured.resolve(false);
+      })
+      .finally(async () => {
+        await result.rm().catch((err) => {
+          log.error({ err }, 'Failed to remove container');
+        });
+      });
+  }
+
+  return {
+    ...result,
+    credsCaptured: deferredCredsCaptured.promise,
+  };
 };
 
 export const checkOpencodeCredentials = async (
@@ -178,6 +264,7 @@ export const ensureOpencodeAuth = async (model?: string): Promise<boolean> => {
     console.error('\nError: Opencode login failed');
     return false;
   }
+  await proc.credsCaptured;
 
   // Verify credentials after login
   return await checkOpencodeCredentials(model);

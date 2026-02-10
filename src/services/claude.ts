@@ -94,7 +94,9 @@ const credsEntry = new AsyncEntry('hermes', 'claude/.credentials.json');
 const readHermesCredentialCache =
   async (): Promise<ClaudeCredentialsJson | null> => {
     try {
-      const creds = JSON.parse((await credsEntry.getPassword()) || '{}');
+      const creds = JSON.parse(
+        (await credsEntry.getPassword()) || '{}',
+      ) as ClaudeCredentialsJson;
       if (claudeCredsValid(creds)) {
         log.debug('Found valid claude credentials in hermes keyring');
         return creds;
