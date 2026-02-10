@@ -3,6 +3,7 @@ import { readFileFromContainer, writeFileToContainer } from './dockerFiles';
 
 // These tests require a running Docker daemon.
 // They spin up a lightweight alpine container for the duration of the suite.
+// Skip in CI where Docker is not available.
 
 let containerId: string;
 
@@ -18,7 +19,7 @@ afterAll(async () => {
   }
 });
 
-describe('dockerFiles', () => {
+describe.skipIf(!!process.env.CI)('dockerFiles', () => {
   describe('writeFileToContainer + readFileFromContainer roundtrip', () => {
     test('writes and reads back a simple text file', async () => {
       const path = '/tmp/test-simple.txt';
