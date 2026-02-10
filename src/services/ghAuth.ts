@@ -2,9 +2,10 @@
 // GitHub Authentication Service
 // ============================================================================
 
-import { chmod } from 'node:fs/promises';
+import { nanoid } from 'nanoid';
 import { resolveSandboxImage } from './docker';
-import { checkGhCredentials, getGhConfigVolume, ghConfigHostsFile } from './gh';
+import { captureGhCredentialsFromContainer, checkGhCredentials } from './gh';
+import { log } from './logger';
 
 // ============================================================================
 // Container-based Interactive Auth
@@ -43,18 +44,23 @@ async function drainStream(
 /**
  * Start gh auth login in a Docker container and parse the device code.
  * Returns a handle to wait for completion or cancel.
+ *
+ * Uses a straightforward `docker run` — no files need to be injected
+ * beforehand since `gh auth login` doesn't need existing credentials
+ * to start the OAuth device flow. After login completes, credentials
+ * are captured from the stopped container via `docker cp`.
  */
 export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
   const sandbox = await resolveSandboxImage();
-  const volume = await getGhConfigVolume();
+  const containerName = `hermes-gh-auth-${nanoid()}`;
+
   const proc = Bun.spawn(
     [
       'docker',
       'run',
-      '-i', // Interactive but not TTY - we control the flow
-      '--rm',
-      '-v',
-      volume,
+      '-i',
+      '--name',
+      containerName,
       sandbox.image,
       'gh',
       'auth',
@@ -71,6 +77,11 @@ export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
     },
   );
 
+  const cleanup = () => {
+    proc.kill();
+    Bun.$`docker rm -f ${containerName}`.quiet().nothrow();
+  };
+
   // Read initial output to get the device code
   // Expected format:
   // ! First copy your one-time code: XXXX-XXXX
@@ -82,7 +93,7 @@ export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
   // Read stderr until we get the device code, then continue draining
   const stderrReader = proc.stderr?.getReader();
   if (!stderrReader) {
-    proc.kill();
+    cleanup();
     return null;
   }
 
@@ -115,9 +126,9 @@ export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
   const url = urlMatch?.[1] ?? '';
 
   if (!code || !url) {
-    // Failed to parse, kill the process
+    // Failed to parse
     stderrReader.releaseLock();
-    proc.kill();
+    cleanup();
     return null;
   }
 
@@ -148,18 +159,19 @@ export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
       await Promise.all([stderrDrainPromise, stdoutDrainPromise]);
 
       if (exitCode !== 0) {
+        cleanup();
         return false;
       }
-      // Set restrictive permissions on the hosts file
-      const file = ghConfigHostsFile();
-      const hostsFile = Bun.file(file);
-      if (await hostsFile.exists()) {
-        await chmod(file, 0o600);
+
+      // Capture credentials from the stopped container
+      const captured = await captureGhCredentialsFromContainer(containerName);
+      if (!captured) {
+        log.debug('Failed to capture gh credentials from auth container');
       }
+      cleanup();
+
       return await checkGhCredentials();
     },
-    cancel: () => {
-      proc.kill();
-    },
+    cancel: cleanup,
   };
 }

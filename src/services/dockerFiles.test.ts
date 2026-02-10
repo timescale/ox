@@ -3,22 +3,22 @@ import { readFileFromContainer, writeFileToContainer } from './dockerFiles';
 
 // These tests require a running Docker daemon.
 // They spin up a lightweight alpine container for the duration of the suite.
+// Skip in CI where Docker is not available.
 
-let containerId: string;
+describe.skipIf(!!process.env.CI)('dockerFiles', () => {
+  let containerId: string;
 
-beforeAll(async () => {
-  const proc =
-    await Bun.$`docker run -d --rm alpine:latest tail -f /dev/null`.quiet();
-  containerId = proc.text().trim();
-});
+  beforeAll(async () => {
+    const proc =
+      await Bun.$`docker run -d --rm alpine:latest tail -f /dev/null`.quiet();
+    containerId = proc.text().trim();
+  });
 
-afterAll(async () => {
-  if (containerId) {
-    await Bun.$`docker kill ${containerId}`.quiet().catch(() => {});
-  }
-});
-
-describe('dockerFiles', () => {
+  afterAll(async () => {
+    if (containerId) {
+      await Bun.$`docker kill ${containerId}`.quiet().catch(() => {});
+    }
+  });
   describe('writeFileToContainer + readFileFromContainer roundtrip', () => {
     test('writes and reads back a simple text file', async () => {
       const path = '/tmp/test-simple.txt';
@@ -94,13 +94,13 @@ describe('dockerFiles', () => {
 
   describe('readFileFromContainer error handling', () => {
     test('rejects when reading a nonexistent file', async () => {
-      await expect(
+      expect(
         readFileFromContainer(containerId, '/tmp/does-not-exist.txt'),
       ).rejects.toThrow();
     });
 
     test('rejects when reading from an invalid container', async () => {
-      await expect(
+      expect(
         readFileFromContainer('nonexistent-container-id', '/tmp/any.txt'),
       ).rejects.toThrow();
     });
@@ -108,7 +108,7 @@ describe('dockerFiles', () => {
 
   describe('writeFileToContainer error handling', () => {
     test('rejects when writing to an invalid container', async () => {
-      await expect(
+      expect(
         writeFileToContainer(
           'nonexistent-container-id',
           '/tmp/any.txt',

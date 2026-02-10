@@ -1,44 +1,207 @@
-import { chmod, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { AsyncEntry } from '@napi-rs/keyring';
 import { YAML } from 'bun';
-import { projectConfigDir } from './config';
+import { Deferred } from '../types/deferred';
+import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
   type RunInDockerResult,
   runInDocker,
+  type VirtualFile,
 } from './runInDocker';
 
-export const ghConfigDir = () => join(projectConfigDir(), 'gh');
-export const ghConfigHostsFile = () => join(ghConfigDir(), 'hosts.yml');
-export const ghConfigVolume = () => `${ghConfigDir()}:/home/hermes/.config/gh`;
+const containerPaths = {
+  hostsYml: join(CONTAINER_HOME, '.config', 'gh', 'hosts.yml'),
+};
+
+export interface GhHostsYml {
+  [host: string]:
+    | {
+        oauth_token?: string;
+        user?: string;
+        git_protocol?: string;
+      }
+    | undefined;
+}
+
+const ghCredsValid = (creds?: GhHostsYml | null): boolean => {
+  if (!creds) return false;
+  const hosts = Object.keys(creds);
+  if (hosts.length === 0) return false;
+  // At least one host with an oauth_token
+  return hosts.some((host) => !!creds[host]?.oauth_token);
+};
 
 /**
- * Returns the Docker volume mount string for gh credentials.
- * Always returns a valid volume string since ensureCredentialsFile creates the file if needed.
+ * Read gh credentials from the host system's gh CLI.
+ * Uses `gh auth token` and `gh api user` to get the token and username.
  */
-export const getGhConfigVolume = async (): Promise<string> => {
-  await mkdir(ghConfigDir(), { recursive: true });
-  return ghConfigVolume();
+const readHostCredentials = async (): Promise<GhHostsYml | null> => {
+  try {
+    const tokenResult = await Bun.$`gh auth token -h github.com`.quiet();
+    const token = tokenResult.stdout.toString().trim() || null;
+    if (!token) {
+      log.debug('No gh auth token found on host');
+      return null;
+    }
+    const userResult =
+      await Bun.$`gh api user --jq '.login' 2>/dev/null`.quiet();
+    const user = userResult.stdout.toString().trim() || null;
+    if (!user) {
+      log.debug('gh auth token found but could not determine user');
+      return null;
+    }
+    log.debug('Found valid gh credentials on host');
+    return {
+      'github.com': {
+        oauth_token: token,
+        user,
+        git_protocol: 'https',
+      },
+    };
+  } catch {
+    log.debug('No host gh credentials found');
+    return null;
+  }
+};
+
+const credsEntry = new AsyncEntry('hermes', 'gh/hosts.yml');
+
+const readHermesCredentialCache = async (): Promise<GhHostsYml | null> => {
+  try {
+    const raw = await credsEntry.getPassword();
+    if (!raw) {
+      log.debug('No gh/hosts.yml found in hermes keyring');
+      return null;
+    }
+    const creds = YAML.parse(raw) as GhHostsYml;
+    if (ghCredsValid(creds)) {
+      log.debug('Found valid gh credentials in hermes keyring');
+      return creds;
+    }
+    log.debug('gh credentials present in hermes keyring, but invalid.');
+  } catch {
+    log.debug('No gh/hosts.yml found in hermes keyring');
+  }
+  return null;
+};
+
+export const writeGhCredentialCache = async (
+  creds: GhHostsYml,
+): Promise<void> => {
+  await credsEntry.setPassword(YAML.stringify(creds));
+};
+
+/**
+ * Capture gh credentials from an exited container and cache them in the keyring.
+ */
+export const captureGhCredentialsFromContainer = async (
+  containerId: string,
+): Promise<boolean> => {
+  try {
+    const content = await readFileFromContainer(
+      containerId,
+      containerPaths.hostsYml,
+    );
+    const creds = YAML.parse(content) as GhHostsYml;
+    if (ghCredsValid(creds)) {
+      log.debug('Valid gh credentials found in container');
+      await writeGhCredentialCache(creds);
+      return true;
+    }
+    log.debug('Invalid gh credentials found in container');
+  } catch {
+    log.debug('No gh/hosts.yml found in container');
+  }
+  return false;
+};
+
+/**
+ * Get the best available gh credentials (host first, then keyring cache).
+ */
+const resolveCredentials = async (): Promise<GhHostsYml> => {
+  const hostCreds = await readHostCredentials();
+  if (hostCreds && ghCredsValid(hostCreds)) {
+    // Cache host creds in keyring for when host gh isn't available
+    await writeGhCredentialCache(hostCreds);
+    return hostCreds;
+  }
+
+  const cachedCreds = await readHermesCredentialCache();
+  if (cachedCreds && ghCredsValid(cachedCreds)) {
+    return cachedCreds;
+  }
+
+  return {};
+};
+
+/**
+ * Get the gh config as VirtualFile(s) to write into containers.
+ */
+export const getGhConfigFiles = async (): Promise<VirtualFile[]> => {
+  const creds = await resolveCredentials();
+  return [
+    {
+      path: containerPaths.hostsYml,
+      value: YAML.stringify(creds),
+    },
+  ];
 };
 
 export const runGhInDocker = async ({
-  dockerArgs = ['--rm'],
+  dockerArgs = [],
   cmdArgs = [],
   dockerImage,
   interactive = false,
   shouldThrow = true,
-}: RunInDockerOptionsBase): Promise<RunInDockerResult> => {
-  const configVolume = await getGhConfigVolume();
+  files = [],
+  mountCwd,
+}: RunInDockerOptionsBase): Promise<
+  RunInDockerResult & { credsCaptured: Promise<boolean> }
+> => {
+  const configFiles = await getGhConfigFiles();
 
-  return runInDocker({
-    dockerArgs: ['-v', configVolume, ...dockerArgs],
+  const result = await runInDocker({
+    dockerArgs,
     cmdArgs,
     cmdName: 'gh',
     dockerImage,
     interactive,
     shouldThrow,
+    files: [...configFiles, ...files],
+    mountCwd,
   });
+
+  const deferredCredsCaptured = new Deferred<boolean>();
+  const { containerId } = result;
+  if (containerId) {
+    result.exited
+      .then(async (code) => {
+        if (code) {
+          log.debug(`gh exited with code ${code}, not saving credentials`);
+          deferredCredsCaptured.resolve(false);
+          return;
+        }
+        deferredCredsCaptured.wrap(
+          captureGhCredentialsFromContainer(containerId),
+        );
+      })
+      .catch((err) => {
+        log.error({ err }, 'Failed to read gh credentials file from container');
+        deferredCredsCaptured.resolve(false);
+      })
+      .finally(async () => {
+        await result.rm().catch((err) => {
+          log.error({ err }, 'Failed to remove container');
+        });
+      });
+  }
+
+  return {
+    ...result,
+    credsCaptured: deferredCredsCaptured.promise,
+  };
 };
 
 export const checkGhCredentials = async (): Promise<boolean> => {
@@ -52,50 +215,21 @@ export const checkGhCredentials = async (): Promise<boolean> => {
   return exitCode === 0;
 };
 
-async function getHostGhCreds(): Promise<null | {
-  token: string;
-  user: string;
-}> {
-  try {
-    const tokenResult = await Bun.$`gh auth token -h github.com`.quiet();
-    const token = tokenResult.stdout.toString().trim() || null;
-    if (!token) return null;
-    const userResult =
-      await Bun.$`gh api user --jq '.login' 2>/dev/null`.quiet();
-    const user = userResult.stdout.toString().trim() || null;
-    if (!user) return null;
-    return { token, user };
-  } catch {
-    return null;
-  }
-}
-
+/**
+ * Try to apply host gh credentials to the hermes keyring cache.
+ * Returns true if valid credentials were found and cached.
+ */
 export async function applyHostGhCreds(): Promise<boolean> {
-  // attempt to use host credentials
-  const hostCreds = await getHostGhCreds();
-  if (hostCreds) {
-    const file = ghConfigHostsFile();
-    await Bun.write(
-      file,
-      YAML.stringify({
-        'github.com': {
-          oauth_token: hostCreds.token,
-          user: hostCreds.user,
-          git_protocol: 'https',
-        },
-      }),
-    );
-
-    // Set restrictive permissions on the hosts file
-    await chmod(file, 0o600);
-    if (await checkGhCredentials()) {
-      log.debug('Successfully imported host credentials for gh');
-      return true;
-    }
-    log.debug('Failed to import host credentials for gh');
-  } else {
-    log.debug('No host credentials found for gh');
+  const hostCreds = await readHostCredentials();
+  if (!hostCreds || !ghCredsValid(hostCreds)) {
+    log.debug('No valid host credentials found for gh');
+    return false;
   }
-
+  await writeGhCredentialCache(hostCreds);
+  if (await checkGhCredentials()) {
+    log.debug('Successfully imported host credentials for gh');
+    return true;
+  }
+  log.debug('Failed to validate imported host credentials for gh');
   return false;
 }

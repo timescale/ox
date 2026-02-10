@@ -24,7 +24,7 @@ import {
   projectConfigDir,
   readConfig,
 } from './config';
-import { getGhConfigVolume } from './gh';
+import { getGhConfigFiles } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
 import { getOpencodeConfigFiles } from './opencode';
@@ -42,21 +42,13 @@ function base64Encode(text: string): string {
 export const toVolumeArgs = (volumes: string[]): string[] =>
   volumes.flatMap((v) => ['-v', v]);
 
-/**
- * Build the list of credential volume mounts for agent containers.
- * Ensures credential files exist (creating empty JSON files if needed)
- * so Docker mounts them as files, not directories.
- */
-export const getCredentialVolumes = async (): Promise<string[]> => {
-  return Promise.all([getGhConfigVolume()]);
-};
-
 export const getCredentialFiles = async (): Promise<VirtualFile[]> => {
-  const [claudeFiles, opencodeFiles] = await Promise.all([
+  const [claudeFiles, opencodeFiles, ghFiles] = await Promise.all([
     getClaudeConfigFiles(),
     getOpencodeConfigFiles(),
+    getGhConfigFiles(),
   ]);
-  return [...claudeFiles, ...opencodeFiles];
+  return [...claudeFiles, ...opencodeFiles, ...ghFiles];
 };
 
 /**
@@ -930,9 +922,8 @@ export async function resumeSession(
   const baseName = container.Name.replace(/\//g, '').trim();
   const containerName = `${baseName}-resumed-${resumeSuffix}`;
 
-  // Mount config volumes for agent credentials and session continuity
-  // If mountDir is provided, add it as a volume mount
-  const volumes = await getCredentialVolumes();
+  // Build volume mounts (mountDir, overlay mounts, etc.)
+  const volumes: string[] = [];
   const files = await getCredentialFiles();
 
   // Resolve mount directory to absolute path if provided
@@ -1144,8 +1135,8 @@ export async function startContainer(
   // Read config for overlay mounts and init script
   const config = await readConfig();
 
-  // Build volume arguments - config volumes plus optional mount
-  const volumes = await getCredentialVolumes();
+  // Build volume mounts (mountDir, overlay mounts, etc.)
+  const volumes: string[] = [];
   const files = await getCredentialFiles();
 
   // Resolve mount directory to absolute path if provided
@@ -1320,8 +1311,8 @@ export async function startShellContainer(
   // Read config for overlay mounts and init script
   const config = await readConfig();
 
-  // Build volume arguments - config volumes plus optional mount
-  const volumes = await getCredentialVolumes();
+  // Build volume mounts (mountDir, overlay mounts, etc.)
+  const volumes: string[] = [];
   const files = await getCredentialFiles();
 
   // Resolve mount directory to absolute path if provided
