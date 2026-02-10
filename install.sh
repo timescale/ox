@@ -53,23 +53,47 @@ esac
 
 # --- Function definitions ---
 
+is_interactive() {
+  # Check if /dev/tty is available for user interaction
+  [ -t 0 ] || [ -e /dev/tty ]
+}
+
+prompt_yn() {
+  local prompt="$1"
+  local reply
+  read -r -p "$prompt [y/N]: " reply < /dev/tty
+  [[ "$reply" =~ ^[Yy]$ ]]
+}
+
 ensure_path_configured() {
   # Check if ~/.local/bin is in PATH
   if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo ""
     echo -e "${YELLOW}!${NC} $INSTALL_DIR is not in your PATH"
 
-    # Add to shell rc file
+    # Check if rc file needs modification
     if [ -f "$SHELL_RC" ]; then
       # shellcheck disable=SC2016
       if ! grep -q 'export PATH="\$HOME/.local/bin:\$PATH"' "$SHELL_RC"; then
-        {
+        if is_interactive; then
+          if prompt_yn "Add $INSTALL_DIR to PATH in $SHELL_RC?"; then
+            {
+              echo ""
+              echo '# Added by hermes installer'
+              # shellcheck disable=SC2016
+              echo 'export PATH="$HOME/.local/bin:$PATH"'
+            } >> "$SHELL_RC"
+            echo -e "${GREEN}✓${NC} Added $INSTALL_DIR to PATH in $SHELL_RC"
+          else
+            echo ""
+            echo "To add it manually, run:"
+            echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $SHELL_RC"
+          fi
+        else
           echo ""
-          echo '# Added by hermes installer'
-          # shellcheck disable=SC2016
-          echo 'export PATH="$HOME/.local/bin:$PATH"'
-        } >> "$SHELL_RC"
-        echo -e "${GREEN}✓${NC} Added $INSTALL_DIR to PATH in $SHELL_RC"
+          echo "To add it manually, run:"
+          echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $SHELL_RC"
+        fi
       fi
     fi
 
@@ -102,14 +126,24 @@ configure_shell_completions() {
     return
   fi
 
-  # Add completion to shell rc
-  {
+  if is_interactive; then
+    if prompt_yn "Add shell completions to $SHELL_RC?"; then
+      {
+        echo ""
+        echo "# Hermes shell completions"
+        echo "source <(hermes complete $shell_type)"
+      } >> "$SHELL_RC"
+      echo -e "${GREEN}✓${NC} Added shell completions to $SHELL_RC"
+    else
+      echo ""
+      echo "To add shell completions manually, run:"
+      echo "  echo 'source <(hermes complete $shell_type)' >> $SHELL_RC"
+    fi
+  else
     echo ""
-    echo "# Hermes shell completions"
-    echo "source <(hermes complete $shell_type)"
-  } >> "$SHELL_RC"
-
-  echo -e "${GREEN}✓${NC} Added shell completions to $SHELL_RC"
+    echo "To add shell completions manually, run:"
+    echo "  echo 'source <(hermes complete $shell_type)' >> $SHELL_RC"
+  fi
 }
 
 verify_installation() {
