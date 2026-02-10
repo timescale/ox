@@ -57,7 +57,11 @@ type SessionsView =
   | { type: 'init' } // Initial loading state
   | { type: 'docker' }
   | { type: 'config' }
-  | { type: 'prompt'; resumeSession?: HermesSession }
+  | {
+      type: 'prompt';
+      resumeSession?: HermesSession;
+      initialPromptPrefix?: string;
+    }
   | {
       type: 'starting';
       prompt: string;
@@ -548,9 +552,16 @@ function SessionsApp({
   );
 
   // Handle resume from session detail - navigate to PromptScreen with resume context
-  const handleResume = useCallback((session: HermesSession) => {
-    setView({ type: 'prompt', resumeSession: session });
-  }, []);
+  const handleResume = useCallback(
+    (session: HermesSession, promptPrefix?: string) => {
+      setView({
+        type: 'prompt',
+        resumeSession: session,
+        initialPromptPrefix: promptPrefix,
+      });
+    },
+    [],
+  );
 
   // ---- Initial Loading View ----
   if (view.type === 'init') {
@@ -606,7 +617,7 @@ function SessionsApp({
 
   // ---- Prompt Screen View ----
   if (view.type === 'prompt') {
-    const { resumeSession: resumeSess } = view;
+    const { resumeSession: resumeSess, initialPromptPrefix } = view;
     return (
       <>
         <PromptScreen
@@ -617,6 +628,7 @@ function SessionsApp({
           resumeSession={resumeSess}
           initialMountDir={resumeSess?.mountDir ?? initialMountDir}
           forceMountMode={!isGitRepo}
+          initialPromptPrefix={initialPromptPrefix}
           onSubmit={({ prompt, agent, model, mode, mountDir }) => {
             if (resumeSess) {
               // Resume flow - use resumeSessionFlow for loading screen

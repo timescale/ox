@@ -1,23 +1,31 @@
 import { useKeyboard } from '@opentui/react';
 import open from 'open';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWindowSize } from '../hooks/useWindowSize';
 import { copyToClipboard } from '../services/clipboard';
 import {
+  type ContainerDiffResult,
+  getContainerDiff,
   getSession,
   type HermesSession,
   removeContainer,
   stopContainer,
 } from '../services/docker';
-import { getPrForBranch, type PrInfo } from '../services/github';
+import {
+  getPrForBranch,
+  type PrInfo,
+  pushAndCreatePr,
+} from '../services/github';
 import { log } from '../services/logger';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { formatShellError, type ShellError } from '../utils';
 import { ConfirmModal } from './ConfirmModal';
+import { DiffViewer } from './DiffViewer';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
 import { LogViewer } from './LogViewer';
+import { OptionsModal } from './OptionsModal';
 import { Toast, type ToastType } from './Toast';
 
 /** Cache TTL in milliseconds (60 seconds) */
@@ -27,12 +35,13 @@ export interface SessionDetailProps {
   session: HermesSession;
   onBack: () => void;
   onAttach: (containerId: string) => void;
-  onResume: (session: HermesSession) => void;
+  onResume: (session: HermesSession, promptPrefix?: string) => void;
   onSessionDeleted: () => void;
   onNewPrompt?: () => void;
 }
 
-type ModalType = 'stop' | 'delete' | null;
+type ModalType = 'stop' | 'delete' | 'review' | null;
+type DetailTab = 'logs' | 'diff';
 
 interface ToastState {
   message: string;
@@ -99,8 +108,19 @@ export function SessionDetail({
   const [actionInProgress, setActionInProgress] = useState(false);
   const { isTall } = useWindowSize();
 
+  // Diff review state
+  const [activeTab, setActiveTab] = useState<DetailTab>('logs');
+  const [diffData, setDiffData] = useState<ContainerDiffResult | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+
+  // Track previous status for auto-switching to diff on task completion
+  const prevStatusRef = useRef(initialSession.status);
+  // Track selected file in DiffViewer for targeted follow-up
+  const [selectedDiffFile, setSelectedDiffFile] = useState<string | null>(null);
+
   const isRunning = session.status === 'running';
   const isStopped = session.status === 'exited' || session.status === 'dead';
+  const isGitSession = session.repo !== 'local';
 
   // Get PR info from cache
   const cachedPr = prCache[session.containerId];
@@ -133,7 +153,32 @@ export function SessionDetail({
     const interval = setInterval(async () => {
       const updated = await getSession(session.containerId);
       if (updated) {
+        const wasRunning = prevStatusRef.current === 'running';
+        const isNowStopped =
+          updated.status === 'exited' || updated.status === 'dead';
+
         setSession(updated);
+        prevStatusRef.current = updated.status;
+
+        // Auto-switch to diff view when task completes
+        if (
+          wasRunning &&
+          isNowStopped &&
+          updated.repo !== 'local' &&
+          !diffData
+        ) {
+          setDiffLoading(true);
+          setActiveTab('diff');
+          try {
+            const result = await getContainerDiff(updated.containerId);
+            setDiffData(result);
+          } catch (err) {
+            log.error({ err }, 'Failed to auto-load diff');
+            setActiveTab('logs');
+          } finally {
+            setDiffLoading(false);
+          }
+        }
       } else {
         // Container no longer exists
         setToast({ message: 'Container no longer exists', type: 'error' });
@@ -144,7 +189,7 @@ export function SessionDetail({
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [session.containerId, onSessionDeleted, fetchPrInfo]);
+  }, [session.containerId, onSessionDeleted, fetchPrInfo, diffData]);
 
   const showToast = useCallback((message: string, type: ToastType) => {
     setToast({ message, type });
@@ -184,9 +229,12 @@ export function SessionDetail({
     }
   }, [session.containerId, showToast, onSessionDeleted]);
 
-  const handleResume = useCallback(() => {
-    onResume(session);
-  }, [onResume, session]);
+  const handleResume = useCallback(
+    (promptPrefix?: string) => {
+      onResume(session, promptPrefix);
+    },
+    [onResume, session],
+  );
 
   const handleLogError = useCallback(
     (error: string) => {
@@ -243,6 +291,78 @@ export function SessionDetail({
     }
   }, [session.branch, showToast]);
 
+  // Load and show diff from the stopped container
+  const handleViewDiff = useCallback(async () => {
+    if (activeTab === 'diff') {
+      setActiveTab('logs');
+      return;
+    }
+    // Use cached diff if available
+    if (diffData) {
+      setActiveTab('diff');
+      return;
+    }
+    setDiffLoading(true);
+    setActiveTab('diff');
+    try {
+      const result = await getContainerDiff(session.containerId);
+      setDiffData(result);
+    } catch (err) {
+      log.error({ err }, 'Failed to load diff');
+      showToast(
+        `Failed to load diff: ${err instanceof Error ? err.message : String(err)}`,
+        'error',
+      );
+      setActiveTab('logs');
+    } finally {
+      setDiffLoading(false);
+    }
+  }, [activeTab, diffData, session.containerId, showToast]);
+
+  // Push branch and create PR from the diff view
+  const handleCreatePr = useCallback(async () => {
+    if (prInfo) {
+      // PR already exists, just open it
+      handlePrClick();
+      return;
+    }
+    setActionInProgress(true);
+    showToast('Pushing branch and creating PR...', 'info');
+    try {
+      const pr = await pushAndCreatePr(
+        session.containerId,
+        session.repo,
+        session.branch,
+        diffData?.stat,
+        diffData?.log,
+      );
+      if (pr) {
+        setPrInfo(session.containerId, pr);
+        showToast(`PR #${pr.number} created`, 'success');
+        open(pr.url).catch(() => {});
+      } else {
+        showToast('Failed to create PR', 'error');
+      }
+    } catch (err) {
+      log.error({ err }, 'Failed to create PR');
+      showToast(
+        `Failed to create PR: ${err instanceof Error ? err.message : String(err)}`,
+        'error',
+      );
+    } finally {
+      setActionInProgress(false);
+    }
+  }, [
+    prInfo,
+    handlePrClick,
+    session.containerId,
+    session.repo,
+    session.branch,
+    diffData,
+    showToast,
+    setPrInfo,
+  ]);
+
   // Keyboard shortcuts
   useKeyboard((key) => {
     // Ignore if modal is open or action in progress
@@ -261,7 +381,7 @@ export function SessionDetail({
       setModal('delete');
     } else if (key.raw === 'a' && isRunning) {
       onAttach(session.containerId);
-    } else if (key.raw === 'r' && isStopped) {
+    } else if (key.raw === 'r' && isStopped && activeTab !== 'diff') {
       handleResume();
     } else if (key.raw === 'o') {
       // Open PR in browser
@@ -270,7 +390,23 @@ export function SessionDetail({
         return;
       }
       handlePrClick();
-    } else if (key.raw === 'g') {
+    } else if (key.raw === 'v' && isStopped && isGitSession) {
+      handleViewDiff();
+    } else if (
+      key.raw === 'c' &&
+      isStopped &&
+      isGitSession &&
+      activeTab === 'diff' &&
+      !prInfo
+    ) {
+      setModal('review');
+    } else if (key.raw === 'f' && isStopped && activeTab === 'diff') {
+      if (selectedDiffFile) {
+        handleResume(`Regarding changes in \`${selectedDiffFile}\`: `);
+      } else {
+        handleResume();
+      }
+    } else if (key.raw === 'g' && activeTab !== 'diff') {
       handleGitSwitch();
     }
   });
@@ -299,12 +435,20 @@ export function SessionDetail({
       : []),
     ...(isStopped
       ? [
-          ['r', 'esume'],
+          ...(activeTab === 'diff'
+            ? [
+                ...(prInfo ? [['o', 'pen PR']] : [['c', 'ode review']]),
+                ['f', 'ollow-up'],
+              ]
+            : [['r', 'esume']]),
+          ...(isGitSession
+            ? [['v', activeTab === 'diff' ? 'iew logs' : 'iew diff']]
+            : []),
           ['d', 'elete'],
         ]
       : []),
-    ...(prInfo ? [['o', 'pen PR']] : []),
-    ['g', 'it switch'],
+    ...(activeTab !== 'diff' && prInfo ? [['o', 'pen PR']] : []),
+    ...(activeTab !== 'diff' ? [['g', 'it switch']] : []),
     ['b', 'ack'],
   ] as unknown as readonly [string, string][];
 
@@ -383,20 +527,35 @@ export function SessionDetail({
         </text>
       </box>
 
-      {/* Logs section */}
+      {/* Content section - Logs or Diff */}
       <box
-        title="Logs"
+        title={activeTab === 'logs' ? 'Logs' : 'Review'}
         border
         borderStyle="single"
         flexGrow={1}
         flexShrink={1}
         flexDirection="column"
       >
-        <LogViewer
-          containerId={session.containerId}
-          isInteractive={session.interactive}
-          onError={handleLogError}
-        />
+        {activeTab === 'logs' ? (
+          <LogViewer
+            containerId={session.containerId}
+            isInteractive={session.interactive}
+            onError={handleLogError}
+          />
+        ) : diffLoading ? (
+          <box flexGrow={1} alignItems="center" justifyContent="center">
+            <text fg={theme.textMuted}>Loading diff...</text>
+          </box>
+        ) : diffData ? (
+          <DiffViewer
+            diffData={diffData}
+            onSelectedFileChange={setSelectedDiffFile}
+          />
+        ) : (
+          <box flexGrow={1} alignItems="center" justifyContent="center">
+            <text fg={theme.textMuted}>No diff available</text>
+          </box>
+        )}
       </box>
 
       <HotkeysBar compact keyList={actions} />
@@ -422,6 +581,41 @@ export function SessionDetail({
           confirmLabel="Delete"
           confirmColor={theme.warning}
           onConfirm={handleDelete}
+          onCancel={() => setModal(null)}
+        />
+      )}
+
+      {modal === 'review' && (
+        <OptionsModal
+          title="Code Review"
+          message="How would you like to proceed with these changes?"
+          minWidth={50}
+          maxWidth={65}
+          options={[
+            {
+              key: 'a',
+              name: 'Approve & Create PR',
+              description: 'Push branch and open a pull request',
+              onSelect: () => {
+                setModal(null);
+                handleCreatePr();
+              },
+              color: theme.success,
+            },
+            {
+              key: 'x',
+              name: 'Request Changes',
+              description: 'Resume with feedback for the agent',
+              onSelect: () => {
+                setModal(null);
+                const prefix = selectedDiffFile
+                  ? `Please fix the following issues in \`${selectedDiffFile}\`: `
+                  : 'Please fix the following issues: ';
+                handleResume(prefix);
+              },
+              color: theme.warning,
+            },
+          ]}
           onCancel={() => setModal(null)}
         />
       )}

@@ -5,7 +5,7 @@ import type {
   TextareaRenderable,
 } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import packageJson from '../../package.json' with { type: 'json' };
 import {
   AGENT_INFO_MAP,
@@ -40,6 +40,8 @@ export interface PromptScreenProps {
   initialMountDir?: string | null;
   /** If true, mount mode is forced (no GitHub remote available) */
   forceMountMode?: boolean;
+  /** Optional initial text to pre-fill in the textarea */
+  initialPromptPrefix?: string;
   onSubmit: (result: {
     prompt: string;
     agent: AgentType;
@@ -93,6 +95,7 @@ export function PromptScreen({
   resumeSession,
   initialMountDir,
   forceMountMode = false,
+  initialPromptPrefix,
   onSubmit,
   onShell,
   onViewSessions,
@@ -126,6 +129,13 @@ export function PromptScreen({
   const model =
     currentModels?.find((m) => m.id === modelId) ??
     (modelId && agent === 'opencode' ? openCodeIdToModel(modelId) : null);
+
+  // Pre-fill textarea with initial prompt prefix (e.g., from targeted follow-up)
+  useEffect(() => {
+    if (initialPromptPrefix && textareaRef.current) {
+      textareaRef.current.insertText(initialPromptPrefix);
+    }
+  }, [initialPromptPrefix]);
 
   // Handle agent switch with model matching (disabled when resuming)
   const switchAgent = useCallback(() => {

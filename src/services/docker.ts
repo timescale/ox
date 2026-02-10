@@ -721,6 +721,104 @@ export async function getContainerLogs(
   return normalizeLineEndings(result.stdout.toString());
 }
 
+// ============================================================================
+// Container Diff
+// ============================================================================
+
+export interface ContainerDiffResult {
+  /** Unified diff output */
+  diff: string;
+  /** Summary of files changed (git diff --stat) */
+  stat: string;
+  /** Commit log (git log --oneline) */
+  log: string;
+  /** The base branch that was diffed against */
+  baseBranch: string;
+  /** Agent-generated summary from .hermes/summary.md (if available) */
+  summary?: string;
+}
+
+/**
+ * Get the git diff from a stopped container.
+ * Commits the container to a temp image, runs git commands in an ephemeral
+ * container, then cleans up.
+ */
+export async function getContainerDiff(
+  nameOrId: string,
+): Promise<ContainerDiffResult> {
+  const suffix = nanoid(6).toLowerCase();
+  const tempImage = `hermes-diff:${suffix}`;
+
+  try {
+    // Commit the stopped container to a temp image
+    await $`docker commit ${nameOrId} ${tempImage}`.quiet();
+
+    // Run a compound git command to get base branch, log, stat, and diff
+    // Uses delimiters to split the output into sections
+    const script = `
+set -e
+cd /work/app
+
+# Detect base branch
+if git rev-parse --verify origin/main >/dev/null 2>&1; then
+  BASE="origin/main"
+elif git rev-parse --verify main >/dev/null 2>&1; then
+  BASE="main"
+elif git rev-parse --verify origin/master >/dev/null 2>&1; then
+  BASE="origin/master"
+elif git rev-parse --verify master >/dev/null 2>&1; then
+  BASE="master"
+else
+  BASE="HEAD~1"
+fi
+
+echo "===BASE==="
+echo "$BASE"
+echo "===SUMMARY==="
+if [ -f .hermes/summary.md ]; then cat .hermes/summary.md; else echo ""; fi
+echo "===LOG==="
+git log --oneline "$BASE..HEAD" 2>/dev/null || echo "(no commits)"
+echo "===STAT==="
+git diff --stat "$BASE...HEAD" 2>/dev/null || git diff --stat "$BASE..HEAD" 2>/dev/null || echo "(no changes)"
+echo "===DIFF==="
+git diff "$BASE...HEAD" 2>/dev/null || git diff "$BASE..HEAD" 2>/dev/null || echo "(no diff)"
+`.trim();
+
+    const result =
+      await $`docker run --rm ${tempImage} bash -c ${script}`.quiet();
+    const output = result.stdout.toString();
+
+    // Parse sections using delimiters
+    const baseMatch = output
+      .split('===BASE===\n')[1]
+      ?.split('\n===SUMMARY===')[0];
+    const summaryMatch = output
+      .split('===SUMMARY===\n')[1]
+      ?.split('\n===LOG===')[0];
+    const logMatch = output.split('===LOG===\n')[1]?.split('\n===STAT===')[0];
+    const statMatch = output.split('===STAT===\n')[1]?.split('\n===DIFF===')[0];
+    const diffMatch = output.split('===DIFF===\n')[1];
+
+    return {
+      baseBranch: baseMatch?.trim() ?? 'unknown',
+      summary: summaryMatch?.trim() || undefined,
+      log: logMatch?.trim() ?? '',
+      stat: statMatch?.trim() ?? '',
+      diff: diffMatch?.trim() ?? '',
+    };
+  } catch (err) {
+    log.error({ err }, 'Failed to get container diff');
+    throw formatShellError(err as ShellError);
+  } finally {
+    // Clean up temp image
+    try {
+      await $`docker rmi ${tempImage}`.quiet();
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
+}
+
 /**
  * Stream container logs in real-time
  */
@@ -1172,14 +1270,15 @@ export async function startContainer(
       ? `claude${interactive ? '' : ' -p'}${modelArg} --dangerously-skip-permissions`
       : `opencode${modelArg} ${interactive ? '--prompt' : 'run'}`;
 
-  // Only add PR instructions if in a git repo and not interactive mode
+  // Only add push instructions if in a git repo and not interactive mode
   const fullPrompt =
     interactive || !isGitRepo
       ? prompt
       : `${prompt}
 
 ---
-Unless otherwise instructed above, use the \`gh\` command to create a PR when done.`;
+When you are done, commit your changes to the local branch. Do not push or create a pull request.
+Also, write a brief summary of what you changed and why to \`.hermes/summary.md\` (create the directory if needed). Use markdown. Keep it under 10 lines.`;
 
   // Different startup script based on mount mode and git repo status
   let startupScript: string;

@@ -2,7 +2,10 @@
 // GitHub Service - PR operations via gh CLI in docker container
 // ============================================================================
 
-import { runGhInDocker } from './gh';
+import { $ } from 'bun';
+import { nanoid } from 'nanoid';
+import { formatShellError, type ShellError } from '../utils';
+import { getGhConfigVolume, runGhInDocker } from './gh';
 import { log } from './logger';
 
 // ============================================================================
@@ -19,6 +22,95 @@ interface GhPrListItem {
   number: number;
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   url: string;
+}
+
+// ============================================================================
+// PR Creation
+// ============================================================================
+
+/**
+ * Push branch and create a PR from a stopped container.
+ * Commits the container to a temp image, runs git push + gh pr create inside it.
+ * This is the "ship it" action: push + PR in one shot.
+ */
+export async function pushAndCreatePr(
+  containerId: string,
+  repo: string,
+  sessionName: string,
+  diffStat?: string,
+  commitLog?: string,
+): Promise<PrInfo | null> {
+  const branch = sessionName.startsWith('hermes/')
+    ? sessionName
+    : `hermes/${sessionName}`;
+
+  // Build PR title and body from commit log
+  const commits = (commitLog ?? '').split('\n').filter((l) => l.trim());
+  const firstCommit = commits[0];
+  const title = firstCommit
+    ? firstCommit.replace(/^[a-f0-9]+\s+/, '') // strip hash prefix
+    : `Changes from ${branch}`;
+
+  const bodyParts = ['## Summary', ''];
+  if (commits.length > 1) {
+    for (const commit of commits) {
+      bodyParts.push(`- ${commit}`);
+    }
+  } else if (firstCommit) {
+    bodyParts.push(`- ${firstCommit}`);
+  }
+  if (diffStat) {
+    bodyParts.push('', '## Changes', '', '```', diffStat, '```');
+  }
+
+  const body = bodyParts.join('\n');
+  const suffix = nanoid(6).toLowerCase();
+  const tempImage = `hermes-pr:${suffix}`;
+
+  try {
+    // Commit the stopped container to a temp image
+    await $`docker commit ${containerId} ${tempImage}`.quiet();
+
+    // Mount gh credentials and run push + pr create inside the container
+    const ghVolume = await getGhConfigVolume();
+
+    // Push the branch and create the PR in one script
+    const script = `
+set -e
+cd /work/app
+gh auth setup-git
+git push -u origin HEAD
+gh pr create --head "${branch}" --repo "${repo}" --title "${title.replace(/"/g, '\\"')}" --body "$(cat <<'PRBODY'
+${body}
+PRBODY
+)" --json number,state,url
+`.trim();
+
+    const result =
+      await $`docker run --rm -v ${ghVolume} ${tempImage} bash -c ${script}`.quiet();
+    const output = result.stdout.toString().trim();
+
+    // The last line of output should be the JSON from gh pr create
+    const lines = output.split('\n');
+    const jsonLine = lines[lines.length - 1];
+    if (!jsonLine) return null;
+
+    const pr = JSON.parse(jsonLine) as GhPrListItem;
+    return {
+      number: pr.number,
+      state: pr.state,
+      url: pr.url,
+    };
+  } catch (err) {
+    log.error({ err, repo, branch }, 'Error pushing branch and creating PR');
+    throw formatShellError(err as ShellError);
+  } finally {
+    try {
+      await $`docker rmi ${tempImage}`.quiet();
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 }
 
 // ============================================================================
