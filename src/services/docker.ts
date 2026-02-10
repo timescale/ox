@@ -24,7 +24,7 @@ import {
   projectConfigDir,
   readConfig,
 } from './config';
-import { getGhConfigVolume } from './gh';
+import { getGhConfigFiles } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
 import { getOpencodeConfigFiles } from './opencode';
@@ -44,19 +44,20 @@ export const toVolumeArgs = (volumes: string[]): string[] =>
 
 /**
  * Build the list of credential volume mounts for agent containers.
- * Ensures credential files exist (creating empty JSON files if needed)
- * so Docker mounts them as files, not directories.
+ * All credentials are now delivered via VirtualFiles, so this returns
+ * an empty array. Kept for API compatibility with volume-based callers.
  */
 export const getCredentialVolumes = async (): Promise<string[]> => {
-  return Promise.all([getGhConfigVolume()]);
+  return [];
 };
 
 export const getCredentialFiles = async (): Promise<VirtualFile[]> => {
-  const [claudeFiles, opencodeFiles] = await Promise.all([
+  const [claudeFiles, opencodeFiles, ghFiles] = await Promise.all([
     getClaudeConfigFiles(),
     getOpencodeConfigFiles(),
+    getGhConfigFiles(),
   ]);
-  return [...claudeFiles, ...opencodeFiles];
+  return [...claudeFiles, ...opencodeFiles, ...ghFiles];
 };
 
 /**
