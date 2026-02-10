@@ -42,15 +42,6 @@ function base64Encode(text: string): string {
 export const toVolumeArgs = (volumes: string[]): string[] =>
   volumes.flatMap((v) => ['-v', v]);
 
-/**
- * Build the list of credential volume mounts for agent containers.
- * All credentials are now delivered via VirtualFiles, so this returns
- * an empty array. Kept for API compatibility with volume-based callers.
- */
-export const getCredentialVolumes = async (): Promise<string[]> => {
-  return [];
-};
-
 export const getCredentialFiles = async (): Promise<VirtualFile[]> => {
   const [claudeFiles, opencodeFiles, ghFiles] = await Promise.all([
     getClaudeConfigFiles(),
@@ -931,9 +922,8 @@ export async function resumeSession(
   const baseName = container.Name.replace(/\//g, '').trim();
   const containerName = `${baseName}-resumed-${resumeSuffix}`;
 
-  // Mount config volumes for agent credentials and session continuity
-  // If mountDir is provided, add it as a volume mount
-  const volumes = await getCredentialVolumes();
+  // Build volume mounts (mountDir, overlay mounts, etc.)
+  const volumes: string[] = [];
   const files = await getCredentialFiles();
 
   // Resolve mount directory to absolute path if provided
@@ -1145,8 +1135,8 @@ export async function startContainer(
   // Read config for overlay mounts and init script
   const config = await readConfig();
 
-  // Build volume arguments - config volumes plus optional mount
-  const volumes = await getCredentialVolumes();
+  // Build volume mounts (mountDir, overlay mounts, etc.)
+  const volumes: string[] = [];
   const files = await getCredentialFiles();
 
   // Resolve mount directory to absolute path if provided
@@ -1321,8 +1311,8 @@ export async function startShellContainer(
   // Read config for overlay mounts and init script
   const config = await readConfig();
 
-  // Build volume arguments - config volumes plus optional mount
-  const volumes = await getCredentialVolumes();
+  // Build volume mounts (mountDir, overlay mounts, etc.)
+  const volumes: string[] = [];
   const files = await getCredentialFiles();
 
   // Resolve mount directory to absolute path if provided

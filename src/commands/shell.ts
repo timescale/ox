@@ -1,10 +1,5 @@
 import { Command } from 'commander';
-import {
-  ensureDockerSandbox,
-  getCredentialFiles,
-  getCredentialVolumes,
-  toVolumeArgs,
-} from '../services/docker';
+import { ensureDockerSandbox, getCredentialFiles } from '../services/docker';
 import { log } from '../services/logger';
 import { runInDocker } from '../services/runInDocker';
 import type { ShellError } from '../utils';
@@ -24,11 +19,9 @@ export const shellCommand = new Command('shell')
       await ensureDockerSandbox();
 
       const files = await getCredentialFiles();
-      const volumes = await getCredentialVolumes();
 
       const proc = await runInDocker({
         cmdName: 'bash',
-        dockerArgs: toVolumeArgs(volumes),
         interactive: true,
         files,
         mountCwd: options.mount,
