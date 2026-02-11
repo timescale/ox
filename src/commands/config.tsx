@@ -4,7 +4,7 @@
 
 import type { SelectOption } from '@opentui/core';
 import { Command } from 'commander';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CopyOnSelect } from '../components/CopyOnSelect';
 import { DockerSetup } from '../components/DockerSetup';
 import { FilterableSelector } from '../components/FilterableSelector';
@@ -48,10 +48,19 @@ export type ConfigWizardResult =
 // App Component
 // ============================================================================
 
+type Step =
+  | 'docker'
+  | 'service'
+  | 'agent'
+  | 'model'
+  | 'agent-auth-check'
+  | 'gh-auth-check'
+  | 'gh-auth';
+
 export interface ConfigWizardProps {
   onComplete: (result: ConfigWizardResult) => void;
   initialConfig?: HermesConfig;
-  skipToStep?: 'model' | 'agent-auth-check' | 'gh-auth-check';
+  skipToStep?: Step;
 }
 
 export function ConfigWizard({
@@ -63,15 +72,7 @@ export function ConfigWizard({
   const configPromise = useMemo(() => projectConfig.read(), []);
   const tigerAvailablePromise = useMemo(() => isTigerAvailable(), []);
 
-  const [step, setStep] = useState<
-    | 'docker'
-    | 'service'
-    | 'agent'
-    | 'model'
-    | 'agent-auth-check'
-    | 'gh-auth-check'
-    | 'gh-auth'
-  >(skipToStep ?? 'docker');
+  const [step, setStep] = useState<Step>(skipToStep ?? 'docker');
   const [config, setConfig] = useState<HermesConfig | null>(
     initialConfig ?? null,
   );
@@ -87,27 +88,30 @@ export function ConfigWizard({
     null,
   );
 
-  // Total steps depends on whether tiger CLI is available
-  const totalSteps = tigerAvailable === false ? 5 : 6;
+  const steps = useMemo((): Step[] => {
+    const list: Step[] = [
+      'docker',
+      'agent',
+      'model',
+      ...(tigerAvailable ? (['service'] as const) : []),
+      'agent-auth-check',
+      'gh-auth-check',
+    ];
+    return list;
+  }, [tigerAvailable]);
+
+  const nextStep = useCallback(
+    (dir = 1) => {
+      setStep((s) => {
+        const i = steps.indexOf(s);
+        return steps[i + dir] || 'docker';
+      });
+    },
+    [steps],
+  );
 
   // Step number helper - when tiger is unavailable, service step is skipped
-  const stepNumber = (logicalStep: string): number => {
-    const stepsWithTiger = [
-      'docker',
-      'service',
-      'agent',
-      'model',
-      'agent-auth-check',
-      'gh-auth-check',
-    ];
-    const stepsWithoutTiger = [
-      'docker',
-      'agent',
-      'model',
-      'agent-auth-check',
-      'gh-auth-check',
-    ];
-    const steps = tigerAvailable === false ? stepsWithoutTiger : stepsWithTiger;
+  const stepNumber = (logicalStep: Step): number => {
     return steps.indexOf(logicalStep) + 1;
   };
 
@@ -162,7 +166,7 @@ export function ConfigWizard({
       if (cancelled) return;
 
       if (isValid) {
-        setStep('gh-auth-check');
+        nextStep();
       } else {
         // Need login - trigger callback to handle interactive auth
         // config.agent is guaranteed to be defined by the guard at the top
@@ -180,7 +184,7 @@ export function ConfigWizard({
     return () => {
       cancelled = true;
     };
-  }, [step, config, onComplete]);
+  }, [step, config, onComplete, nextStep]);
 
   // Handle GitHub auth check step - start the auth process
   useEffect(() => {
@@ -265,7 +269,7 @@ export function ConfigWizard({
   if (step === 'docker') {
     return (
       <DockerSetup
-        title={`Step 1/${totalSteps}: Docker Setup`}
+        title={`Step 1/${steps.length}: Docker Setup`}
         onComplete={(result) => {
           if (result.type === 'cancelled') {
             onComplete({ type: 'cancelled' });
@@ -275,10 +279,7 @@ export function ConfigWizard({
               message: result.error ?? 'Docker setup failed',
             });
           } else {
-            // tigerAvailable is null while still checking, but isTigerAvailable()
-            // resolves near-instantly so it will always be set by the time Docker
-            // setup completes. Default to skipping the service step if somehow unresolved.
-            setStep(tigerAvailable === true ? 'service' : 'agent');
+            nextStep();
           }
         }}
         showBack={false}
@@ -317,17 +318,17 @@ export function ConfigWizard({
 
     return (
       <Selector
-        title={`Step ${stepNumber('service')}/${totalSteps}: Database Service`}
+        title={`Step ${stepNumber('service')}/${steps.length}: Database Service`}
         description="Select a Tiger service to use as the default parent for database forks."
         options={serviceOptions}
         initialIndex={initialIndex >= 0 ? initialIndex : 0}
         showBack
         onSelect={(value) => {
           setConfig((c) => (c ? { ...c, tigerServiceId: value } : c));
-          setStep('agent');
+          nextStep();
         }}
         onCancel={handleCancel}
-        onBack={() => setStep('docker')}
+        onBack={() => nextStep(-1)}
       />
     );
   }
@@ -340,7 +341,7 @@ export function ConfigWizard({
 
     return (
       <Selector
-        title={`Step ${stepNumber('agent')}/${totalSteps}: Default Agent`}
+        title={`Step ${stepNumber('agent')}/${steps.length}: Default Agent`}
         description="Select the default coding agent to use."
         options={AGENT_SELECT_OPTIONS}
         initialIndex={initialIndex >= 0 ? initialIndex : 0}
@@ -353,10 +354,10 @@ export function ConfigWizard({
             agent: newAgent,
             model: c?.agent !== newAgent ? undefined : c?.model,
           }));
-          setStep('model');
+          nextStep();
         }}
         onCancel={handleCancel}
-        onBack={() => setStep(tigerAvailable === true ? 'service' : 'docker')}
+        onBack={() => nextStep(-1)}
       />
     );
   }
@@ -374,7 +375,7 @@ export function ConfigWizard({
     if (currentModels.length === 0) {
       return (
         <Selector
-          title={`Step ${stepNumber('model')}/${totalSteps}: Default Model (${config?.agent})`}
+          title={`Step ${stepNumber('model')}/${steps.length}: Default Model (${config?.agent})`}
           description="Could not load models. You can skip and specify a model later with --model."
           options={[
             {
@@ -385,9 +386,9 @@ export function ConfigWizard({
           ]}
           initialIndex={0}
           showBack
-          onSelect={() => setStep('agent-auth-check')}
+          onSelect={() => nextStep()}
           onCancel={handleCancel}
-          onBack={() => setStep('agent')}
+          onBack={() => nextStep(-1)}
         />
       );
     }
@@ -408,21 +409,21 @@ export function ConfigWizard({
 
     const handleModelSelect = (value: string | null) => {
       setConfig((c) => ({ ...c, model: value || undefined }));
-      setStep('agent-auth-check');
+      nextStep();
     };
 
     // Use filterable selector for opencode (has many more models)
     if (config?.agent === 'opencode') {
       return (
         <FilterableSelector
-          title={`Step ${stepNumber('model')}/${totalSteps}: Default Model (${config.agent})`}
+          title={`Step ${stepNumber('model')}/${steps.length}: Default Model (${config.agent})`}
           description={`Select the default model for ${config.agent}.`}
           options={modelOptions}
           initialIndex={initialIndex >= 0 ? initialIndex : 0}
           showBack
           onSelect={handleModelSelect}
           onCancel={handleCancel}
-          onBack={() => setStep('agent')}
+          onBack={() => nextStep(-1)}
           hotkeys={[
             {
               label: 'ctrl+a',
@@ -442,14 +443,14 @@ export function ConfigWizard({
 
     return (
       <Selector
-        title={`Step ${stepNumber('model')}/${totalSteps}: Default Model (${config?.agent})`}
+        title={`Step ${stepNumber('model')}/${steps.length}: Default Model (${config?.agent})`}
         description={`Select the default model for ${config?.agent}.`}
         options={modelOptions}
         initialIndex={initialIndex >= 0 ? initialIndex : 0}
         showBack
         onSelect={handleModelSelect}
         onCancel={handleCancel}
-        onBack={() => setStep('agent')}
+        onBack={() => nextStep(-1)}
       />
     );
   }
@@ -459,7 +460,7 @@ export function ConfigWizard({
     const agentName = config?.agent === 'claude' ? 'Claude' : 'Opencode';
     return (
       <Loading
-        title={`Step ${stepNumber('agent-auth-check')}/${totalSteps}: ${agentName} Authentication`}
+        title={`Step ${stepNumber('agent-auth-check')}/${steps.length}: ${agentName} Authentication`}
         message={`Checking ${agentName} credentials`}
         onCancel={handleCancel}
       />
@@ -472,7 +473,7 @@ export function ConfigWizard({
     // This is async, so we show loading while checking
     return (
       <Loading
-        title={`Step ${stepNumber('gh-auth-check')}/${totalSteps}: GitHub Authentication`}
+        title={`Step ${stepNumber('gh-auth-check')}/${steps.length}: GitHub Authentication`}
         message="Checking GitHub authentication"
         onCancel={handleCancel}
       />
