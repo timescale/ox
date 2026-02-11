@@ -129,14 +129,15 @@ export function ConfigWizard({
 
   // Check tiger availability, then load services only if available
   useEffect(() => {
-    tigerAvailablePromise.then((available) => {
-      setTigerAvailable(available);
-      if (available) {
-        listServices()
-          .then(setServices)
-          .catch(() => setServices([]));
-      }
-    });
+    tigerAvailablePromise
+      .then(async (available) => {
+        setTigerAvailable(available);
+        if (!available) return;
+        setServices(await listServices());
+      })
+      .catch(() => {
+        setTigerAvailable(false);
+      });
   }, [tigerAvailablePromise]);
 
   // Force refresh models when resuming at the model step (after adding a provider)
