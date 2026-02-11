@@ -106,8 +106,10 @@ async function setSecretMac(
   value: string,
 ): Promise<void> {
   try {
-    // -U: update if exists (upsert), -T "": allow all applications to access
-    await Bun.$`security add-generic-password -s ${service} -a ${account} -w ${value} -U`.quiet();
+    // -U: update if exists (upsert)
+    // -X: pass password as hex data (avoids exposing plaintext in process args)
+    const hex = Buffer.from(value).toString('hex');
+    await Bun.$`security add-generic-password -s ${service} -a ${account} -U -X ${hex}`.quiet();
   } catch (err) {
     log.debug(
       { err, service, account },
