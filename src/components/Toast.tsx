@@ -49,8 +49,10 @@ export function Toast({
       padding={1}
       paddingLeft={2}
       paddingRight={2}
+      marginLeft={1}
+      overflow="hidden"
     >
-      <text fg={theme.text}>
+      <text fg={theme.text} wrapMode="word">
         <span fg={color}>{icon}</span> {message}
       </text>
     </box>

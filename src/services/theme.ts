@@ -129,19 +129,32 @@ export const DEFAULT_THEMES: Record<string, ThemeJson> = {
   zenburn: zenburn as ThemeJson,
 };
 
-export const DEFAULT_THEME_NAME = 'opencode';
-
 /** Get sorted list of all theme names */
 export function getThemeNames(): string[] {
   return Object.keys(DEFAULT_THEMES).sort((a, b) => a.localeCompare(b));
 }
 
 // ============================================================================
+// Terminal Color Capability Detection
+// ============================================================================
+
+/**
+ * Detect whether the terminal supports 24-bit (truecolor) output.
+ * Terminals like iTerm2, Kitty, Ghostty, Alacritty set COLORTERM=truecolor or 24bit.
+ * macOS Terminal.app does not set COLORTERM and only supports 256 colors.
+ */
+const colorterm = process.env.COLORTERM?.toLowerCase();
+export const supportsTrueColor =
+  colorterm === 'truecolor' || colorterm === '24bit';
+
+export const DEFAULT_THEME_NAME = supportsTrueColor ? 'opencode' : 'aura';
+
+// ============================================================================
 // Color Resolution
 // ============================================================================
 
-/** Convert ANSI color code to hex */
-function ansiToHex(code: number): string {
+/** Convert ANSI color code (0-255) to hex string */
+export function ansiToHex(code: number): string {
   // Standard ANSI colors (0-15)
   if (code < 16) {
     const ansiColors = [

@@ -11,6 +11,7 @@ import {
   withBranchOptions,
 } from './commands/branch';
 import { claudeCommand } from './commands/claude';
+import { colorsCommand } from './commands/colors';
 import {
   completionCommand,
   handleCompletionRequest,
@@ -69,6 +70,7 @@ withBranchOptions(program)
 program.addCommand(authCommand);
 program.addCommand(branchCommand);
 program.addCommand(claudeCommand);
+program.addCommand(colorsCommand);
 program.addCommand(completionCommand);
 program.addCommand(configCommand);
 program.addCommand(ghCommand);
