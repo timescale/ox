@@ -820,10 +820,42 @@ export function streamContainerLogs(nameOrId: string): LogStream {
 }
 
 /**
- * Attach to a running container interactively.
- * This replaces the current process with docker attach.
+ * Attach to a running container's main process using docker attach.
+ * Sends a WINCH signal first to trigger the TUI to redraw at the correct size.
  */
 export async function attachToContainer(nameOrId: string): Promise<void> {
+  const proc = Bun.spawn(
+    ['docker', 'attach', '--detach-keys=ctrl-\\', nameOrId],
+    {
+      stdio: ['inherit', 'inherit', 'inherit'],
+    },
+  );
+  await signalContainerTTYResize(nameOrId, -1);
+  setTimeout(async () => {
+    await signalContainerTTYResize(nameOrId);
+  }, 100);
+
+  await proc.exited;
+}
+
+export async function signalContainerTTYResize(
+  nameOrId: string,
+  offset = 0,
+): Promise<void> {
+  const cols = (process.stdout.columns ?? 80) + offset;
+  const rows = (process.stdout.rows ?? 24) + offset;
+  log.debug({ nameOrId, cols, rows }, 'Sending WINCH signal to container');
+  try {
+    await Bun.$`docker exec -t ${nameOrId} bash -c ${`stty -F /dev/console cols ${cols} rows ${rows}; kill -WINCH 1`}`.quiet();
+  } catch {
+    // Best-effort: if the exec fails (e.g. no /dev/console), continue anyway
+  }
+}
+
+/**
+ * Open an interactive bash shell in a running container.
+ */
+export async function shellInContainer(nameOrId: string): Promise<void> {
   const proc = Bun.spawn(['docker', 'exec', '-it', nameOrId, '/bin/bash'], {
     stdio: ['inherit', 'inherit', 'inherit'],
   });

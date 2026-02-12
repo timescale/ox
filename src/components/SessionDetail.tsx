@@ -27,6 +27,7 @@ export interface SessionDetailProps {
   session: HermesSession;
   onBack: () => void;
   onAttach: (containerId: string) => void;
+  onShell: (containerId: string) => void;
   onResume: (session: HermesSession) => void;
   onSessionDeleted: () => void;
   onNewPrompt?: () => void;
@@ -87,6 +88,7 @@ export function SessionDetail({
   session: initialSession,
   onBack,
   onAttach,
+  onShell,
   onResume,
   onSessionDeleted,
   onNewPrompt,
@@ -261,6 +263,8 @@ export function SessionDetail({
       setModal('delete');
     } else if (key.raw === 'a' && isRunning) {
       onAttach(session.containerId);
+    } else if (key.raw === 'S' && isRunning) {
+      onShell(session.containerId);
     } else if (key.raw === 'r' && isStopped) {
       handleResume();
     } else if (key.raw === 'o') {
@@ -293,8 +297,9 @@ export function SessionDetail({
   const actions = [
     ...(isRunning
       ? [
-          ['s', 'top'],
           ['a', 'ttach'],
+          ['S', 'hell'],
+          ['s', 'top'],
         ]
       : []),
     ...(isStopped

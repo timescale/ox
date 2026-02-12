@@ -31,6 +31,7 @@ import {
   listHermesSessions,
   removeContainer,
   resumeSession,
+  shellInContainer,
   startContainer,
   startShellContainer,
 } from '../services/docker';
@@ -78,11 +79,14 @@ interface SessionsResult {
   type:
     | 'quit'
     | 'attach'
+    | 'exec-shell'
     | 'resume'
     | 'start-interactive'
     | 'shell'
     | 'needs-agent-auth';
   containerId?: string;
+  // For attach/exec-shell: the session to return to after detaching
+  session?: HermesSession;
   // For resume: optional model override
   resumeModel?: string;
   // For resume: optional mount directory
@@ -119,10 +123,12 @@ interface ToastState {
 }
 
 export interface RunSessionsTuiOptions {
-  initialView?: 'prompt' | 'list' | 'starting';
+  initialView?: 'prompt' | 'list' | 'starting' | 'detail';
   initialPrompt?: string;
   initialAgent?: AgentType;
   initialModel?: string;
+  /** Session to display when initialView is 'detail' */
+  initialSession?: HermesSession;
   // Options for starting flow
   serviceId?: string;
   dbFork?: boolean;
@@ -137,10 +143,12 @@ export interface RunSessionsTuiOptions {
 // ============================================================================
 
 interface SessionsAppProps {
-  initialView: 'prompt' | 'list' | 'starting';
+  initialView: 'prompt' | 'list' | 'starting' | 'detail';
   initialPrompt?: string;
   initialAgent?: AgentType;
   initialModel?: string;
+  /** Session to display when initialView is 'detail' */
+  initialSession?: HermesSession;
   serviceId?: string;
   dbFork?: boolean;
   /** Mount local directory instead of git clone */
@@ -157,6 +165,7 @@ function SessionsApp({
   initialPrompt,
   initialAgent,
   initialModel,
+  initialSession,
   serviceId,
   dbFork = true,
   initialMountDir,
@@ -176,6 +185,7 @@ function SessionsApp({
     initialPrompt,
     initialAgent,
     initialModel,
+    initialSession,
     serviceId,
     dbFork,
     initialMountDir,
@@ -189,6 +199,7 @@ function SessionsApp({
     initialPrompt,
     initialAgent,
     initialModel,
+    initialSession,
     serviceId,
     dbFork,
     initialMountDir,
@@ -485,9 +496,12 @@ function SessionsApp({
         initialPrompt: prompt,
         initialAgent,
         initialModel,
+        initialSession: session,
       } = propsRef.current;
 
-      if (targetView === 'starting' && prompt) {
+      if (targetView === 'detail' && session) {
+        setView({ type: 'detail', session });
+      } else if (targetView === 'starting' && prompt) {
         const agent = initialAgent ?? existingConfig.agent ?? 'opencode';
         const model = initialModel ?? existingConfig.model ?? '';
         startSession(prompt, agent, model);
@@ -532,9 +546,12 @@ function SessionsApp({
         initialPrompt: prompt,
         initialAgent,
         initialModel,
+        initialSession: session,
       } = propsRef.current;
 
-      if (targetView === 'starting' && prompt) {
+      if (targetView === 'detail' && session) {
+        setView({ type: 'detail', session });
+      } else if (targetView === 'starting' && prompt) {
         const agent = initialAgent ?? result.config.agent ?? 'opencode';
         const model = initialModel ?? result.config.model ?? '';
         startSession(prompt, agent, model);
@@ -680,7 +697,18 @@ function SessionsApp({
           session={view.session}
           onBack={() => setView({ type: 'list' })}
           onAttach={(containerId) =>
-            onComplete({ type: 'attach', containerId })
+            onComplete({
+              type: 'attach',
+              containerId,
+              session: view.session,
+            })
+          }
+          onShell={(containerId) =>
+            onComplete({
+              type: 'exec-shell',
+              containerId,
+              session: view.session,
+            })
           }
           onResume={handleResume}
           onSessionDeleted={() => setView({ type: 'list' })}
@@ -743,143 +771,180 @@ export async function runSessionsTui({
     await ensureGhAuth();
   }
 
-  let resolveResult: (result: SessionsResult) => void;
-  const resultPromise = new Promise<SessionsResult>((resolve) => {
-    resolveResult = resolve;
-  });
+  // Loop: after interactive actions (attach, shell, etc.), return to the TUI
+  // instead of exiting the process.
+  let nextView: SessionsAppProps['initialView'] = initialView;
+  let nextPrompt = initialPrompt;
+  let nextAgent = initialAgent;
+  let nextModel = initialModel;
+  let nextSession: HermesSession | undefined;
+  let nextMountDir = mountDir;
+  let nextIsGitRepo = isGitRepo;
 
-  const { render, destroy } = await createTui();
+  while (true) {
+    let resolveResult: (result: SessionsResult) => void;
+    const resultPromise = new Promise<SessionsResult>((resolve) => {
+      resolveResult = resolve;
+    });
 
-  render(
-    <CopyOnSelect>
-      <SessionsApp
-        initialView={initialView}
-        initialPrompt={initialPrompt}
-        initialAgent={initialAgent}
-        initialModel={initialModel}
-        serviceId={serviceId}
-        dbFork={dbFork}
-        initialMountDir={mountDir}
-        currentRepoInfo={currentRepoInfo}
-        isGitRepo={effectiveIsGitRepo}
-        onComplete={(result) => resolveResult(result)}
-      />
-    </CopyOnSelect>,
-  );
+    const { render, destroy } = await createTui();
 
-  const result = await resultPromise;
+    render(
+      <CopyOnSelect>
+        <SessionsApp
+          initialView={nextView}
+          initialPrompt={nextPrompt}
+          initialAgent={nextAgent}
+          initialModel={nextModel}
+          initialSession={nextSession}
+          serviceId={serviceId}
+          dbFork={dbFork}
+          initialMountDir={nextMountDir}
+          currentRepoInfo={currentRepoInfo}
+          isGitRepo={nextIsGitRepo ?? effectiveIsGitRepo}
+          onComplete={(result) => resolveResult(result)}
+        />
+      </CopyOnSelect>,
+    );
 
-  await destroy();
+    const result = await resultPromise;
 
-  // Handle attach action - needs to happen after TUI cleanup
-  if (result.type === 'attach' && result.containerId) {
-    await attachToContainer(result.containerId);
-  }
+    await destroy();
 
-  if (result.type === 'resume' && result.containerId) {
-    try {
-      await resumeSession(result.containerId, {
-        mode: 'interactive',
-        model: result.resumeModel,
-        mountDir: result.resumeMountDir,
-      });
-    } catch (err) {
-      log.error({ err }, 'Failed to resume session');
-      console.error(`Failed to resume: ${err}`);
+    // After handling the action, default to returning to the session list
+    nextView = 'list';
+    nextPrompt = undefined;
+    nextAgent = undefined;
+    nextModel = undefined;
+    nextSession = undefined;
+    nextMountDir = mountDir;
+    nextIsGitRepo = isGitRepo;
+
+    // Quit exits the loop
+    if (result.type === 'quit') {
+      break;
     }
-  }
 
-  // Handle shell action - start bash shell in container
-  if (result.type === 'shell') {
-    try {
-      if (result.resumeContainerId) {
-        // Shell on resumed container
-        await resumeSession(result.resumeContainerId, { mode: 'shell' });
-      } else {
-        // Fresh shell container
-        const shellRepoInfo = result.shellIsGitRepo
-          ? await getRepoInfo()
-          : null;
-        await startShellContainer({
-          repoInfo: shellRepoInfo,
-          mountDir: result.shellMountDir,
-          isGitRepo: result.shellIsGitRepo,
-        });
+    // Handle attach action - needs to happen after TUI cleanup
+    if (result.type === 'attach' && result.containerId) {
+      await attachToContainer(result.containerId);
+      // Return to the session detail view after detaching
+      if (result.session) {
+        nextView = 'detail';
+        nextSession = result.session;
       }
-    } catch (err) {
-      log.error({ err }, 'Failed to start shell');
-      console.error(`Failed to start shell: ${err}`);
+      continue;
     }
-  }
 
-  // Handle start-interactive action - start container attached to terminal
-  if (result.type === 'start-interactive' && result.startInfo) {
-    const {
-      prompt,
-      agent,
-      model,
-      branchName,
-      envVars,
-      mountDir: startMountDir,
-      isGitRepo: startIsGitRepo = true,
-    } = result.startInfo;
-    try {
-      const startRepoInfo = startIsGitRepo ? await getRepoInfo() : null;
-      await startContainer({
-        branchName,
+    // Handle exec-shell action - open a bash shell in a running container
+    if (result.type === 'exec-shell' && result.containerId) {
+      await shellInContainer(result.containerId);
+      // Return to the session detail view after exiting the shell
+      if (result.session) {
+        nextView = 'detail';
+        nextSession = result.session;
+      }
+      continue;
+    }
+
+    if (result.type === 'resume' && result.containerId) {
+      try {
+        await resumeSession(result.containerId, {
+          mode: 'interactive',
+          model: result.resumeModel,
+          mountDir: result.resumeMountDir,
+        });
+      } catch (err) {
+        log.error({ err }, 'Failed to resume session');
+        console.error(`Failed to resume: ${err}`);
+      }
+      continue;
+    }
+
+    // Handle shell action - start bash shell in container
+    if (result.type === 'shell') {
+      try {
+        if (result.resumeContainerId) {
+          // Shell on resumed container
+          await resumeSession(result.resumeContainerId, { mode: 'shell' });
+        } else {
+          // Fresh shell container
+          const shellRepoInfo = result.shellIsGitRepo
+            ? await getRepoInfo()
+            : null;
+          await startShellContainer({
+            repoInfo: shellRepoInfo,
+            mountDir: result.shellMountDir,
+            isGitRepo: result.shellIsGitRepo,
+          });
+        }
+      } catch (err) {
+        log.error({ err }, 'Failed to start shell');
+        console.error(`Failed to start shell: ${err}`);
+      }
+      continue;
+    }
+
+    // Handle start-interactive action - start container attached to terminal
+    if (result.type === 'start-interactive' && result.startInfo) {
+      const {
         prompt,
-        repoInfo: startRepoInfo,
         agent,
         model,
-        detach: false,
-        interactive: true,
+        branchName,
         envVars,
         mountDir: startMountDir,
-        isGitRepo: startIsGitRepo,
-      });
-    } catch (err) {
-      log.error({ err }, 'Failed to start session interactively');
-      console.error(`Failed to start: ${err}`);
-    }
-  }
-
-  // Handle needs-agent-auth action - run interactive login and retry
-  if (result.type === 'needs-agent-auth' && result.authInfo) {
-    const {
-      agent,
-      model,
-      prompt,
-      mountDir: authMountDir,
-      isGitRepo: authIsGitRepo,
-    } = result.authInfo;
-    const agentName = agent === 'claude' ? 'Claude' : 'Opencode';
-
-    console.log(`\n${agentName} credentials are missing or expired.`);
-    console.log(`Starting ${agentName} login...\n`);
-
-    const authResult =
-      agent === 'claude'
-        ? await ensureClaudeAuth()
-        : await ensureOpencodeAuth();
-
-    if (!authResult) {
-      console.error(`\nError: ${agentName} login failed`);
-      process.exit(1);
+        isGitRepo: startIsGitRepo = true,
+      } = result.startInfo;
+      try {
+        const startRepoInfo = startIsGitRepo ? await getRepoInfo() : null;
+        await startContainer({
+          branchName,
+          prompt,
+          repoInfo: startRepoInfo,
+          agent,
+          model,
+          detach: false,
+          interactive: true,
+          envVars,
+          mountDir: startMountDir,
+          isGitRepo: startIsGitRepo,
+        });
+      } catch (err) {
+        log.error({ err }, 'Failed to start session interactively');
+        console.error(`Failed to start: ${err}`);
+      }
+      continue;
     }
 
-    console.log(`\n${agentName} login successful. Resuming...\n`);
+    // Handle needs-agent-auth action - run interactive login and retry
+    if (result.type === 'needs-agent-auth' && result.authInfo) {
+      const { agent, model, prompt } = result.authInfo;
+      const agentName = agent === 'claude' ? 'Claude' : 'Opencode';
 
-    // Re-run the TUI with the same parameters to continue where we left off
-    await runSessionsTui({
-      initialView: 'starting',
-      initialPrompt: prompt,
-      initialAgent: agent,
-      initialModel: model,
-      serviceId,
-      dbFork,
-      mountDir: authMountDir,
-      isGitRepo: authIsGitRepo,
-    });
+      console.log(`\n${agentName} credentials are missing or expired.`);
+      console.log(`Starting ${agentName} login...\n`);
+
+      const authResult =
+        agent === 'claude'
+          ? await ensureClaudeAuth()
+          : await ensureOpencodeAuth();
+
+      if (!authResult) {
+        console.error(`\nError: ${agentName} login failed`);
+        process.exit(1);
+      }
+
+      console.log(`\n${agentName} login successful. Resuming...\n`);
+
+      // Set up the next iteration to continue where we left off
+      nextView = 'starting';
+      nextPrompt = prompt;
+      nextAgent = agent;
+      nextModel = model;
+      nextMountDir = result.authInfo.mountDir;
+      nextIsGitRepo = result.authInfo.isGitRepo;
+    }
   }
 }
 
