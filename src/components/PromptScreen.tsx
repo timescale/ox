@@ -30,7 +30,7 @@ import { SlashCommandPopover } from './SlashCommandPopover.tsx';
 import { ThemePicker } from './ThemePicker.tsx';
 import { Toast, type ToastType } from './Toast';
 
-export type SubmitMode = 'async' | 'interactive';
+export type SubmitMode = 'async' | 'interactive' | 'plan';
 
 export interface PromptScreenProps {
   defaultAgent: AgentType;
@@ -226,6 +226,42 @@ export function PromptScreen({
           });
         },
       },
+      {
+        name: 'async',
+        description: 'Switch to async mode (detached)',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          setSubmitMode('async');
+        },
+      },
+      {
+        name: 'interactive',
+        description: 'Switch to interactive mode (attached)',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          setSubmitMode('interactive');
+        },
+      },
+      {
+        name: 'plan',
+        description: 'Switch to plan mode (read-only agent)',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          setSubmitMode('plan');
+        },
+      },
     ],
     [
       resumeSession,
@@ -259,13 +295,19 @@ export function PromptScreen({
 
     const promptText = textareaRef.current?.plainText.trim() || '';
 
-    if (!promptText) {
-      setToast({ message: 'Please enter a prompt', type: 'error' });
-      return;
-    }
-    if (!promptText.includes(' ')) {
-      setToast({ message: 'Prompt must be more than one word', type: 'error' });
-      return;
+    // Prompt validation only applies in async mode
+    if (submitMode === 'async') {
+      if (!promptText) {
+        setToast({ message: 'Please enter a prompt', type: 'error' });
+        return;
+      }
+      if (!promptText.includes(' ')) {
+        setToast({
+          message: 'Prompt must be more than one word',
+          type: 'error',
+        });
+        return;
+      }
     }
     if (!modelId) {
       setToast({ message: 'Please select a model', type: 'error' });
@@ -375,7 +417,11 @@ export function PromptScreen({
     }
 
     if (key.name === 'a' && key.ctrl) {
-      setSubmitMode((m) => (m === 'async' ? 'interactive' : 'async'));
+      setSubmitMode((m) => {
+        if (m === 'async') return 'interactive';
+        if (m === 'interactive') return 'plan';
+        return 'async';
+      });
       return;
     }
 
@@ -488,6 +534,9 @@ export function PromptScreen({
                 <text fg={agentInfo?.color}>{agentInfo?.name || agent}</text>
                 {submitMode === 'interactive' ? (
                   <text fg={theme.success}>[interactive]</text>
+                ) : null}
+                {submitMode === 'plan' ? (
+                  <text fg={theme.info}>[plan]</text>
                 ) : null}
                 {mountMode ? <text fg={theme.warning}>[mount]</text> : null}
                 <text fg={model?.name ? theme.text : theme.textMuted}>
