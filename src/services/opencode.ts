@@ -155,6 +155,7 @@ export const runOpencodeInDocker = async ({
   interactive = false,
   shouldThrow = true,
   files = [],
+  labels,
 }: RunInDockerOptionsBase): Promise<
   RunInDockerResult & { credsCaptured: Promise<boolean> }
 > => {
@@ -175,6 +176,7 @@ export const runOpencodeInDocker = async ({
     interactive,
     shouldThrow,
     files: [...configFiles, ...files],
+    labels,
   });
 
   const deferredCredsCaptured = new Deferred<boolean>();

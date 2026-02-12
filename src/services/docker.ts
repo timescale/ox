@@ -51,6 +51,67 @@ export const getCredentialFiles = async (): Promise<VirtualFile[]> => {
   return [...claudeFiles, ...opencodeFiles, ...ghFiles];
 };
 
+// ============================================================================
+// Container Labels
+// ============================================================================
+
+export type ExecType = 'agent' | 'shell';
+
+export interface HermesContainerLabels {
+  /** Session display name */
+  name: string;
+  /** Branch name (often same as name) */
+  branch: string;
+  /** Agent type (claude or opencode) */
+  agent: AgentType;
+  /** Execution type: agent session or shell */
+  execType?: ExecType;
+  /** Repository full name */
+  repo?: string;
+  /** The user prompt */
+  prompt?: string;
+  /** Whether this is an interactive session */
+  interactive?: boolean;
+  /** Model ID */
+  model?: string;
+  /** Mounted host directory (absolute path) */
+  mount?: string;
+  /** Set when not in a git repo */
+  noGit?: boolean;
+  /** Container name this was resumed from */
+  resumedFrom?: string;
+  /** Docker image used for resume */
+  resumeImage?: string;
+}
+
+/**
+ * Build Docker container labels for hermes-managed containers.
+ * Automatically sets `hermes.managed=true` and `hermes.created` timestamp.
+ * Returns a Record suitable for passing to `runInDocker({ labels })`.
+ */
+export function buildHermesLabels(
+  input: HermesContainerLabels,
+): Record<string, string> {
+  const result: Record<string, string> = {
+    'hermes.managed': 'true',
+    'hermes.name': input.name,
+    'hermes.branch': input.branch,
+    'hermes.agent': input.agent,
+    'hermes.exec-type': input.execType ?? 'agent',
+    'hermes.repo': input.repo ?? 'local',
+    'hermes.created': new Date().toISOString(),
+  };
+  if (input.prompt != null) result['hermes.prompt'] = input.prompt;
+  if (input.interactive != null)
+    result['hermes.interactive'] = String(input.interactive);
+  if (input.model) result['hermes.model'] = input.model;
+  if (input.mount) result['hermes.mount'] = input.mount;
+  if (input.noGit) result['hermes.no-git'] = 'true';
+  if (input.resumedFrom) result['hermes.resumed-from'] = input.resumedFrom;
+  if (input.resumeImage) result['hermes.resume-image'] = input.resumeImage;
+  return result;
+}
+
 /**
  * Create local directories for overlay mounts and return volume mount strings.
  * Overlay mounts are stored in .hermes/overlayMounts/<containerName>/<path>
@@ -540,6 +601,8 @@ export interface StartContainerOptions {
   mountDir?: string;
   /** Whether running from a git repository (affects git/gh operations and PR instructions) */
   isGitRepo?: boolean;
+  /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
+  agentArgs?: string[];
 }
 
 // ============================================================================
@@ -552,6 +615,7 @@ export interface HermesSession {
   name: string;
   branch: string;
   agent: AgentType;
+  execType?: ExecType;
   model?: string;
   repo: string;
   prompt: string;
@@ -634,6 +698,7 @@ export async function listHermesSessions(): Promise<HermesSession[]> {
         name: labels['hermes.name'] || labels['hermes.branch'] || 'unknown',
         branch: labels['hermes.branch'] || 'unknown',
         agent: (labels['hermes.agent'] as AgentType) || 'opencode',
+        execType: (labels['hermes.exec-type'] as ExecType) || undefined,
         model: labels['hermes.model'],
         repo: labels['hermes.repo'] || 'unknown',
         prompt: labels['hermes.prompt'] || '',
@@ -872,25 +937,33 @@ export interface ResumeSessionOptions {
   model?: string; // Allow overriding model on resume
   /** If set, mount this local directory into the container */
   mountDir?: string;
+  /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
+  agentArgs?: string[];
 }
 
 function buildResumeAgentCommand(
   agent: AgentType,
   mode: ResumeSessionOptions['mode'],
   model?: string,
+  agentArgs?: string[],
 ): string {
   const modelArg = model ? ` --model ${model}` : '';
+  const extraArgs = agentArgs?.length ? ` ${agentArgs.join(' ')}` : '';
 
   if (agent === 'claude') {
     const promptArg = mode === 'detached' ? ' -p' : '';
-    return `claude -c${promptArg}${modelArg} --dangerously-skip-permissions`;
+    const hasPlanArgs = agentArgs?.includes('--permission-mode') ?? false;
+    const skipPermsFlag = hasPlanArgs
+      ? '--allow-dangerously-skip-permissions'
+      : '--dangerously-skip-permissions';
+    return `claude -c${promptArg}${extraArgs}${modelArg} ${skipPermsFlag}`;
   }
 
   if (mode === 'detached') {
-    return `opencode${modelArg} run -c`;
+    return `opencode${modelArg}${extraArgs} run -c`;
   }
 
-  return `opencode${modelArg} -c`;
+  return `opencode${modelArg}${extraArgs} -c`;
 }
 
 export async function resumeSession(
@@ -920,8 +993,8 @@ export async function resumeSession(
     throw new Error(`Container ${nameOrId} not found`);
   }
 
-  const labels = container.Config.Labels ?? {};
-  if (labels['hermes.managed'] !== 'true') {
+  const containerLabels = container.Config.Labels ?? {};
+  if (containerLabels['hermes.managed'] !== 'true') {
     log.error(`Container ${nameOrId} is not managed by hermes`);
     throw new Error('Container is not managed by hermes');
   }
@@ -931,8 +1004,8 @@ export async function resumeSession(
     throw new Error('Container is already running');
   }
 
-  const agent = (labels['hermes.agent'] as AgentType) || 'opencode';
-  const model = options.model ?? labels['hermes.model'];
+  const agent = (containerLabels['hermes.agent'] as AgentType) || 'opencode';
+  const model = options.model ?? containerLabels['hermes.model'];
   const resumeSuffix = nanoid(6).toLowerCase();
   const resumeImage = `hermes-resume:${container.Id.slice(0, 12)}-${resumeSuffix}`;
 
@@ -976,9 +1049,13 @@ export async function resumeSession(
   const volumeArgs = toVolumeArgs(volumes);
 
   const resumePrompt =
-    mode === 'detached' ? prompt?.trim() || '' : labels['hermes.prompt'] || '';
+    mode === 'detached'
+      ? prompt?.trim() || ''
+      : containerLabels['hermes.prompt'] || '';
   const baseSessionName =
-    labels['hermes.name'] || labels['hermes.branch'] || 'session';
+    containerLabels['hermes.name'] ||
+    containerLabels['hermes.branch'] ||
+    'session';
   const resumeName = `${baseSessionName}-resumed-${resumeSuffix}`;
 
   // For shell mode, just run bash; otherwise run the agent
@@ -994,49 +1071,33 @@ exec bash
 set -e
 cd /work/app
 ${config.initScript || ''}
-${escapePrompt(buildResumeAgentCommand(agent, mode, model), prompt)}
+${escapePrompt(buildResumeAgentCommand(agent, mode, model, options.agentArgs), prompt)}
 `.trim();
 
-  const labelArgs: string[] = [
-    '--label',
-    'hermes.managed=true',
-    '--label',
-    `hermes.name=${resumeName}`,
-    '--label',
-    `hermes.branch=${labels['hermes.branch'] ?? 'unknown'}`,
-    '--label',
-    `hermes.agent=${agent}`,
-    '--label',
-    `hermes.repo=${labels['hermes.repo'] ?? 'unknown'}`,
-    '--label',
-    `hermes.created=${new Date().toISOString()}`,
-    '--label',
-    `hermes.prompt=${resumePrompt}`,
-    '--label',
-    `hermes.resumed-from=${container.Name.replace(/^\//, '')}`,
-    '--label',
-    `hermes.resume-image=${resumeImage}`,
-    '--label',
-    `hermes.interactive=${mode === 'interactive' || mode === 'shell'}`,
-  ];
-  if (model) {
-    labelArgs.push('--label', `hermes.model=${model}`);
-  }
-  // Track mount mode in labels
-  if (absoluteMountDir) {
-    labelArgs.push('--label', `hermes.mount=${absoluteMountDir}`);
-  }
+  const hermesLabels = buildHermesLabels({
+    name: resumeName,
+    branch: containerLabels['hermes.branch'] ?? 'unknown',
+    agent,
+    repo: containerLabels['hermes.repo'] ?? 'unknown',
+    prompt: resumePrompt,
+    interactive: mode === 'interactive' || mode === 'shell',
+    model,
+    mount: absoluteMountDir,
+    resumedFrom: container.Name.replace(/^\//, ''),
+    resumeImage,
+  });
 
   try {
     const result = await runInDocker({
       containerName,
-      dockerArgs: [...labelArgs, ...envArgs, ...volumeArgs],
+      dockerArgs: [...envArgs, ...volumeArgs],
       cmdName: 'bash',
       cmdArgs: ['-c', resumeScript],
       dockerImage: resumeImage,
       interactive: mode !== 'detached',
       detached: mode === 'detached',
       files,
+      labels: hermesLabels,
     });
     await result.exited;
     return containerName;
@@ -1093,6 +1154,7 @@ export async function getSession(
       name: labels['hermes.name'] || labels['hermes.branch'] || 'unknown',
       branch: labels['hermes.branch'] || 'unknown',
       agent: (labels['hermes.agent'] as AgentType) || 'opencode',
+      execType: (labels['hermes.exec-type'] as ExecType) || undefined,
       model: labels['hermes.model'],
       repo: labels['hermes.repo'] || 'unknown',
       prompt: labels['hermes.prompt'] || '',
@@ -1132,6 +1194,7 @@ export async function startContainer(
     envVars,
     mountDir,
     isGitRepo = true,
+    agentArgs,
   } = options;
 
   const hermesEnvPath = '.hermes/.env';
@@ -1189,20 +1252,40 @@ export async function startContainer(
   const volumeArgs = toVolumeArgs(volumes);
 
   // Build the agent command based on the selected agent type, model, and mode
+  const hasPrompt = prompt.trim().length > 0;
   const modelArg = model ? ` --model ${model}` : '';
-  const agentCommand =
-    agent === 'claude'
-      ? `claude${interactive ? '' : ' -p'}${modelArg} --dangerously-skip-permissions`
-      : `opencode${modelArg} ${interactive ? '--prompt' : 'run'}`;
+  const extraArgs = agentArgs?.length ? ` ${agentArgs.join(' ')}` : '';
+  let agentCommand: string;
+  if (agent === 'claude') {
+    const hasPlanArgs = agentArgs?.includes('--permission-mode') ?? false;
+    const skipPermsFlag = hasPlanArgs
+      ? '--allow-dangerously-skip-permissions'
+      : '--dangerously-skip-permissions';
+    const asyncFlag = !interactive ? ' -p' : '';
+    agentCommand = `claude${asyncFlag}${extraArgs}${modelArg} ${skipPermsFlag}`;
+  } else {
+    if (!interactive) {
+      // Async (detached) mode — always uses 'run' subcommand
+      agentCommand = `opencode${modelArg}${extraArgs} run`;
+    } else if (hasPrompt) {
+      // Interactive with prompt — use --prompt flag
+      agentCommand = `opencode${modelArg}${extraArgs} --prompt`;
+    } else {
+      // Interactive without prompt — just open opencode
+      agentCommand = `opencode${modelArg}${extraArgs}`;
+    }
+  }
 
-  // Only add PR instructions if in a git repo and not interactive mode
+  // Only add PR instructions in async mode (detached) with a git repo
   const fullPrompt =
-    interactive || !isGitRepo
-      ? prompt
-      : `${prompt}
+    detach && isGitRepo
+      ? `${prompt}
 
 ---
-Unless otherwise instructed above, use the \`gh\` command to create a PR when done.`;
+Unless otherwise instructed above, use the \`gh\` command to create a PR when done.`
+      : hasPrompt
+        ? prompt
+        : null;
 
   // Different startup script based on mount mode and git repo status
   let startupScript: string;
@@ -1247,42 +1330,22 @@ ${escapePrompt(agentCommand, fullPrompt)}
 `.trim();
   }
 
-  // Build label arguments for hermes metadata
-  const labelArgs: string[] = [
-    '--label',
-    'hermes.managed=true',
-    '--label',
-    `hermes.name=${branchName}`,
-    '--label',
-    `hermes.branch=${branchName}`,
-    '--label',
-    `hermes.agent=${agent}`,
-    '--label',
-    `hermes.repo=${repoInfo?.fullName ?? 'local'}`,
-    '--label',
-    `hermes.created=${new Date().toISOString()}`,
-    '--label',
-    `hermes.interactive=${interactive}`,
-  ];
-  if (model) {
-    labelArgs.push('--label', `hermes.model=${model}`);
-  }
-  // Track mount mode in labels
-  if (absoluteMountDir) {
-    labelArgs.push('--label', `hermes.mount=${absoluteMountDir}`);
-  }
-  // Track whether this is a git repo
-  if (!isGitRepo) {
-    labelArgs.push('--label', 'hermes.no-git=true');
-  }
-  // Store the full prompt in label (truncation is done only at display time)
-  labelArgs.push('--label', `hermes.prompt=${prompt}`);
+  const hermesLabels = buildHermesLabels({
+    name: branchName,
+    branch: branchName,
+    agent,
+    repo: repoInfo?.fullName,
+    prompt,
+    interactive,
+    model,
+    mount: absoluteMountDir,
+    noGit: !isGitRepo || undefined,
+  });
 
   try {
     const result = await runInDocker({
       containerName,
       dockerArgs: [
-        ...labelArgs,
         ...hostEnvArgs,
         '--env-file',
         hermesEnvPath,
@@ -1294,6 +1357,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
       interactive: !detach,
       detached: detach,
       files,
+      labels: hermesLabels,
     });
     await result.exited;
     return detach ? result.text().trim() : null;
@@ -1399,46 +1463,25 @@ exec bash
 `.trim();
   }
 
-  // Build label arguments for hermes metadata
-  const labelArgs: string[] = [
-    '--label',
-    'hermes.managed=true',
-    '--label',
-    `hermes.name=shell-${shellSuffix}`,
-    '--label',
-    `hermes.branch=shell-${shellSuffix}`,
-    '--label',
-    'hermes.agent=shell',
-    '--label',
-    `hermes.repo=${repoInfo?.fullName ?? 'local'}`,
-    '--label',
-    `hermes.created=${new Date().toISOString()}`,
-    '--label',
-    'hermes.interactive=true',
-    '--label',
-    'hermes.prompt=Interactive shell session',
-  ];
-  // Track mount mode in labels
-  if (absoluteMountDir) {
-    labelArgs.push('--label', `hermes.mount=${absoluteMountDir}`);
-  }
-  // Track whether this is a git repo
-  if (!isGitRepo) {
-    labelArgs.push('--label', 'hermes.no-git=true');
-  }
+  const hermesLabels = buildHermesLabels({
+    name: `shell-${shellSuffix}`,
+    branch: `shell-${shellSuffix}`,
+    agent: 'opencode',
+    execType: 'shell',
+    repo: repoInfo?.fullName,
+    prompt: 'Interactive shell session',
+    interactive: true,
+    mount: absoluteMountDir,
+    noGit: !isGitRepo || undefined,
+  });
 
   await runInDocker({
     containerName,
     interactive: true,
-    dockerArgs: [
-      ...labelArgs,
-      ...hostEnvArgs,
-      '--env-file',
-      hermesEnvPath,
-      ...volumeArgs,
-    ],
+    dockerArgs: [...hostEnvArgs, '--env-file', hermesEnvPath, ...volumeArgs],
     cmdName: 'bash',
     cmdArgs: ['-c', startupScript],
     files,
+    labels: hermesLabels,
   });
 }

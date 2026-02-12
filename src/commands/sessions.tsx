@@ -4,6 +4,7 @@
 
 import { YAML } from 'bun';
 import { Command } from 'commander';
+import { nanoid } from 'nanoid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfigWizard, type ConfigWizardResult } from '../commands/config.tsx';
 import { CopyOnSelect } from '../components/CopyOnSelect';
@@ -91,6 +92,8 @@ interface SessionsResult {
   resumeModel?: string;
   // For resume: optional mount directory
   resumeMountDir?: string;
+  // For resume: agent args (e.g., plan mode flags)
+  resumeAgentArgs?: string[];
   // For shell: container ID if resuming, undefined if fresh shell
   resumeContainerId?: string;
   // For shell: optional mount directory for fresh shell
@@ -106,6 +109,7 @@ interface SessionsResult {
     envVars?: Record<string, string>;
     mountDir?: string;
     isGitRepo?: boolean;
+    agentArgs?: string[];
   };
   // For needs-agent-auth: info needed to retry after login
   authInfo?: {
@@ -225,6 +229,8 @@ function SessionsApp({
           'startSession received',
         );
 
+        const isPlan = mode === 'plan';
+
         setView({
           type: 'starting',
           prompt,
@@ -289,24 +295,33 @@ function SessionsApp({
           repoInfo = await getRepoInfo();
         }
 
-        setView((v) =>
-          v.type === 'starting' ? { ...v, step: 'Generating branch name' } : v,
-        );
-        const branchName = await generateBranchName({
-          prompt,
-          agent,
-          model,
-        });
+        // Generate branch name: LLM-generated if we have a prompt, fallback otherwise
+        let branchName: string;
+        if (prompt) {
+          setView((v) =>
+            v.type === 'starting'
+              ? { ...v, step: 'Generating branch name' }
+              : v,
+          );
+          branchName = await generateBranchName({
+            prompt,
+            agent,
+            model,
+          });
+        } else {
+          branchName = `${mode}-${nanoid(6).toLowerCase()}`;
+        }
 
         // Only ensure gitignore if in a git repo
         if (inGitRepo) {
           await ensureGitignore();
         }
 
+        // Skip DB fork for plan mode
         const { serviceId: svcId, dbFork: doFork } = propsRef.current;
         const effectiveServiceId = svcId ?? configRef.current?.tigerServiceId;
         let forkResult: ForkResult | null = null;
-        if (doFork && effectiveServiceId) {
+        if (!isPlan && doFork && effectiveServiceId) {
           setView((v) =>
             v.type === 'starting' ? { ...v, step: 'Forking database' } : v,
           );
@@ -320,8 +335,8 @@ function SessionsApp({
           );
         }
 
-        // For interactive mode, exit TUI and let the caller start the container
-        if (mode === 'interactive') {
+        // For interactive/plan mode, exit TUI and let the caller start the container
+        if (mode === 'interactive' || mode === 'plan') {
           onComplete({
             type: 'start-interactive',
             startInfo: {
@@ -332,6 +347,14 @@ function SessionsApp({
               envVars: forkResult?.envVars,
               mountDir,
               isGitRepo: inGitRepo,
+              ...(isPlan
+                ? {
+                    agentArgs:
+                      agent === 'claude'
+                        ? ['--permission-mode', 'plan']
+                        : ['--agent', 'plan'],
+                  }
+                : {}),
             },
           });
           return;
@@ -397,6 +420,8 @@ function SessionsApp({
           'resumeSessionFlow received',
         );
 
+        const isPlan = mode === 'plan';
+
         setView({
           type: 'resuming',
           session,
@@ -404,18 +429,27 @@ function SessionsApp({
           step: 'Preparing to resume session',
         });
 
-        // For interactive mode, exit TUI and let the caller resume the container
-        if (mode === 'interactive') {
+        // For interactive/plan mode, exit TUI and let the caller resume the container
+        if (mode === 'interactive' || mode === 'plan') {
           setView((v) =>
             v.type === 'resuming'
               ? { ...v, step: 'Starting interactive session' }
               : v,
           );
+
+          // Build agentArgs for plan mode
+          const agentArgs = isPlan
+            ? session.agent === 'claude'
+              ? ['--permission-mode', 'plan']
+              : ['--agent', 'plan']
+            : undefined;
+
           onComplete({
             type: 'resume',
             containerId: session.containerId,
             resumeModel: model,
             resumeMountDir: mountDir,
+            resumeAgentArgs: agentArgs,
           });
           return;
         }
@@ -853,6 +887,7 @@ export async function runSessionsTui({
           mode: 'interactive',
           model: result.resumeModel,
           mountDir: result.resumeMountDir,
+          agentArgs: result.resumeAgentArgs,
         });
       } catch (err) {
         log.error({ err }, 'Failed to resume session');
@@ -895,6 +930,7 @@ export async function runSessionsTui({
         envVars,
         mountDir: startMountDir,
         isGitRepo: startIsGitRepo = true,
+        agentArgs,
       } = result.startInfo;
       try {
         const startRepoInfo = startIsGitRepo ? await getRepoInfo() : null;
@@ -909,6 +945,7 @@ export async function runSessionsTui({
           envVars,
           mountDir: startMountDir,
           isGitRepo: startIsGitRepo,
+          agentArgs,
         });
       } catch (err) {
         log.error({ err }, 'Failed to start session interactively');

@@ -21,6 +21,8 @@ export interface RunInDockerOptionsBase {
   shouldThrow?: boolean;
   files?: VirtualFile[];
   mountCwd?: boolean | string;
+  /** Docker container labels as key-value pairs (expanded to --label args) */
+  labels?: Record<string, string>;
 }
 
 interface RunInDockerOptions extends RunInDockerOptionsBase {
@@ -48,8 +50,13 @@ export const runInDocker = async ({
   shouldThrow = true,
   files = [],
   mountCwd = false,
+  labels = {},
 }: RunInDockerOptions): Promise<RunInDockerResult> => {
   const resolvedImage = dockerImage ?? (await resolveSandboxImage()).image;
+  const labelArgs = Object.entries(labels).flatMap(([k, v]) => [
+    '--label',
+    `${k}=${v}`,
+  ]);
   const effectiveDockerArgs = [
     // Always start detached, so we can get the containerId and potentially write files before starting the main process
     '-d',
@@ -60,6 +67,7 @@ export const runInDocker = async ({
     // We need -it even when detached for interactive mode to work properly in the subsequent docker attach
     ...(interactive ? ['-it'] : []),
     ...dockerArgs,
+    ...labelArgs,
     ...(mountCwd
       ? [
           '-v',
