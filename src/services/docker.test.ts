@@ -25,5 +25,12 @@ describe('docker service', () => {
       expect(config1.image).toBe(config2.image);
       expect(config1.needsBuild).toBe(config2.needsBuild);
     });
+
+    test('always returns version-tagged image (not :latest)', async () => {
+      const config = await resolveSandboxImage({});
+      // Should contain a version tag, not :latest
+      expect(config.image).not.toContain(':latest');
+      expect(config.image).toMatch(/sandbox-slim:\d+\.\d+\.\d+/);
+    });
   });
 });

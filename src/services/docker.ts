@@ -177,6 +177,43 @@ const DOCKER_IMAGE_NAME = 'hermes-sandbox';
 // GHCR (GitHub Container Registry) base path
 const GHCR_BASE = 'ghcr.io/timescale/hermes';
 
+// ============================================================================
+// Pull TTL - avoid excessive pulls by tracking last pull time
+// ============================================================================
+
+/** How long before we re-pull an image tag (4 hours) */
+const PULL_TTL_MS = 4 * 60 * 60 * 1000;
+
+function getPullStatusPath(): string {
+  return join(projectConfigDir(), 'pull-status.json');
+}
+
+interface PullStatus {
+  [imageTag: string]: number; // timestamp (ms) of last successful pull
+}
+
+const readPullStatus = (): Promise<PullStatus> =>
+  Bun.file(getPullStatusPath())
+    .json()
+    .catch(() => ({}));
+
+async function recordPullTime(imageTag: string): Promise<void> {
+  try {
+    const status = await readPullStatus();
+    status[imageTag] = Date.now();
+    await Bun.write(getPullStatusPath(), JSON.stringify(status));
+  } catch (error) {
+    log.error({ error, imageTag }, 'Failed to record pull time');
+  }
+}
+
+async function shouldPull(imageTag: string): Promise<boolean> {
+  const status = await readPullStatus();
+  const lastPull = status[imageTag];
+  if (lastPull == null) return true;
+  return Date.now() - lastPull > PULL_TTL_MS;
+}
+
 type DockerfileVariant = 'slim' | 'full';
 
 function computeDockerfileHash(content: string): string {
@@ -301,29 +338,13 @@ export async function resolveSandboxImage(
   }
 
   // Default: use GHCR sandbox-slim image
-  // Check what's actually available locally, with fallback order:
-  // 1. Version-tagged image (preferred)
-  // 2. Latest image (fallback)
-  // 3. Return version-tagged if neither exists (will need to be pulled)
+  // Always return the version-tagged image. The caller (ensureDockerImage)
+  // handles pulling and falling back to :latest if the versioned image
+  // isn't available. We intentionally don't fall back to :latest here,
+  // because that would cause dockerImageExists() to return true and skip
+  // the pull flow entirely — meaning the versioned image would never be pulled.
   const ghcrTags = getGhcrImageTags('slim');
 
-  if (await imageExists(ghcrTags.version)) {
-    return {
-      image: ghcrTags.version,
-      needsBuild: false,
-      cacheVariant: 'slim',
-    };
-  }
-
-  if (await imageExists(ghcrTags.latest)) {
-    return {
-      image: ghcrTags.latest,
-      needsBuild: false,
-      cacheVariant: 'slim',
-    };
-  }
-
-  // Neither exists locally - return version-tagged (caller will need to pull)
   return {
     image: ghcrTags.version,
     needsBuild: false,
@@ -382,6 +403,7 @@ export const ensureDockerSandbox = async (): Promise<void> => {
 async function tryPullImage(imageTag: string): Promise<boolean> {
   try {
     await $`docker pull ${imageTag}`.quiet();
+    await recordPullTime(imageTag);
     return true;
   } catch {
     return false;
@@ -542,13 +564,13 @@ export async function ensureDockerImage(
   // Flow 3: Default - pull GHCR image (version first, then latest)
   const ghcrTags = getGhcrImageTags('slim');
 
-  // Check if versioned image exists locally
+  // Check if versioned image exists locally (exact version match, no pull needed)
   if (await imageExists(ghcrTags.version)) {
     onProgress?.({ type: 'exists' });
     return ghcrTags.version;
   }
 
-  // Pull versioned image
+  // Try to pull versioned image
   onProgress?.({
     type: 'pulling',
     message: 'Pulling versioned sandbox image',
@@ -558,13 +580,26 @@ export async function ensureDockerImage(
     return ghcrTags.version;
   }
 
-  // Check if latest image exists locally
-  if (await imageExists(ghcrTags.latest)) {
+  // Versioned image not available — fall back to :latest
+  // If :latest exists locally, re-pull it if the TTL has expired to ensure freshness
+  const latestExistsLocally = await imageExists(ghcrTags.latest);
+  if (latestExistsLocally && (await shouldPull(ghcrTags.latest))) {
+    onProgress?.({
+      type: 'pulling',
+      message: 'Refreshing latest sandbox image',
+    });
+    await tryPullImage(ghcrTags.latest);
+    // Use the local image regardless of whether the refresh pull succeeded
+    onProgress?.({ type: 'done' });
+    return ghcrTags.latest;
+  }
+  if (latestExistsLocally) {
+    // TTL has not expired — use the local image as-is
     onProgress?.({ type: 'exists' });
     return ghcrTags.latest;
   }
 
-  // Fall back to latest
+  // :latest doesn't exist locally either — pull it
   onProgress?.({
     type: 'pulling',
     message: 'Pulling latest sandbox image',
@@ -574,7 +609,7 @@ export async function ensureDockerImage(
     return ghcrTags.latest;
   }
 
-  // Final fallback, built the slim image locally
+  // Final fallback: build the slim image locally
   const info = await getDockerfileInfo('slim');
   if (!info) {
     throw new Error('Failed to get Dockerfile content embedded slim image.');
