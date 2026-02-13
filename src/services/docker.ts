@@ -23,6 +23,7 @@ import {
   type HermesConfig,
   projectConfigDir,
   readConfig,
+  userConfigDir,
 } from './config';
 import { getGhConfigFiles } from './gh';
 import type { RepoInfo } from './git';
@@ -185,7 +186,7 @@ const GHCR_BASE = 'ghcr.io/timescale/hermes';
 const PULL_TTL_MS = 4 * 60 * 60 * 1000;
 
 function getPullStatusPath(): string {
-  return join(projectConfigDir(), 'pull-status.json');
+  return join(userConfigDir(), 'pull-status.json');
 }
 
 interface PullStatus {

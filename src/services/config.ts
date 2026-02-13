@@ -159,7 +159,7 @@ function createConfigStore<T extends object>(
 export const projectConfigDir = () => join(process.cwd(), '.hermes');
 
 /** User config directory: OS-specific config path (e.g., ~/.config/hermes on Linux) */
-const userConfigDir = () =>
+export const userConfigDir = () =>
   process.env.HERMES_USER_CONFIG_DIR ||
   envPaths('hermes', { suffix: '' }).config;
 
