@@ -6,6 +6,7 @@ export interface LoadingProps {
   title?: string;
   message?: string;
   detail?: string;
+  hint?: string;
   onCancel?: () => void;
 }
 
@@ -13,6 +14,7 @@ export function Loading({
   title,
   message = 'Please wait',
   detail,
+  hint,
   onCancel,
 }: LoadingProps) {
   const { theme } = useTheme();
@@ -40,6 +42,11 @@ export function Loading({
       {detail ? (
         <text fg={theme.secondary} marginTop={1}>
           {detail}
+        </text>
+      ) : null}
+      {hint ? (
+        <text fg={theme.textMuted} marginTop={1}>
+          {hint}
         </text>
       ) : null}
       {onCancel ? (

@@ -71,12 +71,14 @@ type SessionsView =
       agent: AgentType;
       model: string;
       step: string;
+      mode: SubmitMode;
     }
   | {
       type: 'resuming';
       session: HermesSession;
       model: string;
       step: string;
+      mode: SubmitMode;
     }
   | { type: 'detail'; session: HermesSession }
   | { type: 'list' };
@@ -242,6 +244,7 @@ function SessionsApp({
           agent,
           model,
           step: 'Preparing sandbox environment',
+          mode,
         });
         await ensureDockerImage({
           onProgress: (progress) => {
@@ -432,6 +435,7 @@ function SessionsApp({
           session,
           model,
           step: 'Preparing to resume session',
+          mode,
         });
 
         // For interactive/plan mode, exit TUI and let the caller resume the container
@@ -715,9 +719,13 @@ function SessionsApp({
 
   // ---- Starting Screen View ----
   if (view.type === 'starting' || view.type === 'resuming') {
+    const hint =
+      view.mode === 'interactive' || view.mode === 'plan'
+        ? 'Hint: press ctrl+\\ to detach an interactive session'
+        : undefined;
     return (
       <>
-        <StartingScreen step={view.step} />
+        <StartingScreen step={view.step} hint={hint} />
         {toast && (
           <Toast
             message={toast.message}
