@@ -1,10 +1,13 @@
 import { useKeyboard } from '@opentui/react';
 import open from 'open';
 import { useCallback, useEffect, useState } from 'react';
+import { useContainerStats } from '../hooks/useContainerStats';
 import { useWindowSize } from '../hooks/useWindowSize';
 import { copyToClipboard } from '../services/clipboard';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import {
+  formatCpuPercent,
+  formatMemUsage,
   getSession,
   type HermesSession,
   removeContainer,
@@ -104,6 +107,11 @@ export function SessionDetail({
 
   const isRunning = session.status === 'running';
   const isStopped = session.status === 'exited' || session.status === 'dead';
+
+  // Poll CPU/memory stats for running containers
+  const statsIds = isRunning ? [session.containerId] : [];
+  const containerStats = useContainerStats(statsIds);
+  const stats = containerStats.get(session.containerId);
 
   // Get PR info from cache
   const cachedPr = prCache[session.containerId];
@@ -453,6 +461,18 @@ export function SessionDetail({
             {statusIcon} {statusText}
           </text>
         </box>
+        {isRunning && stats && (
+          <box flexDirection="row" gap={3}>
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>cpu</text>
+              <text>{formatCpuPercent(stats.cpuPercent)}</text>
+            </box>
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>mem</text>
+              <text>{formatMemUsage(stats.memUsage)}</text>
+            </box>
+          </box>
+        )}
         <box flexDirection="row" flexGrow={1} justifyContent="flex-end">
           <text>{agentDisplay}</text>
         </box>

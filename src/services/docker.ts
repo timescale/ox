@@ -799,6 +799,94 @@ export async function stopContainer(nameOrId: string): Promise<void> {
   await $`docker stop ${nameOrId}`.quiet().nothrow();
 }
 
+// ============================================================================
+// Container Stats
+// ============================================================================
+
+export interface ContainerStats {
+  containerId: string;
+  cpuPercent: number;
+  memUsage: string;
+  memPercent: number;
+}
+
+interface DockerStatsJson {
+  ID: string;
+  CPUPerc: string;
+  MemUsage: string;
+  MemPerc: string;
+}
+
+/**
+ * Fetch CPU/memory stats for the given container IDs (must be running).
+ * Returns a Map keyed by container ID.
+ */
+export async function getContainerStats(
+  containerIds: string[],
+): Promise<Map<string, ContainerStats>> {
+  const result = new Map<string, ContainerStats>();
+  if (containerIds.length === 0) return result;
+
+  try {
+    const output =
+      await $`docker stats --no-stream --format {{json .}} ${containerIds}`
+        .quiet()
+        .nothrow();
+    const lines = output.stdout.toString().trim().split('\n').filter(Boolean);
+
+    for (const line of lines) {
+      try {
+        const data: DockerStatsJson = JSON.parse(line);
+        const id = data.ID.slice(0, 12);
+        result.set(id, {
+          containerId: id,
+          cpuPercent: Number.parseFloat(data.CPUPerc.replace('%', '')) || 0,
+          memUsage: data.MemUsage,
+          memPercent: Number.parseFloat(data.MemPerc.replace('%', '')) || 0,
+        });
+      } catch {
+        // Skip malformed lines
+      }
+    }
+  } catch {
+    // Stats are best-effort; return empty map on failure
+  }
+
+  return result;
+}
+
+/**
+ * Format CPU percentage for display (e.g. "12.3%")
+ */
+export function formatCpuPercent(cpu: number): string {
+  return cpu < 10 ? `${cpu.toFixed(1)}%` : `${Math.round(cpu)}%`;
+}
+
+/**
+ * Format memory usage string for compact display.
+ * Input is Docker's format like "256MiB / 8GiB".
+ * With short=true, returns only the usage portion: "256M"
+ * With short=false, returns both parts: "256M / 8G"
+ */
+export function formatMemUsage(memUsage: string, short = false): string {
+  const shorten = (s: string): string =>
+    s
+      .trim()
+      .replace('GiB', 'G')
+      .replace('MiB', 'M')
+      .replace('KiB', 'K')
+      .replace('TiB', 'T');
+
+  const parts = memUsage.split('/');
+  if (parts.length < 2) return shorten(memUsage);
+
+  const usage = shorten(parts[0] ?? '');
+  if (short) return usage;
+
+  const limit = shorten(parts[1] ?? '');
+  return `${usage} / ${limit}`;
+}
+
 /**
  * Normalize line endings for container logs.
  * Converts \r\n and standalone \r to \n.

@@ -3,8 +3,11 @@ import { flushSync, useKeyboard } from '@opentui/react';
 import fuzzysort from 'fuzzysort';
 import open from 'open';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useContainerStats } from '../hooks/useContainerStats';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import {
+  formatCpuPercent,
+  formatMemUsage,
   type HermesSession,
   listHermesSessions,
   removeContainer,
@@ -132,6 +135,14 @@ export function SessionsList({
   const [actionInProgress, setActionInProgress] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
+
+  // Poll CPU/memory stats for running containers
+  const runningIds = useMemo(
+    () =>
+      sessions.filter((s) => s.status === 'running').map((s) => s.containerId),
+    [sessions],
+  );
+  const containerStats = useContainerStats(runningIds);
 
   // Filter sessions: first by scope/mode, then fuzzy text search
   const filteredSessions = useMemo(() => {
@@ -639,6 +650,12 @@ export function SessionsList({
         <text height={1} width={12} fg={theme.textMuted}>
           STATUS
         </text>
+        <text height={1} width={6} fg={theme.textMuted}>
+          CPU
+        </text>
+        <text height={1} width={7} fg={theme.textMuted}>
+          MEM
+        </text>
         <text height={1} width={10} fg={theme.textMuted}>
           PR
         </text>
@@ -722,6 +739,17 @@ export function SessionsList({
               ? formatRelativeTime(session.created)
               : '';
 
+            // Stats for running containers
+            const stats = containerStats.get(session.containerId);
+            const cpuText =
+              session.status === 'running' && stats
+                ? formatCpuPercent(stats.cpuPercent)
+                : '-';
+            const memText =
+              session.status === 'running' && stats
+                ? formatMemUsage(stats.memUsage, true)
+                : '-';
+
             // Background: selected > hovered > default
             const bgColor = isSelected
               ? theme.primary
@@ -752,6 +780,12 @@ export function SessionsList({
                 </text>
                 <text height={1} width={12} fg={itemFgMuted}>
                   {statusText}
+                </text>
+                <text height={1} width={6} fg={itemFgMuted}>
+                  {cpuText}
+                </text>
+                <text height={1} width={7} fg={itemFgMuted}>
+                  {memText}
                 </text>
                 <text height={1} width={10} fg={isSelected ? itemFg : prColor}>
                   {prText}
