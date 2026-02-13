@@ -16,6 +16,7 @@ import { SessionsList } from '../components/SessionsList';
 import { StartingScreen } from '../components/StartingScreen';
 import { Toast, type ToastType } from '../components/Toast';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
+import { CommandPaletteHost } from '../services/commands.tsx';
 import {
   type AgentType,
   type HermesConfig,
@@ -703,6 +704,7 @@ function SessionsApp({
             onDismiss={() => setToast(null)}
           />
         )}
+        <CommandPaletteHost />
       </>
     );
   }
@@ -755,6 +757,7 @@ function SessionsApp({
             onDismiss={() => setToast(null)}
           />
         )}
+        <CommandPaletteHost />
       </>
     );
   }
@@ -766,6 +769,21 @@ function SessionsApp({
         onSelect={(session) => setView({ type: 'detail', session })}
         onQuit={() => onComplete({ type: 'quit' })}
         onNewTask={() => setView({ type: 'prompt' })}
+        onAttach={(session) =>
+          onComplete({
+            type: 'attach',
+            containerId: session.containerId,
+            session,
+          })
+        }
+        onShell={(session) =>
+          onComplete({
+            type: 'exec-shell',
+            containerId: session.containerId,
+            session,
+          })
+        }
+        onResume={handleResume}
         currentRepo={currentRepoInfo?.fullName}
       />
       {toast && (
@@ -775,6 +793,7 @@ function SessionsApp({
           onDismiss={() => setToast(null)}
         />
       )}
+      <CommandPaletteHost />
     </>
   );
 }

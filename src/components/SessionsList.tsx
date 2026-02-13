@@ -2,15 +2,18 @@ import type { ScrollBoxRenderable } from '@opentui/core';
 import { flushSync, useKeyboard } from '@opentui/react';
 import open from 'open';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import {
   type HermesSession,
   listHermesSessions,
   removeContainer,
+  stopContainer,
 } from '../services/docker';
 import { getPrForBranch } from '../services/github';
 import { log } from '../services/logger';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
+import { formatShellError, type ShellError } from '../utils';
 import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
@@ -26,6 +29,9 @@ export interface SessionsListProps {
   onSelect: (session: HermesSession) => void;
   onQuit: () => void;
   onNewTask?: () => void;
+  onAttach?: (session: HermesSession) => void;
+  onShell?: (session: HermesSession) => void;
+  onResume?: (session: HermesSession) => void;
   /** Current repo fullName (e.g., "owner/repo") if in a git repo, undefined otherwise */
   currentRepo?: string;
 }
@@ -98,6 +104,9 @@ export function SessionsList({
   onSelect,
   onQuit,
   onNewTask,
+  onAttach,
+  onShell,
+  onResume,
   currentRepo,
 }: SessionsListProps) {
   const { theme } = useTheme();
@@ -118,6 +127,7 @@ export function SessionsList({
   );
   const [toast, setToast] = useState<ToastState | null>(null);
   const [deleteModal, setDeleteModal] = useState<HermesSession | null>(null);
+  const [stopModal, setStopModal] = useState<HermesSession | null>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
@@ -234,6 +244,44 @@ export function SessionsList({
     }
   }, [deleteModal, filteredSessions, loadSessions, setSelectedSessionId]);
 
+  const handleStop = useCallback(async () => {
+    if (!stopModal) return;
+    const session = stopModal;
+    setStopModal(null);
+    setActionInProgress(true);
+    setToast({ message: 'Stopping container...', type: 'info' });
+    try {
+      await stopContainer(session.containerId);
+      setToast({ message: 'Container stopped', type: 'success' });
+      await loadSessions();
+    } catch (err) {
+      log.error({ err }, `Failed to stop container ${session.containerId}`);
+      setToast({ message: `Failed to stop: ${err}`, type: 'error' });
+    } finally {
+      setActionInProgress(false);
+    }
+  }, [stopModal, loadSessions]);
+
+  const handleGitSwitch = useCallback(async () => {
+    const session = filteredSessions[selectedIndex];
+    if (!session) return;
+    const branchName = `hermes/${session.branch}`;
+    setActionInProgress(true);
+    try {
+      await Bun.$`git fetch && git switch ${branchName}`.quiet();
+      setToast({
+        message: `Switched to branch ${branchName}`,
+        type: 'success',
+      });
+    } catch (err) {
+      const formattedError = formatShellError(err as ShellError);
+      log.error({ err }, `Failed to switch to branch ${branchName}`);
+      setToast({ message: formattedError.message, type: 'error' });
+    } finally {
+      setActionInProgress(false);
+    }
+  }, [filteredSessions, selectedIndex]);
+
   // Initial load
   useEffect(() => {
     loadSessions();
@@ -286,32 +334,229 @@ export function SessionsList({
     }
   }, []);
 
-  // Keyboard handling
+  // Suspend command keybind dispatch when modals are open
+  const suspend = useCommandStore((s) => s.suspend);
+  const isOpen = useCommandStore((s) => s.isOpen);
+  useEffect(() => {
+    if (deleteModal || stopModal || actionInProgress) {
+      return suspend();
+    }
+  }, [deleteModal, stopModal, actionInProgress, suspend]);
+
+  // Helper to get the currently selected session
+  const getSelectedSession = () => filteredSessions[selectedIndex];
+
+  // Register commands for the command palette
+  useRegisterCommands(() => {
+    const selected = getSelectedSession();
+    const isRunning = selected?.status === 'running';
+    const isStopped =
+      selected?.status === 'exited' || selected?.status === 'dead';
+
+    return [
+      {
+        id: 'session.view',
+        title: 'View session details',
+        description: 'Open the selected session detail view',
+        category: 'Navigation',
+        keybind: { key: 'return', display: 'enter' },
+        enabled: filteredSessions.length > 0,
+        onSelect: () => {
+          const s = getSelectedSession();
+          if (s) onSelect(s);
+        },
+      },
+      {
+        id: 'task.new',
+        title: 'New task',
+        description: 'Start a new hermes session',
+        category: 'Navigation',
+        keybind: { key: 'n', ctrl: true },
+        enabled: !!onNewTask,
+        onSelect: () => onNewTask?.(),
+      },
+      {
+        id: 'filter.cycle',
+        title: 'Cycle filter',
+        description:
+          'Cycle between all, running, and completed session filters',
+        category: 'View',
+        keybind: { key: 'tab', display: 'tab' },
+        onSelect: () => {
+          const currentIdx = FILTER_ORDER.indexOf(filterMode);
+          const nextIdx = (currentIdx + 1) % FILTER_ORDER.length;
+          const nextMode = FILTER_ORDER[nextIdx];
+          if (nextMode) setFilterMode(nextMode);
+        },
+      },
+      {
+        id: 'scope.toggle',
+        title: 'Toggle scope',
+        description:
+          'Switch between local (this repo) and global session views',
+        category: 'View',
+        keybind: { key: 'tab', shift: true, display: 'shift+tab' },
+        enabled: !!currentRepo,
+        onSelect: () => {
+          const currentIdx = SCOPE_ORDER.indexOf(scopeMode);
+          const nextIdx = (currentIdx + 1) % SCOPE_ORDER.length;
+          const nextScope = SCOPE_ORDER[nextIdx];
+          if (nextScope) setScopeMode(nextScope);
+        },
+      },
+      {
+        id: 'sessions.refresh',
+        title: 'Refresh sessions',
+        description: 'Reload session list and PR info',
+        category: 'Session',
+        keybind: { key: 'f2', display: 'f2' },
+        onSelect: () => {
+          setLoading(true);
+          clearPrCache();
+          loadSessions().then(() => {
+            setToast({ message: 'Refreshed', type: 'info' });
+          });
+        },
+      },
+      {
+        id: 'session.resume',
+        title: 'Resume session',
+        description: 'Resume the selected session with a new prompt',
+        category: 'Session',
+        keybind: { key: 'r', ctrl: true },
+        enabled: isStopped && !!onResume,
+        onSelect: () => {
+          const s = getSelectedSession();
+          if (s) onResume?.(s);
+        },
+      },
+      {
+        id: 'session.attach',
+        title: 'Attach',
+        description: 'Connect to the selected running container interactively',
+        category: 'Session',
+        keybind: { key: 'a', ctrl: true },
+        enabled: isRunning && !!onAttach,
+        onSelect: () => {
+          const s = getSelectedSession();
+          if (s) onAttach?.(s);
+        },
+      },
+      {
+        id: 'session.delete',
+        title: 'Delete session',
+        description: 'Remove the selected session container',
+        category: 'Session',
+        keybind: [
+          { key: 'delete', display: 'delete' },
+          { key: 'd', ctrl: true },
+        ],
+        enabled: !!selected,
+        onSelect: () => {
+          if (selected) setDeleteModal(selected);
+        },
+      },
+      {
+        id: 'session.shell',
+        title: 'Shell',
+        description: 'Open a bash shell inside the selected container',
+        category: 'Session',
+        keybind: { key: 's', ctrl: true },
+        enabled: isRunning && !!onShell,
+        onSelect: () => {
+          const s = getSelectedSession();
+          if (s) onShell?.(s);
+        },
+      },
+      {
+        id: 'session.gitSwitch',
+        title: 'Git switch',
+        description: "Switch local git branch to the selected session's branch",
+        category: 'Session',
+        keybind: { key: 'g', ctrl: true },
+        enabled: !!selected,
+        onSelect: handleGitSwitch,
+      },
+      {
+        id: 'session.stop',
+        title: 'Stop session',
+        description: 'Stop the selected running container',
+        category: 'Session',
+        keybind: { key: 'x', ctrl: true },
+        enabled: isRunning && !!selected,
+        onSelect: () => {
+          if (selected) setStopModal(selected);
+        },
+      },
+      {
+        id: 'session.openPr',
+        title: 'Open PR',
+        description:
+          'Open the pull request for the selected session in browser',
+        category: 'Session',
+        keybind: { key: 'o', ctrl: true },
+        onSelect: () => {
+          if (selected) {
+            const prInfo = prCache[selected.containerId]?.prInfo;
+            if (prInfo) {
+              open(prInfo.url)
+                .then(() => {
+                  setToast({
+                    message: `Opening PR #${prInfo.number}...`,
+                    type: 'info',
+                    duration: 1000,
+                  });
+                })
+                .catch((err: unknown) => {
+                  log.debug({ err }, 'Failed to open PR URL in browser');
+                  setToast({
+                    message: 'Failed to open PR in browser',
+                    type: 'error',
+                  });
+                });
+            } else {
+              setToast({
+                message: 'No PR found for this session',
+                type: 'warning',
+              });
+            }
+          }
+        },
+      },
+    ];
+  }, [
+    onSelect,
+    onNewTask,
+    onAttach,
+    onShell,
+    onResume,
+    filterMode,
+    currentRepo,
+    scopeMode,
+    clearPrCache,
+    loadSessions,
+    filteredSessions,
+    selectedIndex,
+    prCache,
+    handleGitSwitch,
+  ]);
+
+  // Keyboard handling — navigation keys only.
+  // Action keybinds are handled by the centralized CommandPaletteHost.
   useKeyboard((key) => {
     // Ignore keyboard input when modal is open or action in progress
-    if (deleteModal || actionInProgress) return;
+    if (deleteModal || stopModal || actionInProgress) return;
 
+    // Escape returns to prompt screen (but not if the command palette is open)
     if (key.name === 'escape') {
-      onQuit();
-      return;
-    }
-
-    // Delete selected session (ctrl+d or delete key)
-    if ((key.name === 'd' && key.ctrl) || key.name === 'delete') {
-      const session = filteredSessions[selectedIndex];
-      if (session) {
-        setDeleteModal(session);
+      if (!isOpen) {
+        onNewTask ? onNewTask() : onQuit();
       }
       return;
     }
 
-    if (key.name === 'return' && filteredSessions.length > 0) {
-      const session = filteredSessions[selectedIndex];
-      if (session) {
-        onSelect(session);
-      }
-      return;
-    }
+    // Don't navigate when the command palette is open
+    if (isOpen) return;
 
     if (key.name === 'up' || (key.name === 'k' && key.ctrl)) {
       const newIndex = Math.max(0, selectedIndex - 1);
@@ -328,74 +573,6 @@ export function SessionsList({
       const newIndex = Math.min(filteredSessions.length - 1, selectedIndex + 1);
       flushSync(() => selectByIndex(newIndex));
       scrollToIndex(newIndex);
-      return;
-    }
-
-    if (key.name === 'tab') {
-      const currentIdx = FILTER_ORDER.indexOf(filterMode);
-      const nextIdx = (currentIdx + 1) % FILTER_ORDER.length;
-      const nextMode = FILTER_ORDER[nextIdx];
-      if (nextMode) {
-        setFilterMode(nextMode);
-        // Don't reset selection when changing filter - the selectedIndex
-        // computation will handle finding the session or falling back to 0
-      }
-      return;
-    }
-
-    // Ctrl+L to toggle scope (only when in a repo)
-    if (key.name === 'l' && key.ctrl && currentRepo) {
-      const currentIdx = SCOPE_ORDER.indexOf(scopeMode);
-      const nextIdx = (currentIdx + 1) % SCOPE_ORDER.length;
-      const nextScope = SCOPE_ORDER[nextIdx];
-      if (nextScope) {
-        setScopeMode(nextScope);
-      }
-      return;
-    }
-
-    if (key.name === 'r' && key.ctrl) {
-      setLoading(true);
-      clearPrCache(); // Force re-fetch of PR info
-      loadSessions().then(() => {
-        setToast({ message: 'Refreshed', type: 'info' });
-      });
-      return;
-    }
-
-    // Ctrl+O to open PR in browser
-    if (key.name === 'o' && key.ctrl) {
-      const session = filteredSessions[selectedIndex];
-      if (session) {
-        const prInfo = prCache[session.containerId]?.prInfo;
-        if (prInfo) {
-          open(prInfo.url)
-            .then(() => {
-              setToast({
-                message: `Opening PR #${prInfo.number}...`,
-                type: 'info',
-                duration: 1000,
-              });
-            })
-            .catch((err: unknown) => {
-              log.debug({ err }, 'Failed to open PR URL in browser');
-              setToast({
-                message: `Failed to open PR in browser`,
-                type: 'error',
-              });
-            });
-        } else {
-          setToast({
-            message: 'No PR found for this session',
-            type: 'warning',
-          });
-        }
-      }
-      return;
-    }
-
-    if (key.name === 'p' && key.ctrl && onNewTask) {
-      onNewTask();
       return;
     }
 
@@ -604,10 +781,10 @@ export function SessionsList({
       <HotkeysBar
         keyList={[
           ['tab', 'filter'],
-          ...(currentRepo ? [['ctrl+l', 'scope'] as [string, string]] : []),
-          ['ctrl+o', 'open PR'],
-          ['ctrl+p', 'new'],
-          ['ctrl+r', 'refresh'],
+          ...(currentRepo ? [['shift+tab', 'scope'] as [string, string]] : []),
+          ['ctrl+n', 'new'],
+          ['f2', 'refresh'],
+          ['ctrl+p', 'commands'],
         ]}
       />
 
@@ -621,6 +798,19 @@ export function SessionsList({
           confirmColor={theme.error}
           onConfirm={handleDelete}
           onCancel={() => setDeleteModal(null)}
+        />
+      )}
+
+      {/* Stop confirmation modal */}
+      {stopModal && (
+        <ConfirmModal
+          title="Stop Session"
+          message={`Stop "${stopModal.name}"?`}
+          detail="This will terminate the running agent session."
+          confirmLabel="Stop"
+          confirmColor={theme.warning}
+          onConfirm={handleStop}
+          onCancel={() => setStopModal(null)}
         />
       )}
 

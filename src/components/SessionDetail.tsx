@@ -3,6 +3,7 @@ import open from 'open';
 import { useCallback, useEffect, useState } from 'react';
 import { useWindowSize } from '../hooks/useWindowSize';
 import { copyToClipboard } from '../services/clipboard';
+import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import {
   getSession,
   type HermesSession,
@@ -245,37 +246,131 @@ export function SessionDetail({
     }
   }, [session.branch, showToast]);
 
-  // Keyboard shortcuts
+  // Suspend command keybind dispatch when modal is open
+  const suspend = useCommandStore((s) => s.suspend);
+  useEffect(() => {
+    if (modal || actionInProgress) {
+      return suspend();
+    }
+  }, [modal, actionInProgress, suspend]);
+
+  // Register commands for the command palette
+  useRegisterCommands(
+    () => [
+      {
+        id: 'nav.sessionsList',
+        title: 'View sessions list',
+        description: 'Go back to the sessions list',
+        category: 'Navigation',
+        keybind: { key: 'l', ctrl: true },
+        onSelect: () => onBack(),
+      },
+      {
+        id: 'task.new',
+        title: 'New task',
+        description: 'Start a new hermes session',
+        category: 'Navigation',
+        keybind: { key: 'n', ctrl: true },
+        enabled: !!onNewPrompt,
+        onSelect: () => onNewPrompt?.(),
+      },
+      {
+        id: 'session.attach',
+        title: 'Attach',
+        description: 'Connect to the running agent container interactively',
+        category: 'Session',
+        keybind: { key: 'a', ctrl: true },
+        enabled: isRunning,
+        onSelect: () => onAttach(session.containerId),
+      },
+      {
+        id: 'session.shell',
+        title: 'Shell',
+        description: 'Open a bash shell inside the running container',
+        category: 'Session',
+        keybind: { key: 's', ctrl: true },
+        enabled: isRunning,
+        onSelect: () => onShell(session.containerId),
+      },
+      {
+        id: 'session.stop',
+        title: 'Stop',
+        description: 'Stop the running container',
+        category: 'Session',
+        keybind: { key: 'x', ctrl: true },
+        enabled: isRunning,
+        onSelect: () => setModal('stop'),
+      },
+      {
+        id: 'session.resume',
+        title: 'Resume',
+        description: 'Resume this stopped session with a new prompt',
+        category: 'Session',
+        keybind: { key: 'r', ctrl: true },
+        enabled: isStopped,
+        onSelect: handleResume,
+      },
+      {
+        id: 'session.delete',
+        title: 'Delete',
+        description: 'Remove the stopped container permanently',
+        category: 'Session',
+        keybind: { key: 'd', ctrl: true },
+        enabled: isStopped,
+        onSelect: () => setModal('delete'),
+      },
+      {
+        id: 'session.openPr',
+        title: 'Open PR',
+        description: 'Open the pull request in browser',
+        category: 'Session',
+        keybind: { key: 'o', ctrl: true },
+        onSelect: () => {
+          if (!prInfo) {
+            setToast({
+              message: 'No PR found for this session',
+              type: 'warning',
+            });
+            return;
+          }
+          handlePrClick();
+        },
+      },
+      {
+        id: 'session.gitSwitch',
+        title: 'Git switch',
+        description: "Switch local git branch to this session's branch",
+        category: 'Session',
+        keybind: { key: 'g', ctrl: true },
+        onSelect: handleGitSwitch,
+      },
+    ],
+    [
+      onBack,
+      onNewPrompt,
+      isRunning,
+      isStopped,
+      session.containerId,
+      onAttach,
+      onShell,
+      handleResume,
+      prInfo,
+      handlePrClick,
+      handleGitSwitch,
+    ],
+  );
+
+  // Read palette open state so escape doesn't go back when closing the palette
+  const isOpen = useCommandStore((s) => s.isOpen);
+
+  // Keyboard shortcuts — navigation only.
+  // Action keybinds are handled by the centralized CommandPaletteHost.
   useKeyboard((key) => {
-    // Ignore if modal is open or action in progress
     if (modal || actionInProgress) return;
 
-    if (key.name === 'p' && key.ctrl && onNewPrompt) {
-      onNewPrompt();
+    if (key.name === 'escape') {
+      if (!isOpen) onBack();
       return;
-    }
-
-    if (key.name === 'escape' || key.name === 'backspace' || key.raw === 'b') {
-      onBack();
-    } else if (key.raw === 's' && isRunning) {
-      setModal('stop');
-    } else if ((key.raw === 'd' || key.raw === 'x') && isStopped) {
-      setModal('delete');
-    } else if (key.raw === 'a' && isRunning) {
-      onAttach(session.containerId);
-    } else if (key.raw === 'S' && isRunning) {
-      onShell(session.containerId);
-    } else if (key.raw === 'r' && isStopped) {
-      handleResume();
-    } else if (key.raw === 'o') {
-      // Open PR in browser
-      if (!prInfo) {
-        setToast({ message: 'No PR found for this session', type: 'warning' });
-        return;
-      }
-      handlePrClick();
-    } else if (key.raw === 'g') {
-      handleGitSwitch();
     }
   });
 
@@ -293,24 +388,24 @@ export function SessionDetail({
   const model = session.model?.split('/').pop();
   const agentDisplay = model ? `${session.agent} (${model})` : session.agent;
 
-  // Build help text based on available actions
+  // Build hotkey hints based on available actions
   const actions = [
     ...(isRunning
       ? [
-          ['a', 'ttach'],
-          ['S', 'hell'],
-          ['s', 'top'],
+          ['ctrl+a', 'attach'],
+          ['ctrl+s', 'shell'],
+          ['ctrl+x', 'stop'],
         ]
       : []),
     ...(isStopped
       ? [
-          ['r', 'esume'],
-          ['d', 'elete'],
+          ['ctrl+r', 'resume'],
+          ['ctrl+d', 'delete'],
         ]
       : []),
-    ...(prInfo ? [['o', 'pen PR']] : []),
-    ['g', 'it switch'],
-    ['b', 'ack'],
+    ...(prInfo ? [['ctrl+o', 'open PR']] : []),
+    ['ctrl+g', 'git switch'],
+    ['ctrl+p', 'commands'],
   ] as unknown as readonly [string, string][];
 
   return (
@@ -404,7 +499,7 @@ export function SessionDetail({
         />
       </box>
 
-      <HotkeysBar compact keyList={actions} />
+      <HotkeysBar keyList={actions} />
 
       {/* Confirmation modals */}
       {modal === 'stop' && (

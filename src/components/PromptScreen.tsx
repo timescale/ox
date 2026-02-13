@@ -5,7 +5,7 @@ import type {
   TextareaRenderable,
 } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import packageJson from '../../package.json' with { type: 'json' };
 import {
   AGENT_INFO_MAP,
@@ -16,6 +16,7 @@ import {
   openCodeIdToModel,
   useAgentModels,
 } from '../services/agents';
+import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import type { AgentType } from '../services/config';
 import type { HermesSession } from '../services/docker';
 import { log } from '../services/logger';
@@ -145,11 +146,107 @@ export function PromptScreen({
     );
   }, [resumeSession, agent, defaultAgent, modelId, modelsMap]);
 
+  // Suspend command keybind dispatch when sub-modals are open
+  const suspend = useCommandStore((s) => s.suspend);
+  useEffect(() => {
+    if (showModelSelector || showThemePicker) {
+      return suspend();
+    }
+  }, [showModelSelector, showThemePicker, suspend]);
+
+  // Register commands for the command palette
+  useRegisterCommands(
+    () => [
+      {
+        id: 'mode.cycle',
+        title: 'Switch interaction mode',
+        description: 'Cycle between async, interactive, and plan modes',
+        category: 'Prompt',
+        keybind: { key: 'tab', display: 'tab' },
+        onSelect: () =>
+          setSubmitMode((m) => {
+            if (m === 'async') return 'interactive';
+            if (m === 'interactive') return 'plan';
+            return 'async';
+          }),
+      },
+      {
+        id: 'agent.switch',
+        title: 'Switch agent',
+        description: 'Cycle through available AI agents',
+        category: 'Agent',
+        keybind: { key: 'tab', shift: true, display: 'shift+tab' },
+        hidden: !!resumeSession,
+        onSelect: switchAgent,
+      },
+      {
+        id: 'model.select',
+        title: 'Select model',
+        description: 'Choose the AI model to use',
+        category: 'Agent',
+        keybind: { key: 'space', ctrl: true, display: 'ctrl+space' },
+        enabled: !!currentModels?.length,
+        onSelect: () => setShowModelSelector(true),
+      },
+      {
+        id: 'shell.launch',
+        title: 'Launch shell',
+        description: 'Open a bash shell in a sandbox container',
+        category: 'System',
+        keybind: { key: 's', ctrl: true },
+        hidden: true,
+        onSelect: () =>
+          onShell(mountMode ? (mountDir ?? undefined) : undefined),
+      },
+      {
+        id: 'sessions.view',
+        title: 'View sessions list',
+        description: 'Browse and manage existing sessions',
+        category: 'Session',
+        keybind: { key: 'l', ctrl: true },
+        onSelect: () => onViewSessions?.(),
+      },
+      {
+        id: 'mount.toggle',
+        title: `${mountMode ? 'Disable' : 'Enable'} local mount mode`,
+        description: forceMountMode
+          ? 'Mount mode is required (no git remote)'
+          : 'Toggle between git clone and local directory mount',
+        category: 'Prompt',
+        keybind: { key: 'd', ctrl: true },
+        enabled: !forceMountMode,
+        onSelect: () =>
+          setMountMode((m) => {
+            if (!m) setMountDir(process.cwd());
+            return !m;
+          }),
+      },
+      {
+        id: 'theme.select',
+        title: 'Select theme',
+        description: 'Change the color theme',
+        category: 'System',
+        keybind: { key: 't', ctrl: true },
+        onSelect: () => setShowThemePicker(true),
+      },
+    ],
+    [
+      resumeSession,
+      currentModels,
+      switchAgent,
+      mountMode,
+      forceMountMode,
+      mountDir,
+      onShell,
+      onViewSessions,
+    ],
+  );
+
   // Define available slash commands
   const slashCommands: SlashCommand[] = useMemo(
     () => [
       {
-        name: 'agents',
+        name: 'agent',
         description: 'Switch agent',
         onSelect: () => {
           setShowSlashCommands(false);
@@ -163,7 +260,7 @@ export function PromptScreen({
         },
       },
       {
-        name: 'models',
+        name: 'model',
         description: 'Switch model',
         onSelect: () => {
           setShowSlashCommands(false);
@@ -190,7 +287,7 @@ export function PromptScreen({
       },
       {
         name: 'sessions',
-        description: 'View sessions',
+        description: 'View sessions list',
         onSelect: () => {
           setShowSlashCommands(false);
           setSlashQuery('');
@@ -203,10 +300,10 @@ export function PromptScreen({
       {
         name: 'mount',
         description: forceMountMode
-          ? 'Mount mode required'
+          ? 'Local mount mode required'
           : mountMode
-            ? 'Disable mount mode (use git clone)'
-            : 'Enable mount mode (use local directory)',
+            ? 'Disable local mount mode (use git clone)'
+            : 'Enable local mount mode (use local directory)',
         onSelect: () => {
           setShowSlashCommands(false);
           setSlashQuery('');
@@ -252,7 +349,7 @@ export function PromptScreen({
       },
       {
         name: 'plan',
-        description: 'Switch to plan mode (read-only agent)',
+        description: 'Switch to plan mode (interactive, read-only agent)',
         onSelect: () => {
           setShowSlashCommands(false);
           setSlashQuery('');
@@ -365,9 +462,9 @@ export function PromptScreen({
     return false;
   };
 
-  // Keyboard handling (when modal not shown)
+  // Keyboard handling — only slash command detection remains.
+  // Action keybinds are handled by the centralized CommandPaletteHost.
   useKeyboard((key) => {
-    log.trace({ key }, 'Key pressed in PromptScreen');
     if (showModelSelector || showThemePicker) return;
 
     // If slash commands are showing, let the popover handle navigation
@@ -397,57 +494,6 @@ export function PromptScreen({
     // Check after any key if we have slash text
     if (key.name === 'backspace') {
       setTimeout(checkForSlashCommand, 0);
-    }
-
-    if (key.name === 'tab' && !resumeSession) {
-      switchAgent();
-      return;
-    }
-
-    if (key.name === 'l' && key.ctrl) {
-      if (currentModels?.length) {
-        setShowModelSelector(true);
-      }
-      return;
-    }
-
-    if (key.name === 's' && key.ctrl) {
-      onViewSessions?.();
-      return;
-    }
-
-    if (key.name === 'a' && key.ctrl) {
-      setSubmitMode((m) => {
-        if (m === 'async') return 'interactive';
-        if (m === 'interactive') return 'plan';
-        return 'async';
-      });
-      return;
-    }
-
-    if (key.name === 'b' && key.ctrl) {
-      onShell(mountMode ? (mountDir ?? undefined) : undefined);
-      return;
-    }
-
-    if (key.name === 't' && key.ctrl) {
-      setShowThemePicker(true);
-      return;
-    }
-
-    if (key.name === 'd' && key.ctrl) {
-      // Don't allow toggling mount mode off when forced
-      if (forceMountMode) {
-        return;
-      }
-      setMountMode((m) => {
-        if (!m) {
-          // Enabling mount mode - set default mount dir to cwd
-          setMountDir(process.cwd());
-        }
-        return !m;
-      });
-      return;
     }
   });
 
@@ -570,12 +616,13 @@ export function PromptScreen({
           </box>
           <HotkeysBar
             keyList={[
-              ...(resumeSession ? [] : [['tab', 'agents'] as [string, string]]),
-              ['ctrl+l', 'models'],
-              ['ctrl+a', 'mode'],
-              ['ctrl+d', 'mount'],
-              ['ctrl+b', 'shell'],
-              ['ctrl+s', 'sessions'],
+              ['tab', 'mode'],
+              ...(resumeSession
+                ? []
+                : [['shift+tab', 'agent'] as [string, string]]),
+              ['ctrl+space', 'model'],
+              ['ctrl+l', 'sessions'],
+              ['ctrl+p', 'commands'],
             ]}
           />
         </box>
