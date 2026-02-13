@@ -828,26 +828,7 @@ export async function getContainerStats(
   if (containerIds.length === 0) return result;
 
   try {
-    const format = '{{json .}}';
-    const output =
-      await $`docker stats --no-stream --format ${format} ${containerIds}`
-        .quiet()
-        .nothrow();
-    if (output.exitCode !== 0) {
-      log.warn(
-        { exitCode: output.exitCode, stderr: output.stderr.toString() },
-        'docker stats exited with non-zero code',
-      );
-      return result;
-    }
-
-    log.trace(
-      { containerCount: containerIds.length },
-      'Fetched container stats',
-    );
-
-    const lines = output.text().trim().split('\n');
-    for (const line of lines) {
+    for await (const line of $`docker stats --no-stream --format ${'{{json .}}'} ${containerIds}`.lines()) {
       try {
         const data: DockerStatsJson = JSON.parse(line);
         const id = data.ID.slice(0, 12);
@@ -861,6 +842,10 @@ export async function getContainerStats(
         log.warn({ line, err }, 'Failed to parse docker stats line');
       }
     }
+    log.trace(
+      { containerCount: containerIds.length },
+      'Fetched container stats',
+    );
   } catch (err) {
     log.warn({ err }, 'Failed to fetch container stats');
   }
