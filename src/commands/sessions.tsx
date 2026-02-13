@@ -50,7 +50,11 @@ import {
   ensureOpencodeAuth,
 } from '../services/opencode';
 import { createTui } from '../services/tui.ts';
-import { ensureGitignore } from '../utils';
+import {
+  ensureGitignore,
+  enterSubprocessScreen,
+  resetTerminal,
+} from '../utils';
 
 // ============================================================================
 // Types
@@ -901,6 +905,7 @@ export async function runSessionsTui({
     }
 
     if (result.type === 'resume' && result.containerId) {
+      enterSubprocessScreen();
       try {
         await resumeSession(result.containerId, {
           mode: 'interactive',
@@ -912,11 +917,13 @@ export async function runSessionsTui({
         log.error({ err }, 'Failed to resume session');
         console.error(`Failed to resume: ${err}`);
       }
+      resetTerminal();
       continue;
     }
 
     // Handle shell action - start bash shell in container
     if (result.type === 'shell') {
+      enterSubprocessScreen();
       try {
         if (result.resumeContainerId) {
           // Shell on resumed container
@@ -936,6 +943,7 @@ export async function runSessionsTui({
         log.error({ err }, 'Failed to start shell');
         console.error(`Failed to start shell: ${err}`);
       }
+      resetTerminal();
       continue;
     }
 
@@ -951,6 +959,7 @@ export async function runSessionsTui({
         isGitRepo: startIsGitRepo = true,
         agentArgs,
       } = result.startInfo;
+      enterSubprocessScreen();
       try {
         const startRepoInfo = startIsGitRepo ? await getRepoInfo() : null;
         await startContainer({
@@ -970,6 +979,7 @@ export async function runSessionsTui({
         log.error({ err }, 'Failed to start session interactively');
         console.error(`Failed to start: ${err}`);
       }
+      resetTerminal();
       continue;
     }
 

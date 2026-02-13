@@ -37,6 +37,57 @@ export function printErr(msg: string): void {
 }
 
 // ============================================================================
+// Terminal State Utilities
+// ============================================================================
+
+/**
+ * Enter the alternate screen buffer before handing the terminal to a
+ * subprocess (docker attach, docker exec, etc.).
+ *
+ * This isolates all subprocess output from the main screen buffer, so
+ * nothing leaks into the user's terminal scrollback. Pair with
+ * {@link resetTerminal} after the subprocess exits.
+ */
+export function enterSubprocessScreen(): void {
+  const sequences = [
+    '\x1b[?1049h', // Enter alternate screen buffer
+    '\x1b[?1000h', // Enable X11 mouse button tracking
+    '\x1b[?1002h', // Enable button-event tracking (drag)
+    '\x1b[?1003h', // Enable any-event tracking (all motion)
+    '\x1b[?1006h', // Enable SGR extended mouse mode
+  ].join('');
+  process.stdout.write(sequences);
+}
+
+/**
+ * Reset terminal to a clean state after a subprocess exits.
+ *
+ * Exits the alternate screen buffer (entered by {@link enterSubprocessScreen}),
+ * restoring the main screen to its pre-subprocess state. Also resets cursor
+ * visibility and text attributes defensively, and refreshes the cached
+ * terminal dimensions which may be stale after the subprocess.
+ */
+export function resetTerminal(): void {
+  const sequences = [
+    '\x1b[?1003l', // Disable any-event mouse tracking
+    '\x1b[?1002l', // Disable button-event mouse tracking
+    '\x1b[?1000l', // Disable X11 mouse button tracking
+    '\x1b[?1006l', // Disable SGR extended mouse mode
+    '\x1b[?1049l', // Exit alternate screen buffer → restores main screen
+    '\x1b[?25h', // Show cursor (if subprocess hid it)
+    '\x1b[0m', // Reset text attributes (colors, bold, etc.)
+  ].join('');
+  process.stdout.write(sequences);
+
+  // Force a fresh ioctl(TIOCGWINSZ) to update cached terminal dimensions.
+  // While attached to a Docker subprocess, SIGWINCH signals go to Docker
+  // (not our process), so process.stdout.columns/rows may be stale.
+  // This also emits a 'resize' event if the dimensions changed, which
+  // propagates to opentui and the useWindowSize hook.
+  process.stdout._refreshSize();
+}
+
+// ============================================================================
 // Shell Utilities
 // ============================================================================
 
