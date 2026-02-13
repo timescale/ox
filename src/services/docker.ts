@@ -16,7 +16,12 @@ import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
   type: 'text',
 };
 import { runDockerSetupScreen } from '../components/DockerSetup';
-import { formatShellError, type ShellError } from '../utils';
+import {
+  enterSubprocessScreen,
+  formatShellError,
+  resetTerminal,
+  type ShellError,
+} from '../utils';
 import { getClaudeConfigFiles } from './claude';
 import {
   type AgentType,
@@ -923,8 +928,14 @@ export function streamContainerLogs(nameOrId: string): LogStream {
 /**
  * Attach to a running container's main process using docker attach.
  * Sends a WINCH signal first to trigger the TUI to redraw at the correct size.
+ * After detaching, resets the terminal to a clean state since the container's
+ * process may have altered terminal modes (alternate screen, raw mode, etc.).
  */
 export async function attachToContainer(nameOrId: string): Promise<void> {
+  // Enter alternate screen so all container output is isolated from the
+  // user's main screen buffer / scrollback history.
+  enterSubprocessScreen();
+
   const proc = Bun.spawn(
     ['docker', 'attach', '--detach-keys=ctrl-\\', nameOrId],
     {
@@ -937,12 +948,18 @@ export async function attachToContainer(nameOrId: string): Promise<void> {
   }, 100);
 
   await proc.exited;
+
+  // Exit alternate screen and clean up terminal state after detaching.
+  resetTerminal();
 }
 
 export async function signalContainerTTYResize(
   nameOrId: string,
   offset = 0,
 ): Promise<void> {
+  // Force a fresh ioctl query — cached values may be stale if the terminal
+  // was resized while attached to a Docker subprocess.
+  process.stdout._refreshSize();
   const cols = (process.stdout.columns ?? 80) + offset;
   const rows = (process.stdout.rows ?? 24) + offset;
   log.debug({ nameOrId, cols, rows }, 'Sending WINCH signal to container');
@@ -955,12 +972,20 @@ export async function signalContainerTTYResize(
 
 /**
  * Open an interactive bash shell in a running container.
+ * After the shell exits, resets the terminal to a clean state.
  */
 export async function shellInContainer(nameOrId: string): Promise<void> {
+  // Enter alternate screen so all shell output is isolated from the
+  // user's main screen buffer / scrollback history.
+  enterSubprocessScreen();
+
   const proc = Bun.spawn(['docker', 'exec', '-it', nameOrId, '/bin/bash'], {
     stdio: ['inherit', 'inherit', 'inherit'],
   });
   await proc.exited;
+
+  // Exit alternate screen and clean up terminal state after the shell exits.
+  resetTerminal();
 }
 
 // ============================================================================
