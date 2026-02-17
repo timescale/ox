@@ -52,13 +52,15 @@ function getBaseSnapshotSlug(): string {
 /**
  * Ensure the base cloud snapshot exists for the current hermes version.
  * Creates it if it doesn't exist by:
- * 1. Booting a sandbox from builtin:debian-13
+ * 1. Booting a sandbox with the default image (which has sudo)
  * 2. Installing all required tools
- * 3. Snapshotting the volume
+ * 3. Copying the root filesystem into a mounted volume
+ * 4. Snapshotting the volume
  *
- * Uses the SDK's `sandbox.sh` tagged template for all commands.
- * Root commands use `.sudo()`. User-level commands (tool installs)
- * run as the default sandbox user so tools end up in `$HOME`.
+ * We can't use `builtin:debian-13` as `root:` because the raw Debian
+ * image doesn't have `sudo` configured for the sandbox default user.
+ * Instead we use the SDK's default image (which has working sudo),
+ * install everything, then rsync the root into a volume for snapshotting.
  */
 export async function ensureCloudSnapshot(options: {
   token: string;
@@ -81,7 +83,7 @@ export async function ensureCloudSnapshot(options: {
     log.debug({ err }, 'Failed to check snapshot');
   }
 
-  // 2. Create a temporary bootable volume
+  // 2. Create an empty volume to capture the final root filesystem
   const buildVolumeSlug = `hermes-base-build-${Date.now()}`;
   onProgress?.({
     type: 'creating-volume',
@@ -92,13 +94,12 @@ export async function ensureCloudSnapshot(options: {
     slug: buildVolumeSlug,
     region,
     capacity: '10GiB',
-    from: 'builtin:debian-13',
   });
 
   let sandbox: Sandbox | null = null;
 
   try {
-    // 3. Boot sandbox with volume as writable root
+    // 3. Boot sandbox with DEFAULT image (has working sudo) + mount volume
     onProgress?.({
       type: 'booting-sandbox',
       message: 'Booting build sandbox',
@@ -106,9 +107,9 @@ export async function ensureCloudSnapshot(options: {
 
     sandbox = await client.createSandbox({
       region: region as 'ord' | 'ams',
-      root: volume.slug,
       timeout: '30m',
       memory: '2GiB',
+      volumes: { '/mnt/snapshot': volume.slug },
     });
 
     // 4. Install system packages (root)
@@ -118,7 +119,7 @@ export async function ensureCloudSnapshot(options: {
       detail: 'git, curl, ca-certificates, zip, unzip, tar, gzip, jq',
     });
     await run(
-      sandbox.sh`apt-get update && apt-get install -y git curl ca-certificates zip unzip tar gzip jq openssh-client`.sudo(),
+      sandbox.sh`apt-get update && apt-get install -y git curl ca-certificates zip unzip tar gzip jq openssh-client rsync`.sudo(),
       'Install system packages',
     );
 
@@ -173,7 +174,34 @@ export async function ensureCloudSnapshot(options: {
       'Configure git',
     );
 
-    // 10. Snapshot the volume
+    // 10. Copy the root filesystem into the mounted volume
+    onProgress?.({
+      type: 'installing',
+      message: 'Preparing snapshot filesystem',
+    });
+    await run(
+      sandbox.sh`rsync -a / /mnt/snapshot/ --exclude=/mnt --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/tmp`.sudo(),
+      'Copy root filesystem to volume',
+    );
+    // Recreate empty mount points that sessions will need
+    await run(
+      sandbox.sh`mkdir -p /mnt/snapshot/proc /mnt/snapshot/sys /mnt/snapshot/dev /mnt/snapshot/run /mnt/snapshot/tmp /mnt/snapshot/mnt /mnt/snapshot/work`.sudo(),
+      'Create mount points in snapshot',
+    );
+
+    // 11. Kill sandbox to detach the volume (required before snapshotting)
+    onProgress?.({
+      type: 'snapshotting',
+      message: 'Detaching volume',
+    });
+    try {
+      await sandbox.kill();
+    } catch (err) {
+      log.debug({ err }, 'Failed to kill build sandbox (may already be dead)');
+    }
+    sandbox = null; // Prevent double-kill in finally
+
+    // 12. Snapshot the volume
     onProgress?.({
       type: 'snapshotting',
       message: 'Creating snapshot (this may take a moment)',
@@ -183,7 +211,7 @@ export async function ensureCloudSnapshot(options: {
     onProgress?.({ type: 'done', snapshotSlug });
     return snapshotSlug;
   } finally {
-    // 11. Cleanup: kill sandbox and delete build volume
+    // 13. Cleanup: kill sandbox and delete build volume
     onProgress?.({
       type: 'cleaning-up',
       message: 'Cleaning up build resources',
