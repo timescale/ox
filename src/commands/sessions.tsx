@@ -7,6 +7,7 @@ import { Command } from 'commander';
 import { nanoid } from 'nanoid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfigWizard, type ConfigWizardResult } from '../commands/config.tsx';
+import { CloudSetup, type CloudSetupResult } from '../components/CloudSetup';
 import { CopyOnSelect } from '../components/CopyOnSelect';
 import { DockerSetup, type DockerSetupResult } from '../components/DockerSetup';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
@@ -24,6 +25,7 @@ import {
   readConfig,
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
+import { getDenoToken } from '../services/deno';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -63,6 +65,24 @@ type SessionsView =
   | { type: 'init' } // Initial loading state
   | { type: 'docker' }
   | { type: 'config' }
+  | {
+      type: 'cloud-setup';
+      // Store the pending action so we can resume after setup completes
+      pendingStart?: {
+        prompt: string;
+        agent: AgentType;
+        model: string;
+        mode: SubmitMode;
+        mountDir?: string;
+      };
+      pendingResume?: {
+        session: HermesSession;
+        prompt: string;
+        model: string;
+        mode: SubmitMode;
+        mountDir?: string;
+      };
+    }
   | { type: 'prompt'; resumeSession?: HermesSession }
   | {
       type: 'starting';
@@ -281,6 +301,25 @@ function SessionsApp({
 
         const isPlan = mode === 'plan';
 
+        // If using cloud provider, check that setup is complete (token exists)
+        if (activeProvider.type === 'cloud') {
+          const token = await getDenoToken();
+          if (!token) {
+            // Transition to cloud setup view, storing the pending action
+            setView({
+              type: 'cloud-setup',
+              pendingStart: {
+                prompt,
+                agent,
+                model,
+                mode,
+                mountDir: passedMountDir,
+              },
+            });
+            return;
+          }
+        }
+
         setView({
           type: 'starting',
           prompt,
@@ -482,6 +521,18 @@ function SessionsApp({
 
         const isPlan = mode === 'plan';
 
+        // If using cloud provider, check that setup is complete (token exists)
+        if (activeProvider.type === 'cloud') {
+          const token = await getDenoToken();
+          if (!token) {
+            setView({
+              type: 'cloud-setup',
+              pendingResume: { session, prompt, model, mode, mountDir },
+            });
+            return;
+          }
+        }
+
         setView({
           type: 'resuming',
           session,
@@ -664,6 +715,37 @@ function SessionsApp({
     setView({ type: 'prompt', resumeSession: session });
   }, []);
 
+  // Handle cloud setup completion - resume pending start/resume action
+  const handleCloudSetupComplete = useCallback(
+    (result: CloudSetupResult) => {
+      if (result.type === 'cancelled') {
+        setView({ type: 'prompt' });
+        return;
+      }
+      if (result.type === 'error') {
+        showToast(result.error ?? 'Cloud setup failed', 'error');
+        setView({ type: 'prompt' });
+        return;
+      }
+
+      // Cloud is ready - resume the pending action
+      if (view.type === 'cloud-setup') {
+        if (view.pendingStart) {
+          const { prompt, agent, model, mode, mountDir } = view.pendingStart;
+          startSession(prompt, agent, model, mode, mountDir, 'cloud');
+        } else if (view.pendingResume) {
+          const { session, prompt, model, mode, mountDir } = view.pendingResume;
+          resumeSessionFlow(session, prompt, model, mode, mountDir, 'cloud');
+        } else {
+          setView({ type: 'prompt' });
+        }
+      } else {
+        setView({ type: 'prompt' });
+      }
+    },
+    [view, showToast, startSession, resumeSessionFlow],
+  );
+
   // ---- Initial Loading View ----
   if (view.type === 'init') {
     return (
@@ -688,6 +770,27 @@ function SessionsApp({
           title="Docker Setup"
           onComplete={handleDockerComplete}
           showBack={false}
+        />
+        {toast && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onDismiss={() => setToast(null)}
+          />
+        )}
+      </>
+    );
+  }
+
+  // ---- Cloud Setup View ----
+  if (view.type === 'cloud-setup') {
+    return (
+      <>
+        <CloudSetup
+          title="Cloud Setup"
+          onComplete={handleCloudSetupComplete}
+          showBack
+          onBack={() => setView({ type: 'prompt' })}
         />
         {toast && (
           <Toast

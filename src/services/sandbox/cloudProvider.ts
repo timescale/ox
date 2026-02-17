@@ -143,6 +143,15 @@ export class CloudSandboxProvider implements SandboxProvider {
   // Setup
   // --------------------------------------------------------------------------
 
+  /**
+   * Check whether the cloud provider needs setup (no token available).
+   * Useful for UI to decide whether to show the setup flow before proceeding.
+   */
+  async needsSetup(): Promise<boolean> {
+    const token = await getDenoToken();
+    return !token;
+  }
+
   async ensureReady(): Promise<void> {
     const token = await getDenoToken();
     if (!token) {
@@ -166,10 +175,17 @@ export class CloudSandboxProvider implements SandboxProvider {
   async ensureImage(options?: {
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string> {
+    const token = await getDenoToken();
+    if (!token) {
+      throw new Error(
+        'No Deno Deploy token configured. Run cloud setup first.',
+      );
+    }
+
     const region = await this.resolveRegion();
 
     const slug = await ensureCloudSnapshot({
-      token: (await getDenoToken()) ?? '',
+      token,
       region,
       onProgress: (p) => {
         switch (p.type) {
