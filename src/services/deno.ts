@@ -45,7 +45,7 @@ export async function deleteDenoToken(): Promise<void> {
 export async function validateDenoToken(token: string): Promise<boolean> {
   const masked = token.length > 8 ? `${token.slice(0, 8)}...` : '***';
   try {
-    const response = await fetch('https://api.deno.com/v1/sandboxes', {
+    const response = await fetch('https://console.deno.com/api/v2/sandboxes', {
       headers: {
         Authorization: `Bearer ${token}`,
       },

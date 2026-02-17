@@ -79,12 +79,13 @@ function buildAgentCommand(options: CreateSandboxOptions): string {
 async function injectCredentials(
   client: DenoApiClient,
   sandboxId: string,
+  region: string,
 ): Promise<void> {
   const credFiles = await getCredentialFiles();
   for (const file of credFiles) {
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
-    await client.execInSandbox(sandboxId, ['mkdir', '-p', dir]);
-    await client.writeFile(sandboxId, file.path, file.value);
+    await client.execInSandbox(sandboxId, region, ['mkdir', '-p', dir]);
+    await client.writeFile(sandboxId, region, file.path, file.value);
   }
 }
 
@@ -98,8 +99,9 @@ async function injectCredentials(
 async function sshIntoSandbox(
   client: DenoApiClient,
   sandboxId: string,
+  region: string,
 ): Promise<void> {
-  const sshInfo = await client.exposeSsh(sandboxId);
+  const sshInfo = await client.exposeSsh(sandboxId, region);
   enterSubprocessScreen();
   const proc = Bun.spawn(['ssh', `${sshInfo.username}@${sshInfo.hostname}`], {
     stdio: ['inherit', 'inherit', 'inherit'],
@@ -273,12 +275,13 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
 
     // 4. Inject credential files
-    await injectCredentials(client, sandbox.id);
+    await injectCredentials(client, sandbox.id, region);
 
     // 5. Clone repo and create branch
     if (options.repoInfo && options.isGitRepo !== false) {
       await client.execInSandbox(
         sandbox.id,
+        region,
         [
           'bash',
           '-c',
@@ -287,7 +290,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         { user: 'hermes' },
       );
     } else {
-      await client.execInSandbox(sandbox.id, [
+      await client.execInSandbox(sandbox.id, region, [
         'bash',
         '-c',
         'mkdir -p /work/app',
@@ -298,6 +301,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     if (options.initScript) {
       await client.execInSandbox(
         sandbox.id,
+        region,
         ['bash', '-c', `cd /work/app && ${options.initScript}`],
         { user: 'hermes' },
       );
@@ -307,11 +311,12 @@ export class CloudSandboxProvider implements SandboxProvider {
     const agentCommand = buildAgentCommand(options);
     if (options.interactive) {
       // Interactive mode: SSH into sandbox
-      await sshIntoSandbox(client, sandbox.id);
+      await sshIntoSandbox(client, sandbox.id, region);
     } else {
       // Detached mode: start agent in background
       await client.execInSandbox(
         sandbox.id,
+        region,
         [
           'bash',
           '-c',
@@ -358,12 +363,13 @@ export class CloudSandboxProvider implements SandboxProvider {
     });
 
     // Inject credentials
-    await injectCredentials(client, sandbox.id);
+    await injectCredentials(client, sandbox.id, region);
 
     // Clone repo if available
     if (options.repoInfo && options.isGitRepo !== false) {
       await client.execInSandbox(
         sandbox.id,
+        region,
         [
           'bash',
           '-c',
@@ -374,7 +380,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
 
     // SSH into the sandbox
-    await sshIntoSandbox(client, sandbox.id);
+    await sshIntoSandbox(client, sandbox.id, region);
 
     // Kill sandbox after shell exits
     try {
@@ -453,7 +459,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
 
     // 3. Inject fresh credentials
-    await injectCredentials(client, sandbox.id);
+    await injectCredentials(client, sandbox.id, region);
 
     // 4. Start agent with continue flag or open shell
     const agent = existing.agent as AgentType;
@@ -464,7 +470,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       : '';
 
     if (options.mode === 'shell' || options.mode === 'interactive') {
-      await sshIntoSandbox(client, sandbox.id);
+      await sshIntoSandbox(client, sandbox.id, region);
     } else {
       // Detached: run agent in background with continue flag
       let agentCmd: string;
@@ -487,6 +493,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
       await client.execInSandbox(
         sandbox.id,
+        region,
         [
           'bash',
           '-c',
@@ -624,7 +631,10 @@ export class CloudSandboxProvider implements SandboxProvider {
 
   async attach(sessionId: string): Promise<void> {
     const client = await this.getClient();
-    await sshIntoSandbox(client, sessionId);
+    const db = openSessionDb();
+    const session = dbGetSession(db, sessionId);
+    const region = session?.region ?? (await this.resolveRegion());
+    await sshIntoSandbox(client, sessionId, region);
   }
 
   async shell(sessionId: string): Promise<void> {
@@ -639,7 +649,14 @@ export class CloudSandboxProvider implements SandboxProvider {
   async getLogs(sessionId: string, tail?: number): Promise<string> {
     try {
       const client = await this.getClient();
-      const content = await client.readFile(sessionId, '/work/agent.log');
+      const db = openSessionDb();
+      const session = dbGetSession(db, sessionId);
+      const region = session?.region ?? (await this.resolveRegion());
+      const content = await client.readFile(
+        sessionId,
+        region,
+        '/work/agent.log',
+      );
       if (tail) {
         const lines = content.split('\n');
         return lines.slice(-tail).join('\n');
@@ -654,18 +671,27 @@ export class CloudSandboxProvider implements SandboxProvider {
   streamLogs(sessionId: string): LogStream {
     let stopped = false;
     let lastOffset = 0;
+    const resolveRegion = this.resolveRegion.bind(this);
 
     const stop = () => {
       stopped = true;
     };
 
     async function* generateLines(): AsyncIterable<string> {
+      const db = openSessionDb();
+      const session = dbGetSession(db, sessionId);
+      const region = session?.region ?? (await resolveRegion());
+
       while (!stopped) {
         try {
           const token = await getDenoToken();
           if (!token) break;
           const client = new DenoApiClient(token);
-          const content = await client.readFile(sessionId, '/work/agent.log');
+          const content = await client.readFile(
+            sessionId,
+            region,
+            '/work/agent.log',
+          );
           const newContent = content.substring(lastOffset);
           lastOffset = content.length;
 

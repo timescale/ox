@@ -87,7 +87,7 @@ export async function ensureCloudSnapshot(options: {
       message: 'Installing system packages',
       detail: 'git, curl, ca-certificates, zip, unzip, tar, gzip, jq',
     });
-    await client.execInSandbox(sandboxId, [
+    await client.execInSandbox(sandboxId, region, [
       'bash',
       '-c',
       'apt-get update && apt-get install -y git curl ca-certificates zip unzip tar gzip jq openssh-client',
@@ -98,7 +98,7 @@ export async function ensureCloudSnapshot(options: {
       type: 'installing',
       message: 'Installing GitHub CLI',
     });
-    await client.execInSandbox(sandboxId, [
+    await client.execInSandbox(sandboxId, region, [
       'bash',
       '-c',
       [
@@ -114,7 +114,7 @@ export async function ensureCloudSnapshot(options: {
       type: 'installing',
       message: 'Creating hermes user',
     });
-    await client.execInSandbox(sandboxId, [
+    await client.execInSandbox(sandboxId, region, [
       'bash',
       '-c',
       [
@@ -134,6 +134,7 @@ export async function ensureCloudSnapshot(options: {
     });
     await client.execInSandbox(
       sandboxId,
+      region,
       ['bash', '-c', 'curl -fsSL https://claude.ai/install.sh | bash'],
       { user: 'hermes' },
     );
@@ -145,6 +146,7 @@ export async function ensureCloudSnapshot(options: {
     });
     await client.execInSandbox(
       sandboxId,
+      region,
       ['bash', '-c', 'curl -fsSL https://cli.tigerdata.com | sh'],
       { user: 'hermes' },
     );
@@ -156,6 +158,7 @@ export async function ensureCloudSnapshot(options: {
     });
     await client.execInSandbox(
       sandboxId,
+      region,
       [
         'bash',
         '-c',
@@ -171,6 +174,7 @@ export async function ensureCloudSnapshot(options: {
     });
     await client.execInSandbox(
       sandboxId,
+      region,
       [
         'bash',
         '-c',
