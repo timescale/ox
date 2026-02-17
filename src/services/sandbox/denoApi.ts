@@ -61,17 +61,24 @@ export class DenoApiClient {
     const url = `${API_BASE}${path}`;
     log.debug({ method, path }, 'Deno API request');
 
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (err) {
+      throw new Error(
+        `Network error connecting to Deno Deploy API: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     if (!response.ok) {
-      const text = await response.text();
+      const text = await response.text().catch(() => 'unknown error');
       throw new Error(`Deno API error ${response.status}: ${text}`);
     }
 

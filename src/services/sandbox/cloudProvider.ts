@@ -220,20 +220,41 @@ export class CloudSandboxProvider implements SandboxProvider {
     const env: Record<string, string> = { ...options.envVars };
 
     // 3. Boot sandbox from base snapshot with work volume
-    const sandbox = await client.createSandbox({
-      region,
-      root: baseSnapshot,
-      timeout: '30m',
-      memory: '2GiB',
-      volumes: { '/work': workVolume.slug },
-      labels: {
-        'hermes.managed': 'true',
-        'hermes.name': options.branchName,
-        'hermes.agent': options.agent,
-        'hermes.repo': options.repoInfo?.fullName ?? 'local',
-      },
-      env,
-    });
+    let sandbox: Awaited<ReturnType<typeof client.createSandbox>>;
+    try {
+      sandbox = await client.createSandbox({
+        region,
+        root: baseSnapshot,
+        timeout: '30m',
+        memory: '2GiB',
+        volumes: { '/work': workVolume.slug },
+        labels: {
+          'hermes.managed': 'true',
+          'hermes.name': options.branchName,
+          'hermes.agent': options.agent,
+          'hermes.repo': options.repoInfo?.fullName ?? 'local',
+        },
+        env,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        message.includes('limit') ||
+        message.includes('concurrent') ||
+        message.includes('quota')
+      ) {
+        const db = openSessionDb();
+        const running = dbListSessions(db, {
+          provider: 'cloud',
+          status: 'running',
+        });
+        throw new Error(
+          `Cloud sandbox limit reached (${running.length} running). ` +
+            'Stop a running session or wait for one to finish.',
+        );
+      }
+      throw err;
+    }
 
     // 4. Inject credential files
     await injectCredentials(client, sandbox.id);
@@ -352,13 +373,23 @@ export class CloudSandboxProvider implements SandboxProvider {
     options: ResumeSandboxOptions,
   ): Promise<string> {
     const client = await this.getClient();
-    const region = await this.resolveRegion();
     const db = openSessionDb();
 
     const existing = dbGetSession(db, sessionId);
     if (!existing?.snapshotSlug) {
       throw new Error('No resume snapshot available for this session');
     }
+
+    // Check region consistency — volumes/snapshots must stay in the same region
+    const currentRegion = await this.resolveRegion();
+    if (existing.region && existing.region !== currentRegion) {
+      log.warn(
+        { sessionRegion: existing.region, currentRegion },
+        'Session region differs from current config region. Using session region.',
+      );
+    }
+    // Use session's original region for consistency (volumes/snapshots are regional)
+    const region = existing.region ?? currentRegion;
 
     // 1. Create new volume from resume snapshot
     const resumeVolumeSlug = `hermes-session-${existing.name}-r${Date.now()}`;
@@ -371,19 +402,39 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // 2. Boot new sandbox from base snapshot + resume volume
     const baseSnapshot = `hermes-base-${packageJson.version}`;
-    const sandbox = await client.createSandbox({
-      region,
-      root: baseSnapshot,
-      timeout: '30m',
-      memory: '2GiB',
-      volumes: { '/work': resumeVolume.slug },
-      labels: {
-        'hermes.managed': 'true',
-        'hermes.name': existing.name,
-        'hermes.agent': existing.agent,
-        'hermes.repo': existing.repo,
-      },
-    });
+    let sandbox: Awaited<ReturnType<typeof client.createSandbox>>;
+    try {
+      sandbox = await client.createSandbox({
+        region,
+        root: baseSnapshot,
+        timeout: '30m',
+        memory: '2GiB',
+        volumes: { '/work': resumeVolume.slug },
+        labels: {
+          'hermes.managed': 'true',
+          'hermes.name': existing.name,
+          'hermes.agent': existing.agent,
+          'hermes.repo': existing.repo,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        message.includes('limit') ||
+        message.includes('concurrent') ||
+        message.includes('quota')
+      ) {
+        const running = dbListSessions(db, {
+          provider: 'cloud',
+          status: 'running',
+        });
+        throw new Error(
+          `Cloud sandbox limit reached (${running.length} running). ` +
+            'Stop a running session or wait for one to finish.',
+        );
+      }
+      throw err;
+    }
 
     // 3. Inject fresh credentials
     await injectCredentials(client, sandbox.id);

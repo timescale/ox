@@ -291,11 +291,22 @@ export function CloudSetup({
 
   // ---- Error State ----
   if (state.type === 'error') {
+    const isNetworkError =
+      state.message.includes('Network error') ||
+      state.message.includes('fetch failed') ||
+      state.message.includes('ECONNREFUSED');
+    const isTokenError =
+      state.message.includes('token') || state.message.includes('401');
+
     return (
       <Frame title={title} centered>
         <text fg={theme.error}>Error: {state.message}</text>
         <text fg={theme.textMuted} marginTop={1}>
-          Please check your Deno Deploy token and try again.
+          {isNetworkError
+            ? 'Cannot connect to Deno Deploy. Check your internet connection and try again.'
+            : isTokenError
+              ? 'Invalid or expired token. Please provide a new token.'
+              : 'Snapshot build failed. Please try again.'}
         </text>
         <text fg={theme.primary}>
           Visit: https://dash.deno.com/account#access-tokens
