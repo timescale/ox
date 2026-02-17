@@ -9,15 +9,28 @@ import { log } from '../logger.ts';
 import { DenoApiClient } from './denoApi.ts';
 
 /**
- * Await a sandbox command and log errors with context on failure.
- * Re-throws the original error after logging.
+ * Await a sandbox command. Uses `.noThrow()` to capture stderr for
+ * logging, then throws if the command failed.
  */
-async function run(cmd: PromiseLike<unknown>, step: string): Promise<void> {
-  try {
-    await cmd;
-  } catch (err) {
-    log.error({ err, step }, 'Snapshot build step failed');
-    throw err;
+async function run(
+  cmd: {
+    noThrow: () => PromiseLike<{
+      status: { success: boolean; code: number };
+      stderrText: string | null;
+    }>;
+  },
+  step: string,
+): Promise<void> {
+  const result = await cmd.noThrow();
+  if (!result.status.success) {
+    const stderr = result.stderrText ?? '';
+    log.error(
+      { step, exitCode: result.status.code, stderr },
+      'Snapshot build step failed',
+    );
+    throw new Error(
+      `Snapshot build failed at "${step}" (exit ${result.status.code}): ${stderr.slice(0, 500)}`,
+    );
   }
 }
 
