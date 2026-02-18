@@ -262,7 +262,7 @@ export async function ensureCloudSnapshot(options: {
     });
     await run(
       sandbox,
-      'curl -fsSL https://opencode.ai/install | bash && mkdir -p ~/.opencode/bin && ln -sf ~/.local/bin/opencode ~/.opencode/bin/opencode',
+      'curl -fsSL https://opencode.ai/install | bash',
       'Install OpenCode',
     );
 
@@ -276,7 +276,16 @@ export async function ensureCloudSnapshot(options: {
       'git config --global user.email "hermes@tigerdata.com" && git config --global user.name "Hermes Agent"',
       'Configure git',
     );
-    // Ensure ~/.local/bin and ~/.opencode/bin are in PATH for agent sessions
+    // Ensure ~/.local/bin and ~/.opencode/bin are in PATH for all shell types.
+    // SSH login shells source /etc/profile.d/*.sh (alphabetically).  The Deno
+    // platform generates app-env.sh which resets PATH to system dirs.  Our
+    // hermes-path.sh (h > a) runs after and appends user bin dirs.
+    await run(
+      sandbox,
+      'echo \'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\' | sudo tee /etc/profile.d/hermes-path.sh > /dev/null && sudo chmod +x /etc/profile.d/hermes-path.sh',
+      'Configure PATH in profile.d',
+    );
+    // Also add to .bashrc for non-login shells that use BASH_ENV
     await run(
       sandbox,
       'echo \'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\' >> ~/.bashrc',

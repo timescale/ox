@@ -105,24 +105,32 @@ async function injectCredentials(sandbox: Sandbox): Promise<void> {
 /**
  * Expose SSH on a sandbox and run an interactive SSH session.
  */
-async function sshIntoSandbox(sandbox: Sandbox): Promise<void> {
+async function sshIntoSandbox(
+  sandbox: Sandbox,
+  command?: string,
+): Promise<void> {
   const sshInfo = await sandbox.exposeSsh();
   enterSubprocessScreen();
-  const proc = Bun.spawn(
-    [
-      'ssh',
-      '-o',
-      'StrictHostKeyChecking=no',
-      '-o',
-      'UserKnownHostsFile=/dev/null',
-      '-o',
-      'LogLevel=ERROR',
-      `${sshInfo.username}@${sshInfo.hostname}`,
-    ],
-    {
-      stdio: ['inherit', 'inherit', 'inherit'],
-    },
-  );
+  const sshArgs = [
+    'ssh',
+    '-o',
+    'StrictHostKeyChecking=no',
+    '-o',
+    'UserKnownHostsFile=/dev/null',
+    '-o',
+    'LogLevel=ERROR',
+  ];
+  if (command) {
+    // Force PTY allocation — required for interactive agent TUIs
+    sshArgs.push('-t');
+  }
+  sshArgs.push(`${sshInfo.username}@${sshInfo.hostname}`);
+  if (command) {
+    sshArgs.push(command);
+  }
+  const proc = Bun.spawn(sshArgs, {
+    stdio: ['inherit', 'inherit', 'inherit'],
+  });
   await proc.exited;
   resetTerminal();
 }
@@ -377,8 +385,8 @@ export class CloudSandboxProvider implements SandboxProvider {
       // 7. Start agent process
       const agentCommand = buildAgentCommand(options);
       if (options.interactive) {
-        // Interactive mode: SSH into sandbox
-        await sshIntoSandbox(sandbox);
+        // Interactive mode: SSH into sandbox and launch agent
+        await sshIntoSandbox(sandbox, `cd /work/app && ${agentCommand}`);
       } else {
         // Detached mode: start agent in background (dynamic — contains pipes/redirects)
         await spawnShell(
@@ -549,8 +557,22 @@ export class CloudSandboxProvider implements SandboxProvider {
         ? ` ${options.agentArgs.join(' ')}`
         : '';
 
-      if (options.mode === 'shell' || options.mode === 'interactive') {
+      if (options.mode === 'shell') {
         await sshIntoSandbox(sandbox);
+      } else if (options.mode === 'interactive') {
+        // Interactive resume: launch agent with continue flag
+        let agentCmd: string;
+        if (agent === 'claude') {
+          const hasPlanArgs =
+            options.agentArgs?.includes('--permission-mode') ?? false;
+          const skipPermsFlag = hasPlanArgs
+            ? '--allow-dangerously-skip-permissions'
+            : '--dangerously-skip-permissions';
+          agentCmd = `claude -c${extraArgs}${modelArg} ${skipPermsFlag}`;
+        } else {
+          agentCmd = `opencode${modelArg}${extraArgs}`;
+        }
+        await sshIntoSandbox(sandbox, `cd /work/app && ${agentCmd}`);
       } else {
         // Detached: run agent in background with continue flag
         let agentCmd: string;
