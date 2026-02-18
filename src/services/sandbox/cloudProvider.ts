@@ -3,7 +3,6 @@
 // ============================================================================
 
 import type { Sandbox } from '@deno/sandbox';
-
 import { runCloudSetupScreen } from '../../components/CloudSetup.tsx';
 import { enterSubprocessScreen, resetTerminal } from '../../utils.ts';
 import type { AgentType } from '../config.ts';
@@ -12,7 +11,7 @@ import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
 import { log } from '../logger.ts';
 import { ensureCloudSnapshot } from './cloudSnapshot.ts';
-import { DenoApiClient } from './denoApi.ts';
+import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import {
   deleteSession as dbDeleteSession,
   getSession as dbGetSession,
@@ -31,6 +30,15 @@ import type {
   SandboxBuildProgress,
   SandboxProvider,
 } from './types.ts';
+
+// ============================================================================
+// Shell Helpers
+// ============================================================================
+
+/** Escape a value for safe interpolation in a shell command string. */
+function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
 
 // ============================================================================
 // Agent Command Builder
@@ -80,7 +88,8 @@ function buildAgentCommand(options: CreateSandboxOptions): string {
  * so paths are correct for the sandbox environment.
  */
 async function injectCredentials(sandbox: Sandbox): Promise<void> {
-  const home = (await sandbox.sh`echo $HOME`.text()).trim();
+  const homeResult = await spawnShellCapture(sandbox, 'echo $HOME');
+  const home = homeResult.trim();
   const credFiles = await getCredentialFiles(home);
   for (const file of credFiles) {
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
@@ -99,37 +108,75 @@ async function injectCredentials(sandbox: Sandbox): Promise<void> {
 async function sshIntoSandbox(sandbox: Sandbox): Promise<void> {
   const sshInfo = await sandbox.exposeSsh();
   enterSubprocessScreen();
-  const proc = Bun.spawn(['ssh', `${sshInfo.username}@${sshInfo.hostname}`], {
-    stdio: ['inherit', 'inherit', 'inherit'],
-  });
+  const proc = Bun.spawn(
+    [
+      'ssh',
+      '-o',
+      'StrictHostKeyChecking=no',
+      '-o',
+      'UserKnownHostsFile=/dev/null',
+      '-o',
+      'LogLevel=ERROR',
+      `${sshInfo.username}@${sshInfo.hostname}`,
+    ],
+    {
+      stdio: ['inherit', 'inherit', 'inherit'],
+    },
+  );
   await proc.exited;
   resetTerminal();
 }
 
 /**
- * Run a dynamic shell command string in the sandbox using spawn().
+ * Run a shell command in the sandbox with piped stdout/stderr.
+ * Throws on non-zero exit code.
  *
- * Only use this for commands that interpolate values containing shell syntax
- * (pipes, redirects, &&, &). For static or safely-interpolated commands,
- * prefer `sandbox.sh` tagged templates instead.
+ * Uses spawn() directly instead of sandbox.sh because the SDK has a
+ * chaining bug: each builder method (sudo, stdout, stderr, noThrow) creates
+ * a fresh clone that only retains the single property being set, losing all
+ * previous chain state.
  */
 async function spawnShell(sandbox: Sandbox, command: string): Promise<void> {
   const proc = await sandbox.spawn('bash', {
     args: ['-c', command],
     stdout: 'piped',
     stderr: 'piped',
+    env: { BASH_ENV: '$HOME/.bashrc' },
   });
   const result = await proc.output();
   if (!result.status.success) {
     const stderr = result.stderrText ?? '';
     log.warn(
-      { command, exitCode: result.status.code, stderr },
+      { command: command.slice(0, 200), exitCode: result.status.code, stderr },
       'Sandbox command failed',
     );
     throw new Error(
       `Sandbox command failed (exit ${result.status.code}): ${stderr || command}`,
     );
   }
+}
+
+/**
+ * Run a shell command and return its stdout text. Piped so nothing leaks to TUI.
+ */
+async function spawnShellCapture(
+  sandbox: Sandbox,
+  command: string,
+): Promise<string> {
+  const proc = await sandbox.spawn('bash', {
+    args: ['-c', command],
+    stdout: 'piped',
+    stderr: 'piped',
+    env: { BASH_ENV: '$HOME/.bashrc' },
+  });
+  const result = await proc.output();
+  if (!result.status.success) {
+    const stderr = result.stderrText ?? '';
+    throw new Error(
+      `Sandbox command failed (exit ${result.status.code}): ${stderr || command}`,
+    );
+  }
+  return result.stdoutText ?? '';
 }
 
 // ============================================================================
@@ -249,7 +296,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const baseSnapshot = await this.ensureImage();
 
     // 1. Create session-specific volume for /work
-    const volumeSlug = `hermes-session-${options.branchName}-${Date.now()}`;
+    const volumeSlug = denoSlug('hs', options.branchName);
     const workVolume = await client.createVolume({
       slug: volumeSlug,
       region,
@@ -260,7 +307,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const env: Record<string, string> = { ...options.envVars };
 
     // 3. Boot sandbox from base snapshot with work volume
-    let sandbox: Sandbox;
+    let sandbox: ResolvedSandbox;
     try {
       sandbox = await client.createSandbox({
         region: region as 'ord' | 'ams',
@@ -277,7 +324,17 @@ export class CloudSandboxProvider implements SandboxProvider {
         env,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // Clean up the orphaned volume
+      try {
+        await client.deleteVolume(workVolume.id);
+      } catch (delErr) {
+        log.debug(
+          { err: delErr },
+          'Failed to clean up volume after sandbox creation failure',
+        );
+      }
+
+      const message = (err as { message?: string })?.message ?? String(err);
       if (
         message.includes('limit') ||
         message.includes('concurrent') ||
@@ -304,9 +361,12 @@ export class CloudSandboxProvider implements SandboxProvider {
       if (options.repoInfo && options.isGitRepo !== false) {
         const fullName = options.repoInfo.fullName;
         const branchRef = `hermes/${options.branchName}`;
-        await sandbox.sh`cd /work && gh auth setup-git && gh repo clone ${fullName} app && cd app && git switch -c ${branchRef}`;
+        await spawnShell(
+          sandbox,
+          `cd /work && gh auth setup-git && gh repo clone ${shellEscape(fullName)} app && cd app && git switch -c ${shellEscape(branchRef)}`,
+        );
       } else {
-        await sandbox.sh`mkdir -p /work/app`;
+        await spawnShell(sandbox, 'mkdir -p /work/app');
       }
 
       // 6. Run init script if configured (dynamic — may contain shell syntax)
@@ -333,7 +393,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // 8. Record in SQLite
     const session: HermesSession = {
-      id: sandbox.id,
+      id: sandbox.resolvedId,
       name: options.branchName,
       provider: 'cloud',
       status: 'running',
@@ -347,6 +407,12 @@ export class CloudSandboxProvider implements SandboxProvider {
       region,
       volumeSlug: workVolume.slug,
     };
+
+    if (!session.id) {
+      log.warn(
+        'Session created with empty sandbox ID — status tracking may not work',
+      );
+    }
 
     const db = openSessionDb();
     upsertSession(db, session);
@@ -370,12 +436,15 @@ export class CloudSandboxProvider implements SandboxProvider {
     try {
       // Inject credentials
       await injectCredentials(sandbox);
-      await sandbox.sh`mkdir -p /work`;
+      await spawnShell(sandbox, 'mkdir -p /work');
 
       // Clone repo if available
       if (options.repoInfo && options.isGitRepo !== false) {
         const fullName = options.repoInfo.fullName;
-        await sandbox.sh`cd /work && gh auth setup-git && gh repo clone ${fullName} app`;
+        await spawnShell(
+          sandbox,
+          `cd /work && gh auth setup-git && gh repo clone ${shellEscape(fullName)} app`,
+        );
       }
 
       // SSH into the sandbox
@@ -415,7 +484,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const region = existing.region ?? currentRegion;
 
     // 1. Create new volume from resume snapshot
-    const resumeVolumeSlug = `hermes-session-${existing.name}-r${Date.now()}`;
+    const resumeVolumeSlug = denoSlug('hr', existing.name);
     const resumeVolume = await client.createVolume({
       slug: resumeVolumeSlug,
       region,
@@ -424,7 +493,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     });
 
     // 2. Boot new sandbox from base snapshot + resume volume
-    let sandbox: Sandbox;
+    let sandbox: ResolvedSandbox;
     try {
       sandbox = await client.createSandbox({
         region: region as 'ord' | 'ams',
@@ -440,7 +509,17 @@ export class CloudSandboxProvider implements SandboxProvider {
         },
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // Clean up the orphaned volume
+      try {
+        await client.deleteVolume(resumeVolume.id);
+      } catch (delErr) {
+        log.debug(
+          { err: delErr },
+          'Failed to clean up volume after sandbox creation failure',
+        );
+      }
+
+      const message = (err as { message?: string })?.message ?? String(err);
       if (
         message.includes('limit') ||
         message.includes('concurrent') ||
@@ -504,7 +583,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // 5. Update SQLite
     const newSession: HermesSession = {
-      id: sandbox.id,
+      id: sandbox.resolvedId,
       name: existing.name,
       provider: 'cloud',
       status: 'running',
@@ -521,7 +600,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     };
     upsertSession(db, newSession);
 
-    return sandbox.id;
+    return sandbox.resolvedId;
   }
 
   // --------------------------------------------------------------------------
@@ -618,7 +697,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
       // Snapshot work volume for resume
       if (session?.volumeSlug) {
-        const snapshotSlug = `hermes-resume-${session.name}-${Date.now()}`;
+        const snapshotSlug = denoSlug('hsnap', session.name);
         try {
           await client.snapshotVolume(session.volumeSlug, {
             slug: snapshotSlug,
