@@ -34,15 +34,21 @@ sudo dpkg --configure -a
 
 # 2. Mount /dev/shm (needed for container runtime locking)
 sudo mkdir -p /dev/shm
-sudo mount -t tmpfs tmpfs /dev/shm
+if ! mountpoint -q /dev/shm; then
+  sudo mount -t tmpfs tmpfs /dev/shm
+fi
 
 # 3. Mount cgroup v1 controllers (needed by runc)
 #    The sandbox's /sys/fs/cgroup is on sysfs (read-only), so we first
 #    overlay it with a tmpfs to allow creating subdirectories.
-sudo mount -t tmpfs tmpfs /sys/fs/cgroup
+if [ "$(findmnt -n -o FSTYPE /sys/fs/cgroup 2>/dev/null)" != "tmpfs" ]; then
+  sudo mount -t tmpfs tmpfs /sys/fs/cgroup
+fi
 for subsys in memory cpu cpuacct cpuset devices freezer blkio pids; do
   sudo mkdir -p /sys/fs/cgroup/$subsys
-  sudo mount -t cgroup -o $subsys cgroup /sys/fs/cgroup/$subsys
+  if ! mountpoint -q /sys/fs/cgroup/$subsys; then
+    sudo mount -t cgroup -o $subsys cgroup /sys/fs/cgroup/$subsys
+  fi
 done
 
 # 4. Switch to iptables-legacy (nft backend doesn't work in this kernel)
