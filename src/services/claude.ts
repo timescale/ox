@@ -33,6 +33,7 @@ interface ClaudeCredentialsJson {
 
 const claudeCredsValid = (creds?: ClaudeCredentialsJson | null): boolean => {
   if (!creds?.claudeAiOauth?.accessToken) return false;
+  if (creds.claudeAiOauth.refreshToken) return true; // if we have a refresh token, we can get a new access token
   const expiresAt = creds.claudeAiOauth.expiresAt || 0;
   return expiresAt > Date.now();
 };

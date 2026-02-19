@@ -22,7 +22,9 @@ const containerPaths = {
 };
 
 // Keyed by provider name; each value has at least an optional `expires` timestamp
-type OpencodeAuthJson = Partial<Record<string, { expires?: number }>>;
+type OpencodeAuthJson = Partial<
+  Record<string, { expires?: number; refresh?: string }>
+>;
 
 const authCredsValid = (creds?: OpencodeAuthJson | null): boolean => {
   if (!creds) return false;
@@ -31,6 +33,7 @@ const authCredsValid = (creds?: OpencodeAuthJson | null): boolean => {
   // At least one key with a non-expired entry
   return entries.some(([_key, entry]) => {
     if (!entry) return false;
+    if (entry.refresh) return true; // if we have a refresh token, we can get a new access token
     if (entry.expires && entry.expires < Date.now()) return false;
     return true;
   });
