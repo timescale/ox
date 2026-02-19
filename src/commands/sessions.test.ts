@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { HermesSession } from '../services/sandbox';
-import { formatRelativeTime, getStatusDisplay, truncate } from './sessions';
+import { formatRelativeTime } from '../services/sessionDisplay';
+import { getStatusDisplay, truncate } from './sessions';
 
 describe('formatRelativeTime', () => {
   test('returns "just now" for very recent time', () => {

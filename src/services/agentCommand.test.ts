@@ -55,7 +55,7 @@ describe('buildAgentCommand - claude', () => {
       model: 'claude-sonnet-4-20250514',
     });
     expect(cmd).toBe(
-      'claude --model claude-sonnet-4-20250514 --dangerously-skip-permissions',
+      "claude --model 'claude-sonnet-4-20250514' --dangerously-skip-permissions",
     );
   });
 
@@ -65,7 +65,7 @@ describe('buildAgentCommand - claude', () => {
       mode: 'interactive',
       agentArgs: ['--verbose'],
     });
-    expect(cmd).toBe('claude --verbose --dangerously-skip-permissions');
+    expect(cmd).toBe("claude '--verbose' --dangerously-skip-permissions");
   });
 
   test('plan mode (--permission-mode in agentArgs)', () => {
@@ -75,7 +75,7 @@ describe('buildAgentCommand - claude', () => {
       agentArgs: ['--permission-mode', 'plan'],
     });
     expect(cmd).toBe(
-      'claude --permission-mode plan --allow-dangerously-skip-permissions',
+      "claude '--permission-mode' 'plan' --allow-dangerously-skip-permissions",
     );
   });
 
@@ -87,7 +87,7 @@ describe('buildAgentCommand - claude', () => {
       agentArgs: ['--verbose'],
     });
     expect(cmd).toBe(
-      'claude -p --verbose --model claude-sonnet-4-20250514 --dangerously-skip-permissions',
+      "claude -p '--verbose' --model 'claude-sonnet-4-20250514' --dangerously-skip-permissions",
     );
   });
 
@@ -132,7 +132,7 @@ describe('buildAgentCommand - claude', () => {
       continue: true,
     });
     expect(cmd).toBe(
-      'claude -c --model claude-sonnet-4-20250514 --dangerously-skip-permissions',
+      "claude -c --model 'claude-sonnet-4-20250514' --dangerously-skip-permissions",
     );
   });
 
@@ -144,7 +144,7 @@ describe('buildAgentCommand - claude', () => {
       agentArgs: ['--permission-mode', 'plan'],
     });
     expect(cmd).toBe(
-      'claude -c --permission-mode plan --allow-dangerously-skip-permissions',
+      "claude -c '--permission-mode' 'plan' --allow-dangerously-skip-permissions",
     );
   });
 });
@@ -206,7 +206,7 @@ describe('buildAgentCommand - opencode', () => {
       mode: 'interactive',
       model: 'gpt-4o',
     });
-    expect(cmd).toBe('opencode --model gpt-4o');
+    expect(cmd).toBe("opencode --model 'gpt-4o'");
   });
 
   test('with extra agentArgs', () => {
@@ -215,7 +215,7 @@ describe('buildAgentCommand - opencode', () => {
       mode: 'interactive',
       agentArgs: ['--agent', 'plan'],
     });
-    expect(cmd).toBe('opencode --agent plan');
+    expect(cmd).toBe("opencode '--agent' 'plan'");
   });
 
   test('detached with model and agentArgs', () => {
@@ -225,7 +225,7 @@ describe('buildAgentCommand - opencode', () => {
       model: 'gpt-4o',
       agentArgs: ['--verbose'],
     });
-    expect(cmd).toBe('opencode --model gpt-4o --verbose run');
+    expect(cmd).toBe("opencode --model 'gpt-4o' '--verbose' run");
   });
 
   // ---------- Continue (resume) ----------
@@ -266,7 +266,7 @@ describe('buildAgentCommand - opencode', () => {
       model: 'gpt-4o',
       continue: true,
     });
-    expect(cmd).toBe('opencode --model gpt-4o -c');
+    expect(cmd).toBe("opencode --model 'gpt-4o' -c");
   });
 
   test('continue interactive ignores prompt (prompt is only for fresh starts)', () => {
@@ -340,7 +340,7 @@ describe('buildContinueCommand', () => {
   test('claude with model', () => {
     const cmd = buildContinueCommand('claude', 'claude-sonnet-4-20250514');
     expect(cmd).toBe(
-      'claude -c --model claude-sonnet-4-20250514 --dangerously-skip-permissions',
+      "claude -c --model 'claude-sonnet-4-20250514' --dangerously-skip-permissions",
     );
   });
 
@@ -351,6 +351,6 @@ describe('buildContinueCommand', () => {
 
   test('opencode with model', () => {
     const cmd = buildContinueCommand('opencode', 'gpt-4o');
-    expect(cmd).toBe('opencode --model gpt-4o -c');
+    expect(cmd).toBe("opencode --model 'gpt-4o' -c");
   });
 });

@@ -83,8 +83,9 @@ export async function listAllSessions(): Promise<HermesSession[]> {
   const sessions: HermesSession[] = [];
 
   for (let i = 0; i < results.length; i++) {
-    const result = results[i]!;
-    const providerType = providers[i]!.type;
+    const result = results[i];
+    const providerType = providers[i]?.type;
+    if (!result) continue;
     if (result.status === 'fulfilled') {
       sessions.push(...result.value);
     } else {
