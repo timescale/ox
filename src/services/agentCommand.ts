@@ -37,8 +37,10 @@ export interface AgentCommandOptions {
 export function buildAgentCommand(options: AgentCommandOptions): string {
   const { agent, mode, model, agentArgs, prompt } = options;
   const cont = options.continue ?? false;
-  const modelArg = model ? ` --model ${model}` : '';
-  const extraArgs = agentArgs?.length ? ` ${agentArgs.join(' ')}` : '';
+  const modelArg = model ? ` --model '${shellEscapeSingleQuote(model)}'` : '';
+  const extraArgs = agentArgs?.length
+    ? ` ${agentArgs.map((a) => `'${shellEscapeSingleQuote(a)}'`).join(' ')}`
+    : '';
   const hasPrompt = prompt != null && prompt.trim().length > 0;
 
   if (agent === 'claude') {

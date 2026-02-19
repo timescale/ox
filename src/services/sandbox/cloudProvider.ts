@@ -136,11 +136,17 @@ async function sshIntoSandbox(
     sshArgs.push(`${sshInfo.username}@${sshInfo.hostname}`);
   }
 
-  const proc = Bun.spawn(sshArgs, {
-    stdio: ['inherit', 'inherit', 'inherit'],
-  });
-  await proc.exited;
-  resetTerminal();
+  try {
+    const proc = Bun.spawn(sshArgs, {
+      stdio: ['inherit', 'inherit', 'inherit'],
+    });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      log.warn({ exitCode }, 'SSH process exited with non-zero status');
+    }
+  } finally {
+    resetTerminal();
+  }
 }
 
 /**
@@ -390,7 +396,11 @@ export class CloudSandboxProvider implements SandboxProvider {
         await spawnShell(sandbox, 'mkdir -p /work/app');
       }
 
-      // 6. Run init script if configured (dynamic — may contain shell syntax)
+      // 6. Run init script if configured (dynamic — may contain shell syntax).
+      // NOTE: initScript is intentionally interpolated without escaping — it IS
+      // a shell command (like a post-create hook) and is expected to contain
+      // arbitrary shell syntax.  The value comes from the user's own config
+      // file and should be treated as trusted input.
       if (options.initScript) {
         onProgress?.('Running init script');
         await spawnShell(sandbox, `cd /work/app && ${options.initScript}`);
@@ -916,45 +926,77 @@ export class CloudSandboxProvider implements SandboxProvider {
   }
 
   streamLogs(sessionId: string): LogStream {
-    let stopped = false;
-    let lastOffset = 0;
+    const abortController = new AbortController();
+    const { signal } = abortController;
 
     const stop = () => {
-      stopped = true;
+      abortController.abort();
     };
 
     async function* generateLines(): AsyncIterable<string> {
-      while (!stopped) {
-        try {
-          const token = await getDenoToken();
-          if (!token) break;
+      // Resolve token and open a single sandbox connection for the
+      // entire streaming session instead of reconnecting every poll.
+      const token = await getDenoToken();
+      if (!token) return;
 
-          // Connect, read, disconnect on each poll
-          const sandbox = await new DenoApiClient(token).connectSandbox(
-            sessionId,
-          );
-          let content: string;
+      const sandbox = await new DenoApiClient(token).connectSandbox(sessionId);
+
+      // Byte offset into the log file (tracks how far we have read).
+      let byteOffset = 0;
+      // Partial line buffer — incomplete trailing content from the
+      // previous read that did not end with a newline.
+      let partialLine = '';
+
+      try {
+        while (!signal.aborted) {
           try {
-            content = await sandbox.fs.readTextFile('/work/agent.log');
-          } finally {
-            await sandbox.close();
-          }
+            const content = await sandbox.fs.readTextFile('/work/agent.log');
 
-          const newContent = content.substring(lastOffset);
-          lastOffset = content.length;
+            // Only process bytes we have not seen yet.
+            const newContent = content.substring(byteOffset);
+            byteOffset = content.length;
 
-          if (newContent) {
-            const lines = newContent.split('\n');
-            for (const line of lines) {
-              if (line) yield line;
+            if (newContent) {
+              const text = partialLine + newContent;
+              const lines = text.split('\n');
+
+              // The last element is either an empty string (content
+              // ended with '\n') or a partial line still being written.
+              // Keep it in the buffer for the next iteration.
+              partialLine = lines.pop() ?? '';
+
+              for (const line of lines) {
+                if (line) yield line;
+              }
             }
+          } catch {
+            // File might not exist yet or sandbox may be gone
           }
-        } catch {
-          // File might not exist yet or sandbox may be gone
+
+          // Poll every 2 seconds — bail early if aborted.
+          await new Promise<void>((resolve) => {
+            if (signal.aborted) {
+              resolve();
+              return;
+            }
+            const timer = setTimeout(resolve, 2000);
+            signal.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timer);
+                resolve();
+              },
+              { once: true },
+            );
+          });
         }
 
-        // Poll every 2 seconds
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        // Flush any remaining partial line on shutdown.
+        if (partialLine) {
+          yield partialLine;
+        }
+      } finally {
+        await sandbox.close();
       }
     }
 
