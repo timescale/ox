@@ -201,12 +201,16 @@ export class CloudSandboxProvider implements SandboxProvider {
   }
 
   async ensureReady(): Promise<void> {
+    log.debug('Checking if cloud provider setup is needed');
     const token = await getDenoToken();
     if (!token) {
+      log.debug('No Deno Deploy token found, entering setup screen');
       const result = await runCloudSetupScreen();
       if (result.type !== 'ready') {
         throw new Error('Cloud setup was cancelled');
       }
+    } else {
+      log.debug('Deno Deploy token found');
     }
     // Verify we now have a valid token
     const validToken = await ensureDenoToken();
@@ -214,6 +218,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       throw new Error('No valid Deno Deploy token available');
     }
     this.client = new DenoApiClient(validToken);
+    log.debug('Cloud provider setup complete');
   }
 
   // --------------------------------------------------------------------------

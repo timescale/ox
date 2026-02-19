@@ -19,6 +19,7 @@ import {
   stopContainer,
   streamContainerLogs,
 } from '../docker.ts';
+import { log } from '../logger.ts';
 import type {
   CreateSandboxOptions,
   CreateShellSandboxOptions,
@@ -123,6 +124,14 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async create(options: CreateSandboxOptions): Promise<HermesSession> {
+    log.debug(
+      {
+        branchName: options.branchName,
+        agent: options.agent,
+        interactive: options.interactive,
+      },
+      'Creating Docker sandbox',
+    );
     const { onProgress } = options;
     onProgress?.('Starting container');
     const containerName = await startContainer({
@@ -145,6 +154,10 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (!session) {
       throw new Error('Failed to find created Docker session');
     }
+    log.debug(
+      { sessionId: session.containerId, name: session.name },
+      'Docker sandbox created',
+    );
     return mapDockerSession(session);
   }
 
@@ -160,6 +173,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     sessionId: string,
     options: ResumeSandboxOptions,
   ): Promise<HermesSession> {
+    log.debug({ sessionId }, 'Resuming Docker sandbox');
     const { onProgress } = options;
     onProgress?.('Resuming container');
     const containerName = await resumeSession(sessionId, options);
@@ -170,11 +184,16 @@ export class DockerSandboxProvider implements SandboxProvider {
     if (!session) {
       throw new Error('Failed to find resumed Docker session');
     }
+    log.debug(
+      { sessionId: session.containerId, name: session.name },
+      'Docker sandbox resumed',
+    );
     return mapDockerSession(session);
   }
 
   async list(): Promise<HermesSession[]> {
     const sessions = await listHermesSessions();
+    log.debug({ count: sessions.length }, 'Listed Docker sessions');
     return sessions.map(mapDockerSession);
   }
 
@@ -184,18 +203,22 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async remove(sessionId: string): Promise<void> {
+    log.debug({ sessionId }, 'Removing Docker sandbox');
     await removeContainer(sessionId);
   }
 
   async stop(sessionId: string): Promise<void> {
+    log.debug({ sessionId }, 'Stopping Docker sandbox');
     await stopContainer(sessionId);
   }
 
   async attach(sessionId: string): Promise<void> {
+    log.debug({ sessionId }, 'Attaching to Docker sandbox');
     await attachToContainer(sessionId);
   }
 
   async shell(sessionId: string): Promise<void> {
+    log.debug({ sessionId }, 'Opening shell in Docker sandbox');
     await shellInContainer(sessionId);
   }
 

@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { Command } from 'commander';
+import { log } from '../services/logger.ts';
 import {
   getProviderForSession,
   getSandboxProvider,
@@ -15,15 +16,16 @@ export async function resumeAction(
   options: { detach?: boolean; shell?: boolean },
 ): Promise<void> {
   if (options.detach && (!prompt || prompt.trim().length === 0)) {
-    console.error('Error: prompt is required for detached resume');
+    log.error('Prompt is required for detached resume');
     process.exit(1);
   }
 
   if (options.detach && options.shell) {
-    console.error('Error: --detach and --shell cannot be used together');
+    log.error('--detach and --shell cannot be used together');
     process.exit(1);
   }
 
+  log.debug({ containerId, options }, 'Resolving session for resume');
   const sessions = await listAllSessions();
   const resolvedSession = sessions.find(
     (session) => session.name === containerId,
@@ -34,6 +36,10 @@ export async function resumeAction(
   );
   let targetSession = resolvedSession ?? fallbackSession;
   if (!targetSession) {
+    log.debug(
+      { containerId },
+      'Session not found in list, querying providers directly',
+    );
     for (const providerType of ['docker', 'cloud'] as const) {
       const provider = getSandboxProvider(providerType);
       const found = await provider.get(containerId);
@@ -45,6 +51,10 @@ export async function resumeAction(
   }
   const targetId = targetSession?.id ?? containerId;
   const provider = targetSession ? getProviderForSession(targetSession) : null;
+  log.debug(
+    { targetId, provider: targetSession?.provider },
+    'Session resolved',
+  );
 
   try {
     const mode = options.shell
@@ -60,8 +70,9 @@ export async function resumeAction(
       prompt,
     });
     if (mode === 'detached') {
-      console.log(
-        `Resumed session started: ${result.name} (${result.id.substring(0, 12)})`,
+      log.info(
+        { name: result.name, sessionId: result.id },
+        'Resumed session started',
       );
     } else if (mode === 'shell') {
       // Shell mode — open a plain bash shell in the container
@@ -71,7 +82,7 @@ export async function resumeAction(
       await provider.attach(result.id);
     }
   } catch (err) {
-    console.error(`Failed to resume: ${err}`);
+    log.error({ err }, 'Failed to resume session');
     process.exit(1);
   }
 }
