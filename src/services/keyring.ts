@@ -5,9 +5,17 @@
 // (no per-application confirmation prompts). On other platforms, falls back to
 // @napi-rs/keyring which uses the OS credential store (e.g. libsecret on Linux,
 // Windows Credential Manager).
+//
+// When the OS keyring is unavailable (e.g. no D-Bus session on headless Linux),
+// secrets are stored in plain-text files under the user config directory as a
+// last-resort fallback. This ensures the application never fails to start
+// because of keyring errors.
 // ============================================================================
 
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { isMac } from 'build-strap';
+import { userConfigDir } from './config';
 import { log } from './logger';
 
 /**
@@ -138,7 +146,71 @@ async function deleteSecretMac(
 }
 
 // ============================================================================
-// Fallback implementation via @napi-rs/keyring
+// File-based fallback for when the OS keyring is unavailable
+//
+// Stores secrets as plain-text files under <userConfigDir>/keyring/<service>/
+// with the account name encoded as the filename. This is a last-resort
+// fallback — the OS keyring is always preferred when available.
+// ============================================================================
+
+/**
+ * Sanitize an account name into a safe filename.
+ * Replaces path separators and other problematic characters with underscores.
+ */
+export function accountToFilename(account: string): string {
+  return account.replace(/[/\\:*?"<>|]/g, '_');
+}
+
+function keyringFallbackDir(service: string): string {
+  return join(userConfigDir(), 'keyring', service);
+}
+
+export function keyringFallbackPath(service: string, account: string): string {
+  return join(keyringFallbackDir(service), accountToFilename(account));
+}
+
+export async function getSecretFile(
+  service: string,
+  account: string,
+): Promise<string | null> {
+  try {
+    const f = Bun.file(keyringFallbackPath(service, account));
+    if (!(await f.exists())) return null;
+    const value = await f.text();
+    return value || null;
+  } catch (err) {
+    log.debug(
+      { err, service, account },
+      'Failed to read secret from file fallback',
+    );
+    return null;
+  }
+}
+
+export async function setSecretFile(
+  service: string,
+  account: string,
+  value: string,
+): Promise<void> {
+  const dir = keyringFallbackDir(service);
+  await mkdir(dir, { recursive: true });
+  await Bun.write(keyringFallbackPath(service, account), value);
+}
+
+export async function deleteSecretFile(
+  service: string,
+  account: string,
+): Promise<void> {
+  try {
+    const { unlink } = await import('node:fs/promises');
+    await unlink(keyringFallbackPath(service, account));
+  } catch {
+    // File may not exist — treat as success
+  }
+}
+
+// ============================================================================
+// Non-macOS implementation: OS keyring via @napi-rs/keyring with file fallback
 // ============================================================================
 
 async function getSecretKeyring(
@@ -149,14 +221,15 @@ async function getSecretKeyring(
     const { AsyncEntry } = await import('@napi-rs/keyring');
     const entry = new AsyncEntry(service, account);
     const value = await entry.getPassword();
-    return value || null;
+    if (value) return value;
   } catch (err) {
     log.debug(
       { err, service, account },
       'Failed to read secret from OS keyring',
     );
-    return null;
   }
+  // Fall back to file-based storage
+  return getSecretFile(service, account);
 }
 
 async function setSecretKeyring(
@@ -168,13 +241,15 @@ async function setSecretKeyring(
     const { AsyncEntry } = await import('@napi-rs/keyring');
     const entry = new AsyncEntry(service, account);
     await entry.setPassword(value);
+    return;
   } catch (err) {
     log.debug(
       { err, service, account },
-      'Failed to write secret to OS keyring',
+      'Failed to write secret to OS keyring, falling back to file',
     );
-    throw err;
   }
+  // Fall back to file-based storage instead of throwing
+  await setSecretFile(service, account, value);
 }
 
 async function deleteSecretKeyring(
@@ -192,4 +267,6 @@ async function deleteSecretKeyring(
       'Failed to delete secret from OS keyring (may not exist)',
     );
   }
+  // Also clean up any file fallback entry
+  await deleteSecretFile(service, account);
 }
