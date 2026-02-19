@@ -157,8 +157,11 @@ export class DenoApiClient {
     }
 
     if (!resolvedId) {
-      log.warn('Could not resolve sandbox ID — kill/cleanup may fail');
-      resolvedId = '';
+      throw new Error(
+        'Could not resolve sandbox ID after creation — the sandbox was created but its ID is unavailable. ' +
+          'Kill/cleanup and session tracking will not work. ' +
+          `Label used for lookup: hermes.create-id=${idLabel}`,
+      );
     }
 
     // Attach resolvedId as an extra property

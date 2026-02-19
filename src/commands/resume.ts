@@ -63,8 +63,11 @@ export async function resumeAction(
       console.log(
         `Resumed session started: ${result.name} (${result.id.substring(0, 12)})`,
       );
+    } else if (mode === 'shell') {
+      // Shell mode — open a plain bash shell in the container
+      await provider.shell(result.id);
     } else {
-      // Interactive or shell mode — attach to the session
+      // Interactive mode — attach to the session
       await provider.attach(result.id);
     }
   } catch (err) {

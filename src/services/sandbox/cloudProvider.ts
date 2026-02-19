@@ -419,14 +419,40 @@ export class CloudSandboxProvider implements SandboxProvider {
           `cd /work/app && nohup ${agentCommand} > /work/agent.log 2>&1 &`,
         );
       }
-    } finally {
-      // Close our WebSocket connection — the sandbox keeps running
-      await sandbox.close();
+    } catch (err) {
+      // Setup failed — tear down the cloud sandbox and volume so we don't
+      // leak resources (especially important given the 5-sandbox limit).
+      try {
+        await sandbox.close();
+      } catch {
+        // best-effort
+      }
+      try {
+        await client.killSandbox(sandbox.resolvedId || sandbox.id);
+      } catch {
+        // best-effort
+      }
+      try {
+        await client.deleteVolume(rootVolume.id);
+      } catch {
+        // best-effort
+      }
+      throw err;
     }
 
+    // Close our WebSocket connection — the sandbox keeps running
+    await sandbox.close();
+
     // 8. Record in SQLite
+    const sessionId = sandbox.resolvedId || sandbox.id;
+    if (!sessionId) {
+      throw new Error(
+        'Cannot persist session: sandbox has no resolvedId or id',
+      );
+    }
+
     const session: HermesSession = {
-      id: sandbox.resolvedId,
+      id: sessionId,
       name: options.branchName,
       provider: 'cloud',
       status: 'running',
@@ -440,12 +466,6 @@ export class CloudSandboxProvider implements SandboxProvider {
       region,
       volumeSlug: rootVolume.slug,
     };
-
-    if (!session.id) {
-      log.warn(
-        'Session created with empty sandbox ID — status tracking may not work',
-      );
-    }
 
     const db = openSessionDb();
     upsertSession(db, session);
@@ -494,7 +514,12 @@ export class CloudSandboxProvider implements SandboxProvider {
     } finally {
       // Kill sandbox after shell exits
       try {
-        await sandbox.kill();
+        await sandbox.close();
+      } catch {
+        // Best-effort cleanup
+      }
+      try {
+        await client.killSandbox(sandbox.resolvedId || sandbox.id);
       } catch {
         // Best-effort cleanup
       }
@@ -640,8 +665,15 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
 
     // 5. Update SQLite
+    const resumeSessionId = sandbox.resolvedId || sandbox.id;
+    if (!resumeSessionId) {
+      throw new Error(
+        'Cannot persist resumed session: sandbox has no resolvedId or id',
+      );
+    }
+
     const newSession: HermesSession = {
-      id: sandbox.resolvedId,
+      id: resumeSessionId,
       name: existing.name,
       provider: 'cloud',
       status: 'running',
@@ -696,7 +728,29 @@ export class CloudSandboxProvider implements SandboxProvider {
 
   async get(sessionId: string): Promise<HermesSession | null> {
     const db = openSessionDb();
-    return dbGetSession(db, sessionId);
+    const session = dbGetSession(db, sessionId);
+
+    // Sync with Deno API: if the session looks running locally but the
+    // sandbox no longer exists in the API, mark it as exited.  This mirrors
+    // the reconciliation that list() performs and ensures callers polling
+    // get() (e.g. SessionDetail) see up-to-date status.
+    if (session?.status === 'running') {
+      try {
+        const client = await this.getClient();
+        const runningSandboxes = await client.listSandboxes({
+          'hermes.managed': 'true',
+        });
+        const runningIds = new Set(runningSandboxes.map((s) => s.id));
+        if (!runningIds.has(session.id)) {
+          updateSessionStatus(db, session.id, 'exited');
+          session.status = 'exited';
+        }
+      } catch (err) {
+        log.debug({ err }, 'Failed to sync cloud session status in get()');
+      }
+    }
+
+    return session;
   }
 
   async remove(sessionId: string): Promise<void> {
@@ -758,9 +812,27 @@ export class CloudSandboxProvider implements SandboxProvider {
     await client.killSandbox(sessionId);
     updateSessionStatus(db, sessionId, 'stopped');
 
+    // Wait for the platform to fully detach the volume from the dead sandbox.
+    // Without this delay, snapshotVolume can hit a 500 error.
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+
     // 2. Best-effort snapshot for resume.  The volume is still available
     //    for direct boot even if the snapshot fails, so this is non-fatal.
     if (session?.volumeSlug) {
+      // Delete any previous snapshot to avoid orphaned resources.
+      // denoSlug generates a new random suffix each time, so repeated
+      // stop() calls would otherwise create unreferenced snapshots.
+      if (session.snapshotSlug) {
+        try {
+          await client.deleteSnapshot(session.snapshotSlug);
+        } catch (err) {
+          log.debug(
+            { err, snapshotSlug: session.snapshotSlug },
+            'Failed to delete previous snapshot — continuing with new snapshot',
+          );
+        }
+      }
+
       const snapshotSlug = denoSlug('hsnap', session.name);
       try {
         await client.snapshotVolume(session.volumeSlug, {

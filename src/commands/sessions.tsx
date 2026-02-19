@@ -1086,9 +1086,10 @@ export async function runSessionsTui({
           const actionProvider = getSandboxProvider(
             result.resumeProvider ?? provider.type,
           );
-          await actionProvider.resume(result.resumeSessionId, {
+          const resumed = await actionProvider.resume(result.resumeSessionId, {
             mode: 'shell',
           });
+          await actionProvider.shell(resumed.id);
         } else {
           // Fresh shell container
           const actionProvider = getSandboxProvider(
@@ -1181,6 +1182,9 @@ export function getStatusDisplay(session: HermesSession): string {
     case 'exited':
       if (session.exitCode === 0) {
         return '\x1b[34mcomplete\x1b[0m'; // blue
+      }
+      if (session.exitCode == null) {
+        return '\x1b[33mexited\x1b[0m'; // yellow
       }
       return `\x1b[31mfailed (${session.exitCode})\x1b[0m`; // red
     case 'stopped':
