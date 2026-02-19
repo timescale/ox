@@ -236,7 +236,7 @@ export async function ensureCloudSnapshot(options: {
 # Detach with ctrl+\\ (no prefix needed) — matches Docker detach keys.
 # -E avoids printing "[detached (from session ...)]" to the host terminal
 # when disconnecting from tmux over SSH.
-bind -n C-\\\\ detach-client -E
+bind -n C-\\\\ detach-client -E true
 # Keep default prefix (ctrl+b) for other tmux commands
 set -g mouse on
 # Hide status bar — hermes manages the session, no need for tmux chrome
