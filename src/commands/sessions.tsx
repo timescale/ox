@@ -51,6 +51,11 @@ import {
 } from '../services/opencode';
 import { createTui } from '../services/tui.ts';
 import {
+  checkForUpdate,
+  isCompiledBinary,
+  performUpdate,
+} from '../services/updater';
+import {
   ensureGitignore,
   enterSubprocessScreen,
   resetTerminal,
@@ -220,6 +225,35 @@ function SessionsApp({
   const showToast = useCallback((message: string, type: ToastType) => {
     setToast({ message, type });
   }, []);
+
+  // Background auto-update check (fire-and-forget on mount)
+  useEffect(() => {
+    if (!isCompiledBinary()) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const update = await checkForUpdate();
+        if (cancelled || !update) return;
+
+        showToast(`Updating to v${update.latestVersion}...`, 'info');
+
+        await performUpdate(update, (progress) => {
+          if (cancelled) return;
+          if (progress.phase === 'complete') {
+            showToast(progress.message, 'success');
+          }
+        });
+      } catch (err) {
+        log.debug({ err }, 'Background auto-update failed');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showToast]);
 
   // Start session function - handles the full flow of starting an agent
   const startSession = useCallback(

@@ -23,7 +23,10 @@ import { opencodeCommand } from './commands/opencode';
 import { resumeCommand } from './commands/resume';
 import { runSessionsTui, sessionsCommand } from './commands/sessions';
 import { shellCommand } from './commands/shell';
+import { upgradeCommand } from './commands/upgrade';
 import { log } from './services/logger';
+import { checkForUpdate, isCompiledBinary } from './services/updater';
+import { printErr } from './utils';
 
 program
   .name('hermes')
@@ -79,6 +82,36 @@ program.addCommand(opencodeCommand);
 program.addCommand(resumeCommand);
 program.addCommand(sessionsCommand);
 program.addCommand(shellCommand);
+program.addCommand(upgradeCommand);
+
+// Background update check for non-TUI commands.
+// The TUI handles its own auto-update; the upgrade command handles its own check.
+// This uses commander's hook system so it works regardless of how the command was
+// invoked (full name, alias, or abbreviation).
+if (isCompiledBinary()) {
+  const skipCommands = new Set([
+    upgradeCommand,
+    completionCommand,
+  ]);
+
+  for (const cmd of program.commands) {
+    if (skipCommands.has(cmd)) continue;
+
+    cmd.hook('preAction', () => {
+      const updateCheck = checkForUpdate().catch(() => null);
+      process.on('beforeExit', () => {
+        updateCheck.then((update) => {
+          if (update) {
+            printErr(
+              `\nA new version of hermes is available: v${update.latestVersion} (current: v${update.currentVersion})`,
+            );
+            printErr("Run 'hermes upgrade' to update.");
+          }
+        });
+      });
+    });
+  }
+}
 
 // Handle `hermes complete <shell>` before parseAsync for tab library
 // This must happen after all commands are added so tab can introspect them
