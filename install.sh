@@ -1,6 +1,6 @@
 #!/bin/bash
 # hermes installer - Install script for macOS/Linux
-# Usage: gh api repos/timescale/hermes/contents/install.sh -H "Accept: application/vnd.github.raw" | bash
+# Usage: curl -fsSL https://hermes.tiger.build | sh
 
 set -e
 
@@ -202,9 +202,11 @@ install_binary() {
   if [ "$OS_TYPE" = "darwin" ] && [ "$ARCH_TYPE" = "x64" ]; then
     echo -e "${RED}Error: Pre-compiled binaries are not available for Intel Macs (darwin-x64).${NC}"
     echo ""
-    echo "Options:"
-    echo "  1) Use option 2 (clone and link with bun) instead"
-    echo "  2) If you have an Apple Silicon Mac, the darwin-arm64 binary should work"
+    echo "If you have an Apple Silicon Mac, the darwin-arm64 binary should work."
+    echo ""
+    echo "For development from source, clone the repo and use bun:"
+    echo "  git clone https://github.com/$REPO.git"
+    echo "  cd hermes && ./bun i && ./bun link"
     echo ""
     exit 1
   fi
@@ -218,15 +220,25 @@ install_binary() {
   TEMP_DIR=$(mktemp -d)
   trap 'rm -rf "$TEMP_DIR"' EXIT
 
-  echo "Fetching latest release..."
-  if ! gh release download --repo "$REPO" --pattern "$BINARY_FILE" --dir "$TEMP_DIR" 2>/dev/null; then
+  # Support pinning to a specific version via HERMES_VERSION env var
+  if [ -n "$HERMES_VERSION" ]; then
+    DOWNLOAD_URL="https://github.com/$REPO/releases/download/v${HERMES_VERSION}/$BINARY_FILE"
+    echo "Detected \$HERMES_VERSION in env. Fetching version ${HERMES_VERSION}..."
+  else
+    DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$BINARY_FILE"
+    echo "Fetching latest release..."
+  fi
+
+  if ! curl -fSL -o "$TEMP_DIR/$BINARY_FILE" "$DOWNLOAD_URL" 2>/dev/null; then
     echo -e "${RED}Error: Failed to download binary.${NC}"
     echo ""
     echo "This could mean:"
     echo "  - No releases have been published yet"
+    if [ -n "$HERMES_VERSION" ]; then
+      echo "  - Version ${HERMES_VERSION} does not exist"
+    fi
     echo "  - The release doesn't have a binary for $OS_TYPE-$ARCH_TYPE"
     echo ""
-    echo "Try option 2 (clone and link) instead, or ask a maintainer to publish a release."
     exit 1
   fi
 
@@ -244,64 +256,6 @@ install_binary() {
   verify_installation
 }
 
-install_dev() {
-  echo ""
-  echo -e "${BLUE}Installing from source...${NC}"
-
-  # Check for bun
-  if ! command -v bun &> /dev/null; then
-    echo -e "${YELLOW}Bun is not installed. Installing bun first...${NC}"
-    curl -fsSL https://bun.sh/install | bash
-    export BUN_INSTALL="$HOME/.bun"
-    export PATH="$BUN_INSTALL/bin:$PATH"
-  fi
-
-  echo -e "${GREEN}✓${NC} Bun is available"
-
-  # Determine clone location
-  DEFAULT_CLONE_DIR="$HOME/dev/hermes"
-  read -r -p "Clone location [$DEFAULT_CLONE_DIR]: " CLONE_DIR < /dev/tty
-  CLONE_DIR="${CLONE_DIR:-$DEFAULT_CLONE_DIR}"
-
-  # Create parent directory if needed
-  mkdir -p "$(dirname "$CLONE_DIR")"
-
-  if [ -d "$CLONE_DIR" ]; then
-    echo -e "${YELLOW}!${NC} Directory already exists: $CLONE_DIR"
-    read -r -p "Update existing installation? [Y/n]: " update_choice < /dev/tty
-    if [[ "$update_choice" =~ ^[Nn] ]]; then
-      echo "Aborted."
-      exit 0
-    fi
-    cd "$CLONE_DIR"
-    git pull
-  else
-    echo "Cloning repository..."
-    gh repo clone "$REPO" "$CLONE_DIR"
-    cd "$CLONE_DIR"
-  fi
-
-  echo "Installing dependencies..."
-  ./bun install
-
-  echo "Linking globally..."
-  ./bun link
-
-  echo -e "${GREEN}✓${NC} Cloned to $CLONE_DIR and linked globally"
-
-  # Configure shell completions
-  configure_shell_completions
-
-  echo ""
-  echo -e "${YELLOW}Note:${NC} You may need to restart your shell or run:"
-  echo "  source $SHELL_RC"
-  echo ""
-  echo "To update hermes in the future, run:"
-  echo "  cd $CLONE_DIR && git pull && ./bun install"
-
-  verify_installation
-}
-
 # --- Main script ---
 
 echo -e "${BLUE}${BOLD}"
@@ -314,36 +268,12 @@ echo -e "${NC}"
 echo -e "${BLUE}Hermes Installer${NC}"
 echo ""
 
-# Check for gh CLI
-if ! command -v gh &> /dev/null; then
-  echo -e "${RED}Error: GitHub CLI (gh) is required but not installed.${NC}"
-  echo ""
-  echo "Install it with:"
-  echo "  macOS:  brew install gh"
-  echo "  Linux:  https://github.com/cli/cli/blob/trunk/docs/install_linux.md"
+# Check for curl
+if ! command -v curl &> /dev/null; then
+  echo -e "${RED}Error: curl is required but not installed.${NC}"
   echo ""
   exit 1
 fi
-
-# Check gh authentication
-if ! gh auth status &> /dev/null; then
-  echo -e "${RED}Error: GitHub CLI is not authenticated.${NC}"
-  echo ""
-  echo "Run: gh auth login"
-  echo ""
-  exit 1
-fi
-
-# Check repo access
-if ! gh repo view "$REPO" &> /dev/null; then
-  echo -e "${RED}Error: Cannot access $REPO${NC}"
-  echo ""
-  echo "Make sure you have access to the repository and are authenticated."
-  echo ""
-  exit 1
-fi
-
-echo -e "${GREEN}✓${NC} GitHub CLI authenticated"
 
 # Validate OS detection
 if [ "$OS_TYPE" = "unknown" ]; then
@@ -365,28 +295,4 @@ if [ -n "$EXISTING_HERMES" ]; then
   echo -e "${YELLOW}!${NC} Existing hermes found at: $EXISTING_HERMES"
 fi
 
-# Installation method selection
-echo ""
-echo -e "${BOLD}Choose installation method:${NC}"
-echo ""
-echo "  1) Download pre-compiled binary (recommended)"
-echo "     Fast install, no dependencies required"
-echo ""
-echo "  2) Clone repository and link with bun (for developers)"
-echo "     Requires bun, allows you to modify the source"
-echo ""
-
-read -r -p "Enter choice [1-2]: " choice < /dev/tty
-
-case $choice in
-  1)
-    install_binary
-    ;;
-  2)
-    install_dev
-    ;;
-  *)
-    echo -e "${RED}Invalid choice${NC}"
-    exit 1
-    ;;
-esac
+install_binary
