@@ -2,6 +2,7 @@
 // Claude Authentication Service
 // ============================================================================
 
+import { spawnSync } from 'node:child_process';
 import { stripVTControlCharacters } from 'node:util';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
@@ -94,6 +95,17 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
   }
   const containerId = createResult.text().trim();
 
+  // Stop the auth container synchronously. Uses spawnSync so it works
+  // reliably during process teardown (async operations may not complete).
+  // -t 2 keeps the grace period short (default 10s is too long).
+  const stopContainer = () => {
+    spawnSync('docker', ['stop', '-t', '2', containerId], { stdio: 'ignore' });
+  };
+
+  // Register a process exit handler to ensure the container is stopped if
+  // process.exit() is called (e.g. from our renderer 'destroy' handler).
+  process.on('exit', stopContainer);
+
   // Inject .claude.json with baseConfig to skip onboarding screens
   const configPath = `${CONTAINER_HOME}/.claude.json`;
   try {
@@ -104,6 +116,7 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
     );
   } catch (err) {
     log.error({ err }, 'Failed to write .claude.json to auth container');
+    process.off('exit', stopContainer);
     await $`docker rm -f ${containerId}`.quiet().nothrow();
     return null;
   }
@@ -201,10 +214,8 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
 
   if (!menuReady) {
     log.error({ output: outputBuffer }, 'Failed to detect Claude login menu');
-    proc.kill();
-    proc.terminal?.close();
-    // Stop the container (--rm will auto-remove it)
-    await $`docker stop ${containerId}`.quiet().nothrow();
+    process.off('exit', stopContainer);
+    stopContainer();
     return null;
   }
 
@@ -294,15 +305,13 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
 
     cancel: () => {
       log.debug('Cancelling Claude login process');
+      process.off('exit', stopContainer);
       // Clear all pending timeouts to allow process to exit
       for (const timeout of timeouts) {
         clearTimeout(timeout);
       }
       timeouts.length = 0;
-      proc.kill();
-      proc.terminal?.close();
-      // Stop the container (--rm will auto-remove it)
-      $`docker stop ${containerId}`.quiet().nothrow();
+      stopContainer();
     },
 
     getOutput: () => outputBuffer,

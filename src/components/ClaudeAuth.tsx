@@ -15,6 +15,7 @@ import { copyToClipboard } from '../services/clipboard';
 import { log } from '../services/logger';
 import { createTui } from '../services/tui';
 import { useTheme } from '../stores/themeStore';
+import { resetTerminal, restoreConsole } from '../utils';
 import { CopyOnSelect } from './CopyOnSelect';
 import { Dots } from './Dots';
 import { Frame } from './Frame';
@@ -315,15 +316,37 @@ export const runClaudeAuthScreen = async (): Promise<boolean> => {
   }
   log.debug('runClaudeAuthScreen: auth process started, creating TUI');
 
-  const { render, destroy } = await createTui();
+  const { renderer, render, destroy } = await createTui();
   log.debug('runClaudeAuthScreen: TUI created, rendering');
 
   return new Promise<boolean>((resolve) => {
+    let resolved = false;
     const handleComplete = async (success: boolean) => {
+      if (resolved) return;
+      resolved = true;
       log.debug({ success }, 'runClaudeAuthScreen: completing');
       await destroy();
       resolve(success);
     };
+
+    // If the renderer is destroyed externally (e.g. Ctrl+C triggers
+    // exitOnCtrlC), cancel the auth process and exit. The user pressed
+    // Ctrl+C to quit, so we should exit the process entirely rather than
+    // falling through to a fallback login flow.
+    renderer.on('destroy', () => {
+      if (resolved) return;
+      resolved = true;
+      log.debug('runClaudeAuthScreen: renderer destroyed, cancelling auth');
+      authProcess.cancel();
+      // Defer exit until after opentui's finalizeDestroy() completes —
+      // the 'destroy' event fires mid-teardown, before raw mode is
+      // restored and the native renderer is cleaned up.
+      setImmediate(() => {
+        restoreConsole();
+        resetTerminal();
+        process.exit(0);
+      });
+    });
 
     render(
       <CopyOnSelect>
