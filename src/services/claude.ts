@@ -108,11 +108,12 @@ interface ClaudeConfigJson {
   primaryApiKey?: string;
 }
 
-const baseConfig = {
+export const baseConfig = {
   numStartups: 1,
   installMethod: 'native',
   autoUpdates: false,
   hasCompletedOnboarding: true,
+  effortCalloutDismissed: true,
   bypassPermissionsModeAccepted: true,
   projects: {
     '/work': {

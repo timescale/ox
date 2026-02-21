@@ -3,9 +3,11 @@
 // ============================================================================
 
 import { stripVTControlCharacters } from 'node:util';
+import { $ } from 'bun';
 import { nanoid } from 'nanoid';
-import { captureClaudeCredentialsFromContainer } from './claude';
+import { baseConfig, captureClaudeCredentialsFromContainer } from './claude';
 import { resolveSandboxImage } from './docker';
+import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
 import { log } from './logger';
 
 // ============================================================================
@@ -75,79 +77,102 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
 
   const containerName = `hermes-claude-auth-${nanoid()}`;
 
-  const proc = Bun.spawn(
-    [
-      'docker',
-      'run',
-      '-it',
-      '--rm',
-      '--name',
-      containerName,
-      sandbox.image,
-      'claude',
-      '/login',
-    ],
-    {
-      terminal: {
-        cols: 500, // Wide enough to keep URL on single line
-        rows: 24,
-        data(_terminal, data) {
-          const text = new TextDecoder().decode(data);
-          outputBuffer += text;
+  // Phase 1: Start the container detached with the signal entrypoint so we
+  // can inject the .claude.json config file before claude /login starts.
+  // This pre-populates hasCompletedOnboarding (skips theme selection, etc.)
+  log.debug('Creating detached auth container');
+  const createResult =
+    await $`docker run -d -it --rm --entrypoint /.hermes/signalEntrypoint.sh --name ${containerName} ${sandbox.image} claude /login`
+      .quiet()
+      .nothrow();
+  if (createResult.exitCode) {
+    log.error(
+      { stderr: createResult.stderr.toString() },
+      'Failed to create auth container',
+    );
+    return null;
+  }
+  const containerId = createResult.text().trim();
 
-          // Strip ANSI codes for pattern matching
-          const clean = stripVTControlCharacters(outputBuffer);
+  // Inject .claude.json with baseConfig to skip onboarding screens
+  const configPath = `${CONTAINER_HOME}/.claude.json`;
+  try {
+    await writeFileToContainer(
+      containerId,
+      configPath,
+      JSON.stringify(baseConfig),
+    );
+  } catch (err) {
+    log.error({ err }, 'Failed to write .claude.json to auth container');
+    await $`docker rm -f ${containerId}`.quiet().nothrow();
+    return null;
+  }
 
-          // Check for URL (after method selected)
-          if (urlResolve) {
-            const urlMatch = clean.match(
-              /(https:\/\/(claude\.ai|platform\.claude\.com)\/oauth[^\s]+)/,
+  // Signal ready so the entrypoint starts `claude /login`
+  await writeFileToContainer(containerId, '/.hermes/signal/.ready', '1');
+
+  // Phase 2: Attach to the container with a PTY to interact with the login flow
+  log.debug('Attaching to auth container');
+  const proc = Bun.spawn(['docker', 'attach', containerId], {
+    terminal: {
+      cols: 500, // Wide enough to keep URL on single line
+      rows: 24,
+      data(_terminal, data) {
+        const text = new TextDecoder().decode(data);
+        outputBuffer += text;
+
+        // Strip ANSI codes for pattern matching
+        const clean = stripVTControlCharacters(outputBuffer);
+
+        // Check for URL (after method selected)
+        if (urlResolve) {
+          const urlMatch = clean.match(
+            /(https:\/\/(claude\.ai|platform\.claude\.com)\/oauth[^\s]+)/,
+          );
+          const url = urlMatch?.[1];
+          // Check for paste prompt (with or without spaces due to ANSI stripping)
+          if (
+            url &&
+            (clean.includes('Paste code') || clean.includes('Pastecode'))
+          ) {
+            log.debug({ url }, 'Found authorization URL');
+            urlResolve(url);
+            urlResolve = null;
+            urlReject = null;
+          }
+        }
+
+        // Check for completion (with or without spaces due to ANSI stripping)
+        // Only check output that came AFTER the code was submitted
+        if (completionResolve && codeSubmittedAt >= 0) {
+          const recentOutput = outputBuffer.slice(codeSubmittedAt);
+          const cleanRecent = stripVTControlCharacters(recentOutput);
+          if (
+            cleanRecent.includes('Login successful') ||
+            cleanRecent.includes('Loginsuccessful') ||
+            cleanRecent.includes('Logged in as') ||
+            cleanRecent.includes('Loggedinas')
+          ) {
+            log.debug('Login successful');
+            captureClaudeCredentialsFromContainer(containerName).then(
+              (success) => {
+                completionResolve?.(success);
+                completionResolve = null;
+              },
             );
-            const url = urlMatch?.[1];
-            // Check for paste prompt (with or without spaces due to ANSI stripping)
-            if (
-              url &&
-              (clean.includes('Paste code') || clean.includes('Pastecode'))
-            ) {
-              log.debug({ url }, 'Found authorization URL');
-              urlResolve(url);
-              urlResolve = null;
-              urlReject = null;
-            }
+          } else if (
+            cleanRecent.includes('Invalid') ||
+            cleanRecent.includes('error') ||
+            cleanRecent.includes('failed')
+          ) {
+            log.debug({ cleanRecent }, 'Login failed');
+            completionResolve(false);
+            completionResolve = null;
           }
-
-          // Check for completion (with or without spaces due to ANSI stripping)
-          // Only check output that came AFTER the code was submitted
-          if (completionResolve && codeSubmittedAt >= 0) {
-            const recentOutput = outputBuffer.slice(codeSubmittedAt);
-            const cleanRecent = stripVTControlCharacters(recentOutput);
-            if (
-              cleanRecent.includes('Login successful') ||
-              cleanRecent.includes('Loginsuccessful') ||
-              cleanRecent.includes('Logged in as') ||
-              cleanRecent.includes('Loggedinas')
-            ) {
-              log.debug('Login successful');
-              captureClaudeCredentialsFromContainer(containerName).then(
-                (success) => {
-                  completionResolve?.(success);
-                  completionResolve = null;
-                },
-              );
-            } else if (
-              cleanRecent.includes('Invalid') ||
-              cleanRecent.includes('error') ||
-              cleanRecent.includes('failed')
-            ) {
-              log.debug({ cleanRecent }, 'Login failed');
-              completionResolve(false);
-              completionResolve = null;
-            }
-          }
-        },
+        }
       },
     },
-  );
+  });
 
   // Wait for login menu to appear
   // Note: stripVTControlCharacters removes escape codes but cursor movement
@@ -178,6 +203,8 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
     log.error({ output: outputBuffer }, 'Failed to detect Claude login menu');
     proc.kill();
     proc.terminal?.close();
+    // Stop the container (--rm will auto-remove it)
+    await $`docker stop ${containerId}`.quiet().nothrow();
     return null;
   }
 
@@ -274,6 +301,8 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
       timeouts.length = 0;
       proc.kill();
       proc.terminal?.close();
+      // Stop the container (--rm will auto-remove it)
+      $`docker stop ${containerId}`.quiet().nothrow();
     },
 
     getOutput: () => outputBuffer,
