@@ -4,6 +4,11 @@ LABEL maintainer="Tiger Data"
 LABEL description="Minimal sandbox environment for AI agents"
 LABEL org.opencontainers.image.source=https://github.com/timescale/hermes
 
+# Pinned tool versions — override at build time with --build-arg
+# Canonical values live in sandbox/versions.json
+ARG CLAUDE_CODE_VERSION=latest
+ARG OPENCODE_VERSION=latest
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
   curl \
@@ -52,18 +57,20 @@ RUN groupadd --gid ${USER_GID} ${USER_NAME} \
 
 # Install claude code as non-root user
 USER ${USER_NAME}
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}
 
 # tiger CLI
 RUN curl -fsSL https://cli.tigerdata.com | sh
 
 # opencode
-RUN curl -fsSL https://opencode.ai/install | bash
+RUN curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION}
 RUN ln -s /home/${USER_NAME}/.opencode/bin/opencode /home/${USER_NAME}/.local/bin/opencode
 
 
 ENV HOME="/home/${USER_NAME}"
 ENV PATH="/home/${USER_NAME}/.local/bin:$PATH"
+# Prevent Claude Code from auto-updating past the pinned version
+ENV DISABLE_AUTOUPDATER=1
 
 RUN  git config --global user.email "hermes@tigerdata.com" \
   && git config --global user.name "Hermes Agent"

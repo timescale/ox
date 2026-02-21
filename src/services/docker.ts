@@ -15,6 +15,7 @@ import FULL_DOCKERFILE from '../../sandbox/full.Dockerfile' with {
 import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
   type: 'text',
 };
+import toolVersions from '../../sandbox/versions.json' with { type: 'json' };
 import { runDockerSetupScreen } from '../components/DockerSetup';
 import {
   enterSubprocessScreen,
@@ -237,6 +238,10 @@ type DockerfileVariant = 'slim' | 'full';
 function computeDockerfileHash(content: string): string {
   const hasher = new Bun.CryptoHasher('md5');
   hasher.update(content);
+  // Include pinned tool versions so a version bump produces a new image tag
+  hasher.update(
+    `claude=${toolVersions.claudeCode},opencode=${toolVersions.opencode}`,
+  );
   return hasher.digest('hex').slice(0, 12);
 }
 
@@ -472,6 +477,10 @@ async function buildDockerImage(
       'docker',
       'build',
       '-q',
+      '--build-arg',
+      `CLAUDE_CODE_VERSION=${toolVersions.claudeCode}`,
+      '--build-arg',
+      `OPENCODE_VERSION=${toolVersions.opencode}`,
       ...(cacheFromImage ? ['--cache-from', cacheFromImage] : []),
       '-t',
       imageName,

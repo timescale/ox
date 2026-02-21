@@ -3,6 +3,7 @@
 // ============================================================================
 
 import packageJson from '../../../package.json' with { type: 'json' };
+import toolVersions from '../../../sandbox/versions.json' with { type: 'json' };
 import { log } from '../logger.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import { sandboxExec } from './sandboxExec.ts';
@@ -18,11 +19,19 @@ export type SnapshotBuildProgress =
   | { type: 'done'; snapshotSlug: string }
   | { type: 'error'; message: string };
 
+function toolVersionsHash(): string {
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(`${toolVersions.claudeCode},${toolVersions.opencode}`);
+  return hasher.digest('hex').slice(0, 6);
+}
+
 function getBaseSnapshotSlug(): string {
   // The base snapshot slug is deterministic (no nanoid) so we can find
-  // an existing snapshot across runs. Sanitize version for slug rules.
+  // an existing snapshot across runs. Includes hermes version + a hash
+  // of pinned tool versions so that updating either triggers a rebuild.
   const safeVersion = packageJson.version.replace(/[^a-z0-9-]/g, '-');
-  return `hermes-base-${safeVersion}`.slice(0, 32);
+  const tvHash = toolVersionsHash();
+  return `hermes-base-${safeVersion}-${tvHash}`.slice(0, 32);
 }
 
 /**
@@ -170,15 +179,15 @@ export async function ensureCloudSnapshot(options: {
       { label: 'Install GitHub CLI', sudo: true },
     );
 
-    // 7. Install Claude Code (default user)
+    // 7. Install Claude Code (default user) — pinned version from sandbox/versions.json
     onProgress?.({
       type: 'installing',
-      message: 'Installing Claude Code',
+      message: `Installing Claude Code v${toolVersions.claudeCode}`,
       detail: 'This may take a minute',
     });
     await sandboxExec(
       sandbox,
-      'curl -fsSL https://claude.ai/install.sh | bash',
+      `curl -fsSL https://claude.ai/install.sh | bash -s ${toolVersions.claudeCode}`,
       { label: 'Install Claude Code' },
     );
 
@@ -191,14 +200,14 @@ export async function ensureCloudSnapshot(options: {
       label: 'Install Tiger CLI',
     });
 
-    // 9. Install OpenCode (default user, using ~ for home)
+    // 9. Install OpenCode (default user, using ~ for home) — pinned version from sandbox/versions.json
     onProgress?.({
       type: 'installing',
-      message: 'Installing OpenCode',
+      message: `Installing OpenCode v${toolVersions.opencode}`,
     });
     await sandboxExec(
       sandbox,
-      'curl -fsSL https://opencode.ai/install | bash',
+      `curl -fsSL https://opencode.ai/install | bash -s -- --version ${toolVersions.opencode}`,
       { label: 'Install OpenCode' },
     );
 
@@ -216,16 +225,18 @@ export async function ensureCloudSnapshot(options: {
     // SSH login shells source /etc/profile.d/*.sh (alphabetically).  The Deno
     // platform generates app-env.sh which resets PATH to system dirs.  Our
     // hermes-path.sh (h > a) runs after and appends user bin dirs.
+    // Also set DISABLE_AUTOUPDATER=1 to prevent Claude Code from self-updating
+    // past the pinned version at runtime.
     await sandboxExec(
       sandbox,
-      'echo \'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\' | sudo tee /etc/profile.d/hermes-path.sh > /dev/null && sudo chmod +x /etc/profile.d/hermes-path.sh',
-      { label: 'Configure PATH in profile.d' },
+      `printf 'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\\nexport DISABLE_AUTOUPDATER=1\\n' | sudo tee /etc/profile.d/hermes-path.sh > /dev/null && sudo chmod +x /etc/profile.d/hermes-path.sh`,
+      { label: 'Configure PATH and env in profile.d' },
     );
     // Also add to .bashrc for non-login shells that use BASH_ENV
     await sandboxExec(
       sandbox,
-      'echo \'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\' >> ~/.bashrc',
-      { label: 'Configure PATH in bashrc' },
+      `printf 'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\\nexport DISABLE_AUTOUPDATER=1\\n' >> ~/.bashrc`,
+      { label: 'Configure PATH and env in bashrc' },
     );
 
     // 11. Configure tmux for detach/reattach workflow
