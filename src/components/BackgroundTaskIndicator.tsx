@@ -11,7 +11,12 @@ export function BackgroundTaskIndicator() {
   const label = pendingCount === 1 ? '1 task' : `${pendingCount} tasks`;
 
   return (
-    <box position="absolute" bottom={0} left={1}>
+    <box
+      position="absolute"
+      bottom={1}
+      left={2}
+      backgroundColor={theme.backgroundPanel}
+    >
       <text fg={theme.textMuted}>
         <span fg={theme.primary}>⟳</span> {label}
         <Dots />
