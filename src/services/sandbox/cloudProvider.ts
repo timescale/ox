@@ -19,10 +19,10 @@ import { ensureCloudSnapshot } from './cloudSnapshot.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import { sandboxExec } from './sandboxExec.ts';
 import {
-  deleteSession as dbDeleteSession,
   getSession as dbGetSession,
   listSessions as dbListSessions,
   openSessionDb,
+  softDeleteSession,
   updateSessionSnapshot,
   updateSessionStatus,
   upsertSession,
@@ -947,8 +947,8 @@ export class CloudSandboxProvider implements SandboxProvider {
       log.debug({ err, sessionId }, 'Failed to initialize cloud cleanup');
     }
 
-    // Always remove from local DB regardless of cleanup results
-    dbDeleteSession(db, sessionId);
+    // Soft-delete from local DB regardless of cleanup results
+    softDeleteSession(db, sessionId);
   }
 
   async stop(sessionId: string): Promise<void> {
