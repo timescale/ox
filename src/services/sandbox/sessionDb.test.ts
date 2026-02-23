@@ -354,4 +354,25 @@ describe('sessionDb', () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.id).toBe('active');
   });
+
+  test('upsertSession does not resurrect soft-deleted records', () => {
+    const db = createTestDb();
+    upsertSession(
+      db,
+      makeSession({ id: 'del-then-upsert', status: 'running' }),
+    );
+    softDeleteSession(db, 'del-then-upsert');
+
+    // Upsert the same ID again (e.g., status sync)
+    upsertSession(db, makeSession({ id: 'del-then-upsert', status: 'exited' }));
+
+    // Should still be hidden from list
+    const sessions = listSessions(db);
+    expect(sessions.find((s) => s.id === 'del-then-upsert')).toBeUndefined();
+
+    // But direct get shows updated status
+    const session = getSession(db, 'del-then-upsert');
+    expect(session).not.toBeNull();
+    expect(session?.status).toBe('exited');
+  });
 });

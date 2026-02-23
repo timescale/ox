@@ -142,10 +142,11 @@ function rowToSession(row: SessionRow): HermesSession {
 // CRUD Operations
 // ============================================================================
 
-/** Insert or update a session record from a HermesSession object */
+/** Insert or update a session record from a HermesSession object.
+ *  Uses ON CONFLICT to preserve the deleted_at column on updates. */
 export function upsertSession(db: Database, session: HermesSession): void {
   const stmt = db.prepare(`
-    INSERT OR REPLACE INTO sessions (
+    INSERT INTO sessions (
       id, provider, name, branch, agent, model, prompt, repo,
       created, status, exit_code, interactive, exec_type, resumed_from,
       region, mount_dir, container_name, volume_slug, snapshot_slug,
@@ -156,6 +157,28 @@ export function upsertSession(db: Database, session: HermesSession): void {
       $region, $mount_dir, $container_name, $volume_slug, $snapshot_slug,
       $started_at, $finished_at, $extra
     )
+    ON CONFLICT(id) DO UPDATE SET
+      provider = excluded.provider,
+      name = excluded.name,
+      branch = excluded.branch,
+      agent = excluded.agent,
+      model = excluded.model,
+      prompt = excluded.prompt,
+      repo = excluded.repo,
+      created = excluded.created,
+      status = excluded.status,
+      exit_code = excluded.exit_code,
+      interactive = excluded.interactive,
+      exec_type = excluded.exec_type,
+      resumed_from = excluded.resumed_from,
+      region = excluded.region,
+      mount_dir = excluded.mount_dir,
+      container_name = excluded.container_name,
+      volume_slug = excluded.volume_slug,
+      snapshot_slug = excluded.snapshot_slug,
+      started_at = excluded.started_at,
+      finished_at = excluded.finished_at,
+      extra = excluded.extra
   `);
 
   stmt.run({
