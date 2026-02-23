@@ -19,6 +19,7 @@ import {
   getStatusIcon,
   getStatusText,
 } from '../services/sessionDisplay';
+import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
@@ -144,19 +145,21 @@ export function SessionDetail({
     }
   }, [session.id, sessionProvider]);
 
-  const handleDelete = useCallback(async () => {
+  const handleDelete = useCallback(() => {
     setModal(null);
-    setActionInProgress(true);
-    try {
-      await sessionProvider.remove(session.id);
-      useToastStore.getState().show('Container removed', 'success');
-      setTimeout(() => onSessionDeleted(), 1000);
-    } catch (err) {
-      log.error({ err }, `Failed to remove container ${session.id}`);
-      useToastStore.getState().show(`Failed to remove: ${err}`, 'error');
-      setActionInProgress(false);
-    }
-  }, [session.id, sessionProvider, onSessionDeleted]);
+
+    useToastStore.getState().show('Session deleted', 'success');
+
+    // Enqueue background deletion
+    useBackgroundTaskStore
+      .getState()
+      .enqueue(`Deleting "${session.name}"`, async () => {
+        await sessionProvider.remove(session.id);
+      });
+
+    // Navigate back to list immediately
+    onSessionDeleted();
+  }, [session.id, session.name, sessionProvider, onSessionDeleted]);
 
   const handleResume = useCallback(() => {
     onResume(session);
