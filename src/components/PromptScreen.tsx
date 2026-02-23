@@ -22,6 +22,7 @@ import { log } from '../services/logger';
 import type { HermesSession, SandboxProviderType } from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { useTheme } from '../stores/themeStore.ts';
+import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
 import { FilterableSelector } from './FilterableSelector';
 import { HermesTitle } from './HermesTitle';
 import { HotkeysBar } from './HotkeysBar';
@@ -891,6 +892,8 @@ export function PromptScreen({
           anchor={inputAnchorRef.current}
         />
       )}
+
+      <BackgroundTaskIndicator bottom={3} />
     </box>
   );
 }

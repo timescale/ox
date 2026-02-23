@@ -891,7 +891,6 @@ function SessionsApp({
           onViewSessions={() => setView({ type: 'list' })}
         />
         <GlobalToast />
-        <BackgroundTaskIndicator />
         <ShutdownOverlay />
         <CommandPaletteHost />
       </>
