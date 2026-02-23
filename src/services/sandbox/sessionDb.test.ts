@@ -9,6 +9,7 @@ import {
   getSession,
   initSessionSchema,
   listSessions,
+  softDeleteSession,
   updateSessionSnapshot,
   updateSessionStatus,
   upsertSession,
@@ -315,5 +316,42 @@ describe('sessionDb', () => {
     expect(result?.provider).toBe('docker');
     expect(result?.mountDir).toBe('/home/user/project');
     expect(result?.containerName).toBe('hermes-docker-1');
+  });
+
+  // ==========================================================================
+  // softDeleteSession
+  // ==========================================================================
+
+  test('softDeleteSession hides session from listSessions', () => {
+    const db = createTestDb();
+    upsertSession(db, makeSession({ id: 'to-soft-delete' }));
+
+    softDeleteSession(db, 'to-soft-delete');
+
+    // Should not appear in list
+    const sessions = listSessions(db);
+    expect(sessions.find((s) => s.id === 'to-soft-delete')).toBeUndefined();
+  });
+
+  test('softDeleteSession preserves record for direct retrieval', () => {
+    const db = createTestDb();
+    upsertSession(db, makeSession({ id: 'soft-del' }));
+    softDeleteSession(db, 'soft-del');
+
+    // Direct get still finds it
+    const session = getSession(db, 'soft-del');
+    expect(session).not.toBeNull();
+    expect(session?.id).toBe('soft-del');
+  });
+
+  test('listSessions excludes soft-deleted sessions by default', () => {
+    const db = createTestDb();
+    upsertSession(db, makeSession({ id: 'active' }));
+    upsertSession(db, makeSession({ id: 'deleted' }));
+    softDeleteSession(db, 'deleted');
+
+    const sessions = listSessions(db);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.id).toBe('active');
   });
 });

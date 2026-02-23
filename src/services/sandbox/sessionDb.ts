@@ -52,6 +52,13 @@ CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);
 export function initSessionSchema(db: Database): void {
   db.exec('PRAGMA journal_mode=WAL');
   db.exec(SCHEMA_SQL);
+
+  // Migration: add deleted_at column for soft-delete support
+  try {
+    db.exec('ALTER TABLE sessions ADD COLUMN deleted_at TEXT');
+  } catch {
+    // Column already exists — expected on subsequent runs
+  }
 }
 
 let _db: Database | null = null;
@@ -95,6 +102,7 @@ interface SessionRow {
   snapshot_slug: string | null;
   started_at: string | null;
   finished_at: string | null;
+  deleted_at: string | null;
   extra: string | null;
 }
 
@@ -191,6 +199,9 @@ export function listSessions(
   const conditions: string[] = [];
   const params: Record<string, string> = {};
 
+  // Always exclude soft-deleted sessions
+  conditions.push('deleted_at IS NULL');
+
   if (filter?.provider) {
     conditions.push('provider = $provider');
     params.$provider = filter.provider;
@@ -213,6 +224,14 @@ export function listSessions(
 export function deleteSession(db: Database, id: string): void {
   const stmt = db.prepare('DELETE FROM sessions WHERE id = $id');
   stmt.run({ $id: id });
+}
+
+/** Soft-delete a session by setting its deleted_at timestamp */
+export function softDeleteSession(db: Database, id: string): void {
+  const stmt = db.prepare(
+    'UPDATE sessions SET deleted_at = $deleted_at WHERE id = $id',
+  );
+  stmt.run({ $id: id, $deleted_at: new Date().toISOString() });
 }
 
 /** Update just the status (and optionally exit code) of a session */
