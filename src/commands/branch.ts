@@ -2,7 +2,7 @@
 // Branch Command - Creates feature branch with isolated DB fork and agent
 // ============================================================================
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { ensureClaudeAuth } from '../services/claude';
 import { type AgentType, projectConfig, readConfig } from '../services/config';
@@ -14,7 +14,8 @@ import {
 } from '../services/git';
 import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
-import { getDefaultProvider } from '../services/sandbox';
+import type { SandboxProviderType } from '../services/sandbox';
+import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
 import { ensureGitignore } from '../utils';
 import { configAction } from './config';
 
@@ -27,6 +28,8 @@ interface BranchOptions {
   interactive: boolean;
   /** Mount local directory instead of git clone. True = cwd, string = specific path */
   mount?: string | true;
+  /** Sandbox provider override (docker or cloud) */
+  provider?: SandboxProviderType;
 }
 
 function printSummary(
@@ -55,7 +58,9 @@ export async function branchAction(
     process.exit(1);
   }
 
-  const provider = await getDefaultProvider();
+  const provider = options.provider
+    ? getSandboxProvider(options.provider)
+    : await getDefaultProvider();
   await provider.ensureReady();
   await provider.ensureImage();
 
@@ -210,6 +215,12 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
     .option(
       '--mount [dir]',
       'Mount local directory into container instead of git clone (defaults to cwd)',
+    )
+    .addOption(
+      new Option(
+        '-r, --provider <type>',
+        'Sandbox provider: docker or cloud (overrides config)',
+      ).choices(['docker', 'cloud']),
     ) as T;
 }
 
@@ -257,5 +268,6 @@ export const branchCommand = withBranchOptions(
     dbFork: options.dbFork,
     mountDir,
     isGitRepo,
+    sandboxProvider: options.provider,
   });
 });

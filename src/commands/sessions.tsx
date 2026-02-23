@@ -157,6 +157,8 @@ export interface RunSessionsTuiOptions {
   mountDir?: string;
   /** Whether running from a git repository (affects git/gh operations) */
   isGitRepo?: boolean;
+  /** Sandbox provider override from CLI flag (overrides config) */
+  sandboxProvider?: SandboxProviderType;
 }
 
 // ============================================================================
@@ -987,8 +989,11 @@ export async function runSessionsTui({
   dbFork,
   mountDir,
   isGitRepo,
+  sandboxProvider,
 }: RunSessionsTuiOptions = {}): Promise<void> {
-  const provider = await getDefaultProvider();
+  const provider = sandboxProvider
+    ? getSandboxProvider(sandboxProvider)
+    : await getDefaultProvider();
   await provider.ensureReady();
 
   // Try to detect current repo (returns null if not in a git repo)

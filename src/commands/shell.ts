@@ -1,11 +1,12 @@
-import { Command } from 'commander';
-import { ensureDockerSandbox, getCredentialFiles } from '../services/docker';
+import { Command, Option } from 'commander';
+import { tryGetRepoInfo } from '../services/git';
 import { log } from '../services/logger';
-import { runInDocker } from '../services/runInDocker';
-import type { ShellError } from '../utils';
+import type { SandboxProviderType } from '../services/sandbox';
+import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
 
 interface ShellOptions {
   mount?: string | true;
+  provider?: SandboxProviderType;
 }
 
 export const shellCommand = new Command('shell')
@@ -14,21 +15,36 @@ export const shellCommand = new Command('shell')
     '--mount [dir]',
     'Mount local directory into container (defaults to cwd)',
   )
+  .addOption(
+    new Option(
+      '-r, --provider <type>',
+      'Sandbox provider: docker or cloud (overrides config)',
+    ).choices(['docker', 'cloud']),
+  )
   .action(async (options: ShellOptions) => {
     try {
-      await ensureDockerSandbox();
+      const provider = options.provider
+        ? getSandboxProvider(options.provider)
+        : await getDefaultProvider();
 
-      const files = await getCredentialFiles();
+      await provider.ensureReady();
+      await provider.ensureImage();
 
-      const proc = await runInDocker({
-        cmdName: 'bash',
-        interactive: true,
-        files,
-        mountCwd: options.mount,
+      const repoInfo = await tryGetRepoInfo();
+      const mountDir =
+        options.mount === true
+          ? process.cwd()
+          : typeof options.mount === 'string'
+            ? options.mount
+            : undefined;
+
+      await provider.createShell({
+        repoInfo,
+        mountDir,
+        isGitRepo: repoInfo !== null,
       });
-      process.exit(await proc.exited);
     } catch (err) {
       log.error({ err }, 'Error starting shell');
-      process.exit((err as ShellError).exitCode || 1);
+      process.exit(1);
     }
   });
