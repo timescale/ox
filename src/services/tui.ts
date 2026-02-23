@@ -43,7 +43,7 @@ async function warnIfNoTrueColor(): Promise<void> {
 export const createTui = async (): Promise<TuiResult> => {
   await warnIfNoTrueColor();
   await useTheme.getState().initialize();
-  const renderer = await createCliRenderer({ exitOnCtrlC: true });
+  const renderer = await createCliRenderer({ exitOnCtrlC: false });
   const root = createRoot(renderer);
 
   const render = (node: ReactNode) => {
