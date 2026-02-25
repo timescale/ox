@@ -15,6 +15,7 @@ import { DockerSetup, type DockerSetupResult } from '../components/DockerSetup';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { GlobalToast } from '../components/GlobalToast';
 import { PromptScreen, type SubmitMode } from '../components/PromptScreen';
+import { ResourcesList } from '../components/ResourcesList';
 import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
 import { ShutdownOverlay } from '../components/ShutdownOverlay';
@@ -111,7 +112,8 @@ type SessionsView =
     }
   | { type: 'starting-shell'; step: string }
   | { type: 'detail'; session: HermesSession }
-  | { type: 'list' };
+  | { type: 'list' }
+  | { type: 'resources' };
 
 interface SessionsResult {
   type:
@@ -150,7 +152,7 @@ interface SessionsResult {
 }
 
 export interface RunSessionsTuiOptions {
-  initialView?: 'prompt' | 'list' | 'starting' | 'detail';
+  initialView?: 'prompt' | 'list' | 'starting' | 'detail' | 'resources';
   initialPrompt?: string;
   initialAgent?: AgentType;
   initialModel?: string;
@@ -172,7 +174,7 @@ export interface RunSessionsTuiOptions {
 // ============================================================================
 
 interface SessionsAppProps {
-  initialView: 'prompt' | 'list' | 'starting' | 'detail';
+  initialView: 'prompt' | 'list' | 'starting' | 'detail' | 'resources';
   initialPrompt?: string;
   initialAgent?: AgentType;
   initialModel?: string;
@@ -734,6 +736,8 @@ function SessionsApp({
         startSession(prompt, agent, model);
       } else if (targetView === 'prompt') {
         setView({ type: 'prompt' });
+      } else if (targetView === 'resources') {
+        setView({ type: 'resources' });
       } else {
         setView({ type: 'list' });
       }
@@ -784,6 +788,8 @@ function SessionsApp({
         startSession(prompt, agent, model);
       } else if (targetView === 'prompt') {
         setView({ type: 'prompt' });
+      } else if (targetView === 'resources') {
+        setView({ type: 'resources' });
       } else {
         setView({ type: 'list' });
       }
@@ -1025,6 +1031,19 @@ function SessionsApp({
     );
   }
 
+  // ---- Resources View ----
+  if (view.type === 'resources') {
+    return (
+      <>
+        <ResourcesList onBack={() => setView({ type: 'list' })} />
+        <GlobalToast />
+        <BackgroundTaskIndicator />
+        <ShutdownOverlay />
+        <CommandPaletteHost />
+      </>
+    );
+  }
+
   // ---- Session List View ----
   return (
     <>
@@ -1047,6 +1066,7 @@ function SessionsApp({
           })
         }
         onResume={handleResume}
+        onResources={() => setView({ type: 'resources' })}
         currentRepo={currentRepoInfo?.fullName}
       />
       <GlobalToast />

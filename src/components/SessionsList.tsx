@@ -41,6 +41,7 @@ export interface SessionsListProps {
   onAttach?: (session: HermesSession) => void;
   onShell?: (session: HermesSession) => void;
   onResume?: (session: HermesSession) => void;
+  onResources?: () => void;
   /** Current repo fullName (e.g., "owner/repo") if in a git repo, undefined otherwise */
   currentRepo?: string;
 }
@@ -67,6 +68,7 @@ export function SessionsList({
   onAttach,
   onShell,
   onResume,
+  onResources,
   currentRepo,
 }: SessionsListProps) {
   const { theme } = useTheme();
@@ -366,6 +368,15 @@ export function SessionsList({
         onSelect: () => onNewTask?.(),
       },
       {
+        id: 'navigate-resources',
+        title: 'Manage Resources',
+        description: 'View and manage sandbox images, volumes, and snapshots',
+        category: 'Navigation',
+        keybind: { key: 'i', ctrl: true },
+        enabled: !!onResources,
+        onSelect: () => onResources?.(),
+      },
+      {
         id: 'filter.cycle',
         title: 'Cycle filter',
         description:
@@ -516,6 +527,7 @@ export function SessionsList({
     onAttach,
     onShell,
     onResume,
+    onResources,
     filterMode,
     currentRepo,
     scopeMode,
