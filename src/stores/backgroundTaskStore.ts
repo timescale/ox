@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { log } from '../services/logger';
 import { useToastStore } from './toastStore';
 
 export interface BackgroundTask {
@@ -58,6 +59,7 @@ export const useBackgroundTaskStore = create<BackgroundTaskState>()(
         })
         .catch((err) => {
           const errorMessage = err instanceof Error ? err.message : String(err);
+          log.error({ err, taskId: id, label }, 'Background task failed');
           set((state) => ({
             tasks: state.tasks.map((t) =>
               t.id === id

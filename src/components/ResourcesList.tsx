@@ -6,6 +6,7 @@ import { log } from '../services/logger.ts';
 import {
   deleteResource,
   getCleanupTargets,
+  groupResourcesByKind,
   listAllResources,
   type SandboxResource,
 } from '../services/sandbox/resources.ts';
@@ -215,13 +216,22 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
       .enqueue(`Deleting "${resource.name}"`, async () => {
         try {
           await deleteResource(resource);
+        } catch (err) {
+          log.error(
+            { err, id: resource.id, name: resource.name },
+            'Background delete failed',
+          );
+          throw err;
         } finally {
           removePendingDelete(resource.id);
         }
       });
   }, [confirmAction, filteredResources, addPendingDelete, removePendingDelete]);
 
-  // Cleanup all old+orphaned resources
+  // Cleanup all old+orphaned resources with dependency ordering.
+  // Resources are grouped by kind (snapshots → volumes → images).
+  // Within each group, deletions run in parallel as individual tasks.
+  // Groups are sequenced so snapshots complete before volumes start.
   const handleCleanupConfirm = useCallback(() => {
     if (!confirmAction || confirmAction.type !== 'cleanup') return;
     const targets = confirmAction.targets;
@@ -236,22 +246,71 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
     setResources((prev) => prev.filter((r) => !targetIds.has(r.id)));
     setSelectedIndex(0);
 
+    const groups = groupResourcesByKind(targets);
+    const totalCount = targets.length;
+    const groupCount = groups.length;
+
+    log.info(
+      {
+        totalCount,
+        groupCount,
+        groups: groups.map((g) => ({ kind: g[0]?.kind, count: g.length })),
+      },
+      'Starting resource cleanup',
+    );
     useToastStore
       .getState()
-      .show(`Cleaning up ${targets.length} resources...`, 'info');
+      .show(`Cleaning up ${totalCount} resources...`, 'info');
 
-    // Enqueue each deletion as a background task
-    for (const target of targets) {
-      useBackgroundTaskStore
-        .getState()
-        .enqueue(`Deleting "${target.name}"`, async () => {
-          try {
-            await deleteResource(target);
-          } finally {
-            removePendingDelete(target.id);
-          }
+    // Process groups sequentially; within each group, enqueue individual tasks
+    // and wait for the whole group to finish before starting the next one.
+    const processGroups = async () => {
+      for (let i = 0; i < groups.length; i++) {
+        const group = groups[i];
+        if (!group || group.length === 0) continue;
+
+        const kind = group[0]?.kind ?? 'unknown';
+        log.info(
+          { kind, count: group.length, groupIndex: i + 1, groupCount },
+          'Processing cleanup group',
+        );
+
+        // Enqueue all resources in this group as individual tasks
+        const taskPromises = group.map((target) => {
+          return new Promise<void>((resolve) => {
+            useBackgroundTaskStore
+              .getState()
+              .enqueue(`Deleting ${target.kind} "${target.name}"`, async () => {
+                try {
+                  await deleteResource(target);
+                } catch (err) {
+                  log.error(
+                    {
+                      err,
+                      id: target.id,
+                      name: target.name,
+                      kind: target.kind,
+                    },
+                    'Cleanup: failed to delete resource',
+                  );
+                  throw err;
+                } finally {
+                  removePendingDelete(target.id);
+                  resolve();
+                }
+              });
+          });
         });
-    }
+
+        // Wait for all tasks in this group to settle before starting next group
+        await Promise.allSettled(taskPromises);
+        log.info({ kind, groupIndex: i + 1 }, 'Cleanup group complete');
+      }
+
+      log.info({ totalCount }, 'Resource cleanup finished');
+    };
+
+    processGroups();
   }, [confirmAction, addPendingDelete, removePendingDelete]);
 
   // Suspend command keybind dispatch when modal is open

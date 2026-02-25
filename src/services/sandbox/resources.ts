@@ -331,6 +331,7 @@ async function discoverCloudResources(
     return [];
   }
 
+  log.debug('Discovering cloud resources...');
   const client = new DenoApiClient(token);
   const currentBaseSlug = getBaseSnapshotSlug();
 
@@ -338,6 +339,11 @@ async function discoverCloudResources(
     client.listVolumes(),
     client.listSnapshots(),
   ]);
+
+  log.debug(
+    { volumeCount: volumes.length, snapshotCount: snapshots.length },
+    'Cloud resources fetched',
+  );
 
   const resources: SandboxResource[] = [];
 
@@ -367,8 +373,13 @@ async function discoverCloudResources(
  * Discover Docker resources (images) and classify them.
  */
 async function discoverDockerResources(): Promise<SandboxResource[]> {
+  log.debug('Discovering Docker resources...');
   const images = await listHermesImages();
-  if (images.length === 0) return [];
+  if (images.length === 0) {
+    log.debug('No Docker images found');
+    return [];
+  }
+  log.debug({ imageCount: images.length }, 'Docker images fetched');
 
   const currentDockerfileHash = computeDockerfileHash(SLIM_DOCKERFILE);
 
@@ -409,6 +420,8 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
  * Uses Promise.allSettled so one provider's failure doesn't break the other.
  */
 export async function listAllResources(): Promise<SandboxResource[]> {
+  log.info('Discovering all sandbox resources...');
+
   // Build session lookups first (shared by cloud classification)
   const db = openSessionDb();
   const allSessions = listAllSessionsIncludingDeleted(db);
@@ -425,13 +438,14 @@ export async function listAllResources(): Promise<SandboxResource[]> {
     if (result.status === 'fulfilled') {
       resources.push(...result.value);
     } else {
-      log.warn(
+      log.error(
         { err: result.reason },
         'Failed to discover resources from provider',
       );
     }
   }
 
+  log.info({ totalCount: resources.length }, 'Resource discovery complete');
   return resources;
 }
 
@@ -462,23 +476,87 @@ export function getCleanupTargets(
  * Delete a single resource.
  */
 export async function deleteResource(resource: SandboxResource): Promise<void> {
-  if (resource.provider === 'cloud') {
-    const token = await getDenoToken();
-    if (!token) {
-      throw new Error(
-        'No Deno token configured — cannot delete cloud resource',
-      );
-    }
-    const client = new DenoApiClient(token);
+  log.info(
+    {
+      id: resource.id,
+      provider: resource.provider,
+      kind: resource.kind,
+      name: resource.name,
+    },
+    'Deleting resource',
+  );
 
-    if (resource.kind === 'snapshot') {
-      await client.deleteSnapshot(resource.id);
-    } else if (resource.kind === 'volume') {
-      await client.deleteVolume(resource.id);
+  try {
+    if (resource.provider === 'cloud') {
+      const token = await getDenoToken();
+      if (!token) {
+        throw new Error(
+          'No Deno token configured — cannot delete cloud resource',
+        );
+      }
+      const client = new DenoApiClient(token);
+
+      if (resource.kind === 'snapshot') {
+        await client.deleteSnapshot(resource.id);
+      } else if (resource.kind === 'volume') {
+        await client.deleteVolume(resource.id);
+      }
+    } else if (resource.provider === 'docker') {
+      if (resource.kind === 'image') {
+        await Bun.$`docker rmi ${resource.name}`.quiet().nothrow();
+      }
     }
-  } else if (resource.provider === 'docker') {
-    if (resource.kind === 'image') {
-      await Bun.$`docker rmi ${resource.name}`.quiet().nothrow();
+
+    log.info(
+      { id: resource.id, name: resource.name },
+      'Resource deleted successfully',
+    );
+  } catch (err) {
+    log.error(
+      {
+        err,
+        id: resource.id,
+        provider: resource.provider,
+        kind: resource.kind,
+        name: resource.name,
+      },
+      'Failed to delete resource',
+    );
+    throw err;
+  }
+}
+
+/**
+ * Group resources by kind, maintaining the dependency order
+ * (snapshots → volumes → images). Each group is a batch that
+ * can be deleted in parallel, but the groups themselves must
+ * be executed sequentially.
+ */
+export function groupResourcesByKind(
+  resources: SandboxResource[],
+): SandboxResource[][] {
+  const sorted = [...resources].sort(
+    (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind],
+  );
+
+  const groups: SandboxResource[][] = [];
+  let currentKind: ResourceKind | null = null;
+  let currentGroup: SandboxResource[] = [];
+
+  for (const resource of sorted) {
+    if (resource.kind !== currentKind) {
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup);
+      }
+      currentGroup = [resource];
+      currentKind = resource.kind;
+    } else {
+      currentGroup.push(resource);
     }
   }
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
+
+  return groups;
 }

@@ -10,6 +10,7 @@ import {
   classifyCloudVolume,
   classifyDockerImage,
   getCleanupTargets,
+  groupResourcesByKind,
   type SandboxResource,
 } from './resources.ts';
 import type { HermesSession } from './types.ts';
@@ -649,5 +650,73 @@ describe('getCleanupTargets', () => {
   test('handles empty input', () => {
     const targets = getCleanupTargets([]);
     expect(targets).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// groupResourcesByKind
+// ============================================================================
+
+describe('groupResourcesByKind', () => {
+  function makeResource(
+    kind: 'snapshot' | 'volume' | 'image',
+    name: string,
+  ): SandboxResource {
+    return {
+      id: name,
+      provider: kind === 'image' ? 'docker' : 'cloud',
+      kind,
+      name,
+      category: 'Test',
+      status: 'old',
+    };
+  }
+
+  test('groups resources by kind in dependency order', () => {
+    const resources = [
+      makeResource('volume', 'vol-1'),
+      makeResource('snapshot', 'snap-1'),
+      makeResource('image', 'img-1'),
+      makeResource('snapshot', 'snap-2'),
+      makeResource('volume', 'vol-2'),
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    expect(groups).toHaveLength(3);
+
+    // First group: snapshots
+    expect(groups[0]?.map((r) => r.name)).toEqual(['snap-1', 'snap-2']);
+    // Second group: volumes
+    expect(groups[1]?.map((r) => r.name)).toEqual(['vol-1', 'vol-2']);
+    // Third group: images
+    expect(groups[2]?.map((r) => r.name)).toEqual(['img-1']);
+  });
+
+  test('returns single group when all same kind', () => {
+    const resources = [
+      makeResource('volume', 'vol-1'),
+      makeResource('volume', 'vol-2'),
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(2);
+  });
+
+  test('omits kinds with no resources', () => {
+    const resources = [
+      makeResource('snapshot', 'snap-1'),
+      makeResource('image', 'img-1'),
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.[0]?.kind).toBe('snapshot');
+    expect(groups[1]?.[0]?.kind).toBe('image');
+  });
+
+  test('handles empty input', () => {
+    const groups = groupResourcesByKind([]);
+    expect(groups).toHaveLength(0);
   });
 });
