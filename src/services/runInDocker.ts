@@ -18,6 +18,15 @@ export interface RunInDockerOptionsBase {
   dockerImage?: string;
   interactive?: boolean;
   detached?: boolean;
+  /**
+   * Allocate a TTY (-it flags) without attaching to it.
+   * Useful when you want to start the container detached but later attach
+   * interactively via `docker attach`.  When true, `-it` flags are added
+   * to the `docker run` command even when `detached` is true.
+   * Only meaningful when `detached` is true (when `interactive` is true
+   * the TTY is always allocated).
+   */
+  allocateTty?: boolean;
   shouldThrow?: boolean;
   files?: VirtualFile[];
   mountCwd?: boolean | string;
@@ -47,6 +56,7 @@ export const runInDocker = async ({
   dockerImage,
   interactive = false,
   detached = false,
+  allocateTty = false,
   shouldThrow = true,
   files = [],
   mountCwd = false,
@@ -64,8 +74,8 @@ export const runInDocker = async ({
     '/.hermes/signalEntrypoint.sh',
     '--name',
     containerName,
-    // We need -it even when detached for interactive mode to work properly in the subsequent docker attach
-    ...(interactive ? ['-it'] : []),
+    // Allocate a TTY when interactive or when explicitly requested for later attachment
+    ...(interactive || allocateTty ? ['-it'] : []),
     ...dockerArgs,
     ...labelArgs,
     ...(mountCwd

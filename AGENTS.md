@@ -204,6 +204,41 @@ Always prefer to use the named props over the `style` prop for better readabilit
 
 Correct existing usages of `style` when editing components.
 
+## Patched Dependencies
+
+This project uses `bun patch` to maintain patches against npm dependencies. Patch files live in `patches/` and are auto-applied by `bun install`.
+
+**IMPORTANT**: Never edit patch files (`patches/*.patch`) directly. The hunk headers contain line counts that must match exactly, and manual edits will corrupt them. Always use the `bun patch` workflow:
+
+```bash
+# 1. Tell bun you want to edit a package (restores original source to node_modules)
+./bun patch <package>@<version>
+
+# 2. Edit the source files directly in node_modules/<package>/
+#    Make your changes to the actual JS/TS files.
+
+# 3. Commit the patch (regenerates the .patch file and reinstalls)
+./bun patch --commit 'node_modules/<package>'
+```
+
+### Example: Modifying the `@deno/sandbox` transport patch
+
+```bash
+# Start patching
+./bun patch @deno/sandbox@0.12.0
+
+# Edit the source file directly
+# (e.g., node_modules/@deno/sandbox/esm/transport.js)
+
+# Commit when done
+./bun patch --commit 'node_modules/@deno/sandbox'
+```
+
+### Troubleshooting
+
+- If `bun patch --commit` fails with a `gitattributes` symlink error, temporarily move `~/.gitattributes` aside, run the commit, then restore it.
+- After committing, always verify with `./bun install` followed by checking that your changes are present in the installed file.
+
 ## CLI Framework
 
 Uses `commander` for argument parsing. Commands are in `src/commands/`.

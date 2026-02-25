@@ -66,6 +66,7 @@ withBranchOptions(program)
       initialModel: options.model,
       serviceId: options.serviceId,
       dbFork: options.dbFork,
+      sandboxProvider: options.provider,
     });
   });
 

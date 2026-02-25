@@ -5,6 +5,7 @@
 import type { SelectOption } from '@opentui/core';
 import { Command } from 'commander';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CloudSetup } from '../components/CloudSetup';
 import { CopyOnSelect } from '../components/CopyOnSelect';
 import { DockerSetup } from '../components/DockerSetup';
 import { FilterableSelector } from '../components/FilterableSelector';
@@ -50,6 +51,9 @@ export type ConfigWizardResult =
 
 type Step =
   | 'docker'
+  | 'sandbox-provider'
+  | 'cloud-region'
+  | 'cloud-setup'
   | 'service'
   | 'agent'
   | 'model'
@@ -91,6 +95,10 @@ export function ConfigWizard({
   const steps = useMemo((): Step[] => {
     const list: Step[] = [
       'docker',
+      'sandbox-provider',
+      ...(config?.sandboxProvider === 'cloud'
+        ? (['cloud-region', 'cloud-setup'] as const)
+        : []),
       'agent',
       'model',
       ...(tigerAvailable ? (['service'] as const) : []),
@@ -98,7 +106,7 @@ export function ConfigWizard({
       'gh-auth-check',
     ];
     return list;
-  }, [tigerAvailable]);
+  }, [config?.sandboxProvider, tigerAvailable]);
 
   const nextStep = useCallback(
     (dir = 1) => {
@@ -287,7 +295,116 @@ export function ConfigWizard({
     );
   }
 
-  // ---- Step 2: Service Selection ----
+  // ---- Step: Sandbox Provider Selection ----
+  if (step === 'sandbox-provider') {
+    const providerOptions: SelectOption[] = [
+      {
+        name: 'Docker (local)',
+        description: 'Run sandbox containers locally via Docker',
+        value: 'docker',
+      },
+      {
+        name: 'Cloud',
+        description: 'Run sandboxes in the cloud (Deno Deploy)',
+        value: 'cloud',
+      },
+    ];
+
+    const initialProviderIndex = config?.sandboxProvider === 'cloud' ? 1 : 0;
+
+    return (
+      <Selector
+        title={`Step ${stepNumber('sandbox-provider')}/${steps.length}: Sandbox Provider`}
+        description="Choose where to run sandbox containers."
+        options={providerOptions}
+        initialIndex={initialProviderIndex}
+        showBack
+        onSelect={(value) => {
+          setConfig((c) =>
+            c
+              ? {
+                  ...c,
+                  sandboxProvider: value as 'docker' | 'cloud',
+                  cloudRegion:
+                    (value as 'docker' | 'cloud') === 'cloud'
+                      ? (c.cloudRegion ?? 'ord')
+                      : undefined,
+                }
+              : c,
+          );
+          nextStep();
+        }}
+        onCancel={handleCancel}
+        onBack={() => nextStep(-1)}
+      />
+    );
+  }
+
+  // ---- Step: Cloud Region Selection ----
+  if (step === 'cloud-region') {
+    const regionOptions: SelectOption[] = [
+      {
+        name: 'US East (ord)',
+        description: 'Chicago region',
+        value: 'ord',
+      },
+      {
+        name: 'EU West (ams)',
+        description: 'Amsterdam region',
+        value: 'ams',
+      },
+    ];
+
+    const initialRegion = config?.cloudRegion ?? 'ord';
+    const initialIndex = regionOptions.findIndex(
+      (opt) => opt.value === initialRegion,
+    );
+
+    return (
+      <Selector
+        title={`Step ${stepNumber('cloud-region')}/${steps.length}: Cloud Region`}
+        description="Choose the default cloud region for sandbox sessions."
+        options={regionOptions}
+        initialIndex={initialIndex >= 0 ? initialIndex : 0}
+        showBack
+        onSelect={(value) => {
+          setConfig((c) =>
+            c ? { ...c, cloudRegion: value as 'ord' | 'ams' } : c,
+          );
+          nextStep();
+        }}
+        onCancel={handleCancel}
+        onBack={() => nextStep(-1)}
+      />
+    );
+  }
+
+  // ---- Step: Cloud Setup ----
+  if (step === 'cloud-setup') {
+    return (
+      <CloudSetup
+        title={`Step ${stepNumber('cloud-setup')}/${steps.length}: Cloud Setup`}
+        showBack
+        onBack={() => nextStep(-1)}
+        onComplete={(result) => {
+          if (result.type === 'ready') {
+            nextStep();
+            return;
+          }
+          if (result.type === 'cancelled') {
+            onComplete({ type: 'cancelled' });
+            return;
+          }
+          onComplete({
+            type: 'error',
+            message: result.error ?? 'Cloud setup failed',
+          });
+        }}
+      />
+    );
+  }
+
+  // ---- Step: Service Selection ----
   if (step === 'service') {
     // Need config and services
     if (config === null || services === null) {
@@ -586,6 +703,10 @@ export async function configAction(): Promise<void> {
 
     console.log('\nConfiguration saved to .hermes/config.yml');
     console.log('\nSummary:');
+
+    console.log(
+      `  Sandbox: ${config.sandboxProvider === 'cloud' ? 'Cloud' : 'Docker (local)'}`,
+    );
 
     if (config.tigerServiceId === null) {
       console.log('  Database: (None) - forks will be skipped by default');

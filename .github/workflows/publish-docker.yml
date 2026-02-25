@@ -23,6 +23,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+      - name: Read pinned tool versions
+        id: versions
+        run: |
+          echo "claude_code=$(jq -r .claudeCode sandbox/versions.json)" >> $GITHUB_OUTPUT
+          echo "opencode=$(jq -r .opencode sandbox/versions.json)" >> $GITHUB_OUTPUT
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
@@ -52,5 +57,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            CLAUDE_CODE_VERSION=${{ steps.versions.outputs.claude_code }}
+            OPENCODE_VERSION=${{ steps.versions.outputs.opencode }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}

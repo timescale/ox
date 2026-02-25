@@ -244,7 +244,7 @@ export function FilterableSelector({
         )}
 
         <text marginTop={1} fg={theme.borderSubtle}>
-          {filteredOptions.length} of {options.length} items shown
+          {`${filteredOptions.length} of ${options.length} items shown`}
         </text>
 
         {hotkeys && hotkeys.length > 0 && (

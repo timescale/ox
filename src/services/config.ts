@@ -63,6 +63,12 @@ export interface HermesConfig {
    * Example: './bun i'
    */
   initScript?: string;
+
+  /** Sandbox provider: 'docker' (default) or 'cloud' (Deno Cloud) */
+  sandboxProvider?: 'docker' | 'cloud';
+
+  /** Default region for cloud sandboxes */
+  cloudRegion?: 'ams' | 'ord';
 }
 
 // ============================================================================

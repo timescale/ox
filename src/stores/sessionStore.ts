@@ -36,6 +36,18 @@ export interface SessionState {
 
   /** Clear all PR cache entries */
   clearPrCache: () => void;
+
+  /** Session IDs with in-flight background deletions */
+  pendingDeletes: Set<string>;
+
+  /** Mark a session as pending deletion */
+  addPendingDelete: (id: string) => void;
+
+  /** Remove a session from pending deletion */
+  removePendingDelete: (id: string) => void;
+
+  /** Check if a session is pending deletion */
+  isPendingDelete: (id: string) => boolean;
 }
 
 export const useSessionStore = create<SessionState>()((set, get) => ({
@@ -64,5 +76,25 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
 
   clearPrCache: () => {
     set({ prCache: {} });
+  },
+
+  pendingDeletes: new Set(),
+
+  addPendingDelete: (id: string) => {
+    set((state) => ({
+      pendingDeletes: new Set([...state.pendingDeletes, id]),
+    }));
+  },
+
+  removePendingDelete: (id: string) => {
+    set((state) => {
+      const next = new Set(state.pendingDeletes);
+      next.delete(id);
+      return { pendingDeletes: next };
+    });
+  },
+
+  isPendingDelete: (id: string) => {
+    return get().pendingDeletes.has(id);
   },
 }));

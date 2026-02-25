@@ -108,21 +108,27 @@ interface ClaudeConfigJson {
   primaryApiKey?: string;
 }
 
-const baseConfig = {
+const projectConfig = {
+  allowedTools: [],
+  mcpContextUris: [],
+  mcpServers: {},
+  enabledMcpjsonServers: [],
+  disabledMcpjsonServers: [],
+  hasTrustDialogAccepted: true,
+  hasClaudeMdExternalIncludesApproved: true,
+  hasCompletedProjectOnboarding: true,
+};
+
+export const baseConfig = {
   numStartups: 1,
   installMethod: 'native',
   autoUpdates: false,
   hasCompletedOnboarding: true,
+  effortCalloutDismissed: true,
   bypassPermissionsModeAccepted: true,
   projects: {
-    '/work': {
-      allowedTools: [],
-      mcpContextUris: [],
-      mcpServers: {},
-      enabledMcpjsonServers: [],
-      disabledMcpjsonServers: [],
-      hasTrustDialogAccepted: true,
-    },
+    '/work': projectConfig,
+    '/work/app': projectConfig,
   },
 };
 

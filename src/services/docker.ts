@@ -15,13 +15,16 @@ import FULL_DOCKERFILE from '../../sandbox/full.Dockerfile' with {
 import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
   type: 'text',
 };
+import toolVersions from '../../sandbox/versions.json' with { type: 'json' };
 import { runDockerSetupScreen } from '../components/DockerSetup';
 import {
   enterSubprocessScreen,
   formatShellError,
   resetTerminal,
   type ShellError,
+  TUI_SUBPROCESS_OPTS,
 } from '../utils';
+import { buildAgentCommand } from './agentCommand';
 import { getClaudeConfigFiles } from './claude';
 import {
   type AgentType,
@@ -30,6 +33,7 @@ import {
   readConfig,
   userConfigDir,
 } from './config';
+import { CONTAINER_HOME } from './dockerFiles';
 import { getGhConfigFiles } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
@@ -48,13 +52,23 @@ function base64Encode(text: string): string {
 export const toVolumeArgs = (volumes: string[]): string[] =>
   volumes.flatMap((v) => ['-v', v]);
 
-export const getCredentialFiles = async (): Promise<VirtualFile[]> => {
+export const getCredentialFiles = async (
+  homeDir = CONTAINER_HOME,
+): Promise<VirtualFile[]> => {
   const [claudeFiles, opencodeFiles, ghFiles] = await Promise.all([
     getClaudeConfigFiles(),
     getOpencodeConfigFiles(),
     getGhConfigFiles(),
   ]);
-  return [...claudeFiles, ...opencodeFiles, ...ghFiles];
+  const files = [...claudeFiles, ...opencodeFiles, ...ghFiles];
+  // Rewrite paths if a different home directory was requested
+  if (homeDir !== CONTAINER_HOME) {
+    return files.map((f) => ({
+      ...f,
+      path: f.path.replace(CONTAINER_HOME, homeDir),
+    }));
+  }
+  return files;
 };
 
 // ============================================================================
@@ -225,6 +239,10 @@ type DockerfileVariant = 'slim' | 'full';
 function computeDockerfileHash(content: string): string {
   const hasher = new Bun.CryptoHasher('md5');
   hasher.update(content);
+  // Include pinned tool versions so a version bump produces a new image tag
+  hasher.update(
+    `claude=${toolVersions.claudeCode},opencode=${toolVersions.opencode}`,
+  );
   return hasher.digest('hex').slice(0, 12);
 }
 
@@ -460,6 +478,10 @@ async function buildDockerImage(
       'docker',
       'build',
       '-q',
+      '--build-arg',
+      `CLAUDE_CODE_VERSION=${toolVersions.claudeCode}`,
+      '--build-arg',
+      `OPENCODE_VERSION=${toolVersions.opencode}`,
       ...(cacheFromImage ? ['--cache-from', cacheFromImage] : []),
       '-t',
       imageName,
@@ -1021,7 +1043,7 @@ export function streamContainerLogs(nameOrId: string): LogStream {
 export async function attachToContainer(nameOrId: string): Promise<void> {
   // Enter alternate screen so all container output is isolated from the
   // user's main screen buffer / scrollback history.
-  enterSubprocessScreen();
+  enterSubprocessScreen(TUI_SUBPROCESS_OPTS);
 
   const proc = Bun.spawn(
     ['docker', 'attach', '--detach-keys=ctrl-\\', nameOrId],
@@ -1037,7 +1059,7 @@ export async function attachToContainer(nameOrId: string): Promise<void> {
   await proc.exited;
 
   // Exit alternate screen and clean up terminal state after detaching.
-  resetTerminal();
+  resetTerminal(TUI_SUBPROCESS_OPTS);
 }
 
 export async function signalContainerTTYResize(
@@ -1064,7 +1086,7 @@ export async function signalContainerTTYResize(
 export async function shellInContainer(nameOrId: string): Promise<void> {
   // Enter alternate screen so all shell output is isolated from the
   // user's main screen buffer / scrollback history.
-  enterSubprocessScreen();
+  enterSubprocessScreen(TUI_SUBPROCESS_OPTS);
 
   const proc = Bun.spawn(['docker', 'exec', '-it', nameOrId, '/bin/bash'], {
     stdio: ['inherit', 'inherit', 'inherit'],
@@ -1072,7 +1094,7 @@ export async function shellInContainer(nameOrId: string): Promise<void> {
   await proc.exited;
 
   // Exit alternate screen and clean up terminal state after the shell exits.
-  resetTerminal();
+  resetTerminal(TUI_SUBPROCESS_OPTS);
 }
 
 // ============================================================================
@@ -1087,31 +1109,6 @@ export interface ResumeSessionOptions {
   mountDir?: string;
   /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
   agentArgs?: string[];
-}
-
-function buildResumeAgentCommand(
-  agent: AgentType,
-  mode: ResumeSessionOptions['mode'],
-  model?: string,
-  agentArgs?: string[],
-): string {
-  const modelArg = model ? ` --model ${model}` : '';
-  const extraArgs = agentArgs?.length ? ` ${agentArgs.join(' ')}` : '';
-
-  if (agent === 'claude') {
-    const promptArg = mode === 'detached' ? ' -p' : '';
-    const hasPlanArgs = agentArgs?.includes('--permission-mode') ?? false;
-    const skipPermsFlag = hasPlanArgs
-      ? '--allow-dangerously-skip-permissions'
-      : '--dangerously-skip-permissions';
-    return `claude -c${promptArg}${extraArgs}${modelArg} ${skipPermsFlag}`;
-  }
-
-  if (mode === 'detached') {
-    return `opencode${modelArg}${extraArgs} run -c`;
-  }
-
-  return `opencode${modelArg}${extraArgs} -c`;
 }
 
 export async function resumeSession(
@@ -1219,7 +1216,7 @@ exec bash
 set -e
 cd /work/app
 ${config.initScript || ''}
-${escapePrompt(buildResumeAgentCommand(agent, mode, model, options.agentArgs), prompt)}
+${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached' : 'interactive', model, agentArgs: options.agentArgs, continue: true }), prompt)}
 `.trim();
 
   const hermesLabels = buildHermesLabels({
@@ -1242,8 +1239,12 @@ ${escapePrompt(buildResumeAgentCommand(agent, mode, model, options.agentArgs), p
       cmdName: 'bash',
       cmdArgs: ['-c', resumeScript],
       dockerImage: resumeImage,
-      interactive: mode !== 'detached',
-      detached: mode === 'detached',
+      // Always start detached — the caller uses provider.attach() for
+      // interactive sessions.  allocateTty ensures the container has a
+      // TTY so `docker attach` works correctly later.
+      interactive: false,
+      detached: true,
+      allocateTty: mode !== 'detached',
       files,
       labels: hermesLabels,
     });
@@ -1330,7 +1331,7 @@ export const printArgs = (args: readonly string[]): string => {
 
 export async function startContainer(
   options: StartContainerOptions,
-): Promise<string | null> {
+): Promise<string> {
   const {
     branchName,
     prompt,
@@ -1399,29 +1400,20 @@ export async function startContainer(
 
   const volumeArgs = toVolumeArgs(volumes);
 
-  // Build the agent command based on the selected agent type, model, and mode
+  // Build the agent command based on the selected agent type, model, and mode.
+  // Prompt is NOT passed to the builder — Docker injects it via escapePrompt()
+  // which appends it as a positional arg (exec <cmd> "$HERMES_PROMPT").
   const hasPrompt = prompt.trim().length > 0;
-  const modelArg = model ? ` --model ${model}` : '';
-  const extraArgs = agentArgs?.length ? ` ${agentArgs.join(' ')}` : '';
-  let agentCommand: string;
-  if (agent === 'claude') {
-    const hasPlanArgs = agentArgs?.includes('--permission-mode') ?? false;
-    const skipPermsFlag = hasPlanArgs
-      ? '--allow-dangerously-skip-permissions'
-      : '--dangerously-skip-permissions';
-    const asyncFlag = !interactive ? ' -p' : '';
-    agentCommand = `claude${asyncFlag}${extraArgs}${modelArg} ${skipPermsFlag}`;
-  } else {
-    if (!interactive) {
-      // Async (detached) mode — always uses 'run' subcommand
-      agentCommand = `opencode${modelArg}${extraArgs} run`;
-    } else if (hasPrompt) {
-      // Interactive with prompt — use --prompt flag
-      agentCommand = `opencode${modelArg}${extraArgs} --prompt`;
-    } else {
-      // Interactive without prompt — just open opencode
-      agentCommand = `opencode${modelArg}${extraArgs}`;
-    }
+  let agentCommand = buildAgentCommand({
+    agent,
+    mode: interactive ? 'interactive' : 'detached',
+    model,
+    agentArgs,
+  });
+  // For interactive opencode with a prompt, append --prompt so that
+  // escapePrompt() produces: exec opencode --prompt "$HERMES_PROMPT"
+  if (agent === 'opencode' && interactive && hasPrompt) {
+    agentCommand += ' --prompt';
   }
 
   // Only add PR instructions in async mode (detached) with a git repo
@@ -1502,13 +1494,17 @@ ${escapePrompt(agentCommand, fullPrompt)}
       ],
       cmdName: 'bash',
       cmdArgs: ['-c', startupScript],
-      interactive: !detach,
-      detached: detach,
+      // Always start detached — the caller uses provider.attach() for
+      // interactive sessions.  allocateTty ensures the container has a
+      // TTY so `docker attach` works correctly later.
+      interactive: false,
+      detached: true,
+      allocateTty: interactive,
       files,
       labels: hermesLabels,
     });
     await result.exited;
-    return detach ? result.text().trim() : null;
+    return containerName;
   } catch (error) {
     log.error({ error }, 'Error starting container');
     throw formatShellError(error as ShellError);

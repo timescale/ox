@@ -5,23 +5,28 @@ import open from 'open';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useContainerStats } from '../hooks/useContainerStats';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
-import {
-  formatCpuPercent,
-  formatMemUsage,
-  type HermesSession,
-  listHermesSessions,
-  removeContainer,
-  stopContainer,
-} from '../services/docker';
+import { formatCpuPercent, formatMemUsage } from '../services/docker';
 import { getPrForBranch } from '../services/github';
 import { log } from '../services/logger';
+import {
+  getProviderForSession,
+  type HermesSession,
+  listAllSessions,
+} from '../services/sandbox';
+import {
+  fetchDockerStats,
+  formatRelativeTime,
+  getStatusIcon,
+  getStatusText,
+} from '../services/sessionDisplay';
+import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
+import { useToastStore } from '../stores/toastStore';
 import { formatShellError, type ShellError } from '../utils';
 import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
-import { Toast, type ToastType } from './Toast';
 
 /** Cache TTL in milliseconds (60 seconds) */
 const PR_CACHE_TTL = 60_000;
@@ -38,55 +43,6 @@ export interface SessionsListProps {
   onResume?: (session: HermesSession) => void;
   /** Current repo fullName (e.g., "owner/repo") if in a git repo, undefined otherwise */
   currentRepo?: string;
-}
-
-interface ToastState {
-  message: string;
-  type: ToastType;
-  duration?: number;
-}
-
-function formatRelativeTime(isoDate: string): string {
-  const date = new Date(isoDate);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  const diffMins = Math.floor(diffSecs / 60);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffDays > 0) {
-    return `${diffDays}d ago`;
-  }
-  if (diffHours > 0) {
-    return `${diffHours}h ago`;
-  }
-  if (diffMins > 0) {
-    return `${diffMins}m ago`;
-  }
-  return 'just now';
-}
-
-function getStatusIcon(session: HermesSession): string {
-  switch (session.status) {
-    case 'running':
-      return '●';
-    case 'exited':
-      return session.exitCode === 0 ? '✓' : '✗';
-    case 'paused':
-      return '⏸';
-    case 'dead':
-      return '✗';
-    default:
-      return '○';
-  }
-}
-
-function getStatusText(session: HermesSession): string {
-  if (session.status === 'exited') {
-    return session.exitCode === 0 ? 'complete' : `failed(${session.exitCode})`;
-  }
-  return session.status;
 }
 
 const FILTER_LABELS: Record<FilterMode, string> = {
@@ -120,6 +76,8 @@ export function SessionsList({
     prCache,
     setPrInfo,
     clearPrCache,
+    addPendingDelete,
+    removePendingDelete,
   } = useSessionStore();
   const [sessions, setSessions] = useState<HermesSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,7 +87,6 @@ export function SessionsList({
   const [scopeMode, setScopeMode] = useState<ScopeMode>(
     currentRepo ? 'local' : 'global',
   );
-  const [toast, setToast] = useState<ToastState | null>(null);
   const [deleteModal, setDeleteModal] = useState<HermesSession | null>(null);
   const [stopModal, setStopModal] = useState<HermesSession | null>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
@@ -138,11 +95,14 @@ export function SessionsList({
 
   // Poll CPU/memory stats for running containers
   const runningIds = useMemo(
-    () =>
-      sessions.filter((s) => s.status === 'running').map((s) => s.containerId),
+    () => sessions.filter((s) => s.status === 'running').map((s) => s.id),
     [sessions],
   );
-  const containerStats = useContainerStats(runningIds);
+  const getStats = useCallback(
+    (ids: string[]) => fetchDockerStats(ids, sessions),
+    [sessions],
+  );
+  const containerStats = useContainerStats(runningIds, getStats);
 
   // Filter sessions: first by scope/mode, then fuzzy text search
   const filteredSessions = useMemo(() => {
@@ -187,7 +147,7 @@ export function SessionsList({
   const selectedIndex = useMemo(() => {
     if (selectedSessionId) {
       const index = filteredSessions.findIndex(
-        (s) => s.containerId === selectedSessionId,
+        (s) => s.id === selectedSessionId,
       );
       if (index >= 0) return index;
     }
@@ -199,7 +159,7 @@ export function SessionsList({
     (index: number) => {
       const session = filteredSessions[index];
       if (session) {
-        setSelectedSessionId(session.containerId);
+        setSelectedSessionId(session.id);
       }
     },
     [filteredSessions, setSelectedSessionId],
@@ -208,12 +168,13 @@ export function SessionsList({
   // Load sessions
   const loadSessions = useCallback(async () => {
     try {
-      const result = await listHermesSessions();
-      setSessions(result);
+      const loaded = await listAllSessions();
+      const { pendingDeletes } = useSessionStore.getState();
+      setSessions(loaded.filter((s) => !pendingDeletes.has(s.id)));
       setLoading(false);
     } catch (err) {
       log.error({ err }, 'Failed to load sessions');
-      setToast({ message: `Failed to load sessions: ${err}`, type: 'error' });
+      useToastStore.getState().show(`Failed to load sessions: ${err}`, 'error');
       setLoading(false);
     }
   }, []);
@@ -235,48 +196,58 @@ export function SessionsList({
   }, []);
 
   // Delete session handler
-  const handleDelete = useCallback(async () => {
+  const handleDelete = useCallback(() => {
     if (!deleteModal) return;
     const session = deleteModal;
 
-    // Determine which session to select after deletion:
-    // prefer next item, fall back to previous if deleting last item
-    const deleteIndex = filteredSessions.findIndex(
-      (s) => s.containerId === session.containerId,
-    );
+    // Determine next selection
+    const deleteIndex = filteredSessions.findIndex((s) => s.id === session.id);
     const nextSession =
       filteredSessions[deleteIndex + 1] ?? filteredSessions[deleteIndex - 1];
-    const nextSessionId = nextSession?.containerId ?? null;
+    const nextSessionId = nextSession?.id ?? null;
 
     setDeleteModal(null);
-    setActionInProgress(true);
-    try {
-      await removeContainer(session.containerId);
-      setToast({ message: 'Session deleted', type: 'success' });
-      // Update selection before refreshing so it persists
-      setSelectedSessionId(nextSessionId);
-      await loadSessions();
-    } catch (err) {
-      log.error({ err }, `Failed to remove container ${session.containerId}`);
-      setToast({ message: `Failed to delete: ${err}`, type: 'error' });
-    } finally {
-      setActionInProgress(false);
-    }
-  }, [deleteModal, filteredSessions, loadSessions, setSelectedSessionId]);
+
+    // Mark as pending delete (Layer 1: immediate in-memory hide)
+    addPendingDelete(session.id);
+
+    // Immediately remove session from local state
+    setSessions((prev) => prev.filter((s) => s.id !== session.id));
+    setSelectedSessionId(nextSessionId);
+
+    useToastStore.getState().show('Session deleted', 'success');
+
+    // Enqueue background deletion
+    useBackgroundTaskStore
+      .getState()
+      .enqueue(`Deleting "${session.name}"`, async () => {
+        try {
+          await getProviderForSession(session).remove(session.id);
+        } finally {
+          removePendingDelete(session.id);
+        }
+      });
+  }, [
+    deleteModal,
+    filteredSessions,
+    setSelectedSessionId,
+    addPendingDelete,
+    removePendingDelete,
+  ]);
 
   const handleStop = useCallback(async () => {
     if (!stopModal) return;
     const session = stopModal;
     setStopModal(null);
     setActionInProgress(true);
-    setToast({ message: 'Stopping container...', type: 'info' });
+    useToastStore.getState().show('Stopping container...', 'info');
     try {
-      await stopContainer(session.containerId);
-      setToast({ message: 'Container stopped', type: 'success' });
+      await getProviderForSession(session).stop(session.id);
+      useToastStore.getState().show('Container stopped', 'success');
       await loadSessions();
     } catch (err) {
-      log.error({ err }, `Failed to stop container ${session.containerId}`);
-      setToast({ message: `Failed to stop: ${err}`, type: 'error' });
+      log.error({ err }, `Failed to stop container ${session.id}`);
+      useToastStore.getState().show(`Failed to stop: ${err}`, 'error');
     } finally {
       setActionInProgress(false);
     }
@@ -289,14 +260,13 @@ export function SessionsList({
     setActionInProgress(true);
     try {
       await Bun.$`git fetch && git switch ${branchName}`.quiet();
-      setToast({
-        message: `Switched to branch ${branchName}`,
-        type: 'success',
-      });
+      useToastStore
+        .getState()
+        .show(`Switched to branch ${branchName}`, 'success');
     } catch (err) {
       const formattedError = formatShellError(err as ShellError);
       log.error({ err }, `Failed to switch to branch ${branchName}`);
-      setToast({ message: formattedError.message, type: 'error' });
+      useToastStore.getState().show(formattedError.message, 'error');
     } finally {
       setActionInProgress(false);
     }
@@ -319,13 +289,13 @@ export function SessionsList({
     const now = Date.now();
     const cache = useSessionStore.getState().prCache;
     for (const session of sessions) {
-      const cached = cache[session.containerId];
+      const cached = cache[session.id];
       const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
 
       if (isStale) {
         getPrForBranch(session.repo, session.branch)
           .then((prInfo) => {
-            setPrInfo(session.containerId, prInfo);
+            setPrInfo(session.id, prInfo);
           })
           .catch((err) => {
             log.error({ err }, 'Failed to fetch PR info');
@@ -371,7 +341,7 @@ export function SessionsList({
     const selected = getSelectedSession();
     const isRunning = selected?.status === 'running';
     const isStopped =
-      selected?.status === 'exited' || selected?.status === 'dead';
+      selected?.status === 'exited' || selected?.status === 'stopped';
 
     return [
       {
@@ -434,7 +404,7 @@ export function SessionsList({
           setLoading(true);
           clearPrCache();
           loadSessions().then(() => {
-            setToast({ message: 'Refreshed', type: 'info' });
+            useToastStore.getState().show('Refreshed', 'info');
           });
         },
       },
@@ -517,28 +487,24 @@ export function SessionsList({
         keybind: { key: 'o', ctrl: true },
         onSelect: () => {
           if (selected) {
-            const prInfo = prCache[selected.containerId]?.prInfo;
+            const prInfo = prCache[selected.id]?.prInfo;
             if (prInfo) {
               open(prInfo.url)
                 .then(() => {
-                  setToast({
-                    message: `Opening PR #${prInfo.number}...`,
-                    type: 'info',
-                    duration: 1000,
-                  });
+                  useToastStore
+                    .getState()
+                    .show(`Opening PR #${prInfo.number}...`, 'info', 1000);
                 })
                 .catch((err: unknown) => {
                   log.debug({ err }, 'Failed to open PR URL in browser');
-                  setToast({
-                    message: 'Failed to open PR in browser',
-                    type: 'error',
-                  });
+                  useToastStore
+                    .getState()
+                    .show('Failed to open PR in browser', 'error');
                 });
             } else {
-              setToast({
-                message: 'No PR found for this session',
-                type: 'warning',
-              });
+              useToastStore
+                .getState()
+                .show('No PR found for this session', 'warning');
             }
           }
         },
@@ -644,6 +610,9 @@ export function SessionsList({
         gap={2}
       >
         <text height={1} width={3} />
+        <text height={1} width={1} fg={theme.textMuted}>
+          P
+        </text>
         <text height={1} flexGrow={2} flexBasis={0} fg={theme.textMuted}>
           NAME
         </text>
@@ -704,17 +673,15 @@ export function SessionsList({
             const statusIcon = getStatusIcon(session);
             const statusColor =
               {
-                created: theme.info,
-                exited: session.exitCode === 0 ? theme.text : theme.error,
-                restarting: theme.accent,
                 running: theme.success,
-                paused: theme.warning,
-                dead: theme.error,
+                exited: session.exitCode === 0 ? theme.text : theme.error,
+                stopped: theme.warning,
+                unknown: theme.textMuted,
               }[session.status] || theme.textMuted;
             const statusText = getStatusText(session);
 
             // PR info from cache
-            const cachedPr = prCache[session.containerId];
+            const cachedPr = prCache[session.id];
             const prInfo = cachedPr?.prInfo;
             const prText = prInfo
               ? `#${prInfo.number} ${prInfo.state.toLowerCase()}`
@@ -739,16 +706,25 @@ export function SessionsList({
               ? formatRelativeTime(session.created)
               : '';
 
-            // Stats for running containers
-            const stats = containerStats.get(session.containerId);
+            // Provider badge
+            const providerBadge = session.provider === 'cloud' ? 'C' : 'D';
+            const providerColor =
+              session.provider === 'cloud' ? theme.accent : theme.textMuted;
+
+            // Stats for running containers (cloud doesn't support stats)
+            const stats = containerStats.get(session.id);
             const cpuText =
-              session.status === 'running' && stats
-                ? formatCpuPercent(stats.cpuPercent)
-                : '-';
+              session.provider === 'cloud'
+                ? '-'
+                : session.status === 'running' && stats
+                  ? formatCpuPercent(stats.cpuPercent)
+                  : '-';
             const memText =
-              session.status === 'running' && stats
-                ? formatMemUsage(stats.memUsage, true)
-                : '-';
+              session.provider === 'cloud'
+                ? '-'
+                : session.status === 'running' && stats
+                  ? formatMemUsage(stats.memUsage, true)
+                  : '-';
 
             // Background: selected > hovered > default
             const bgColor = isSelected
@@ -762,7 +738,7 @@ export function SessionsList({
               : theme.textMuted;
             return (
               <box
-                key={session.containerId}
+                key={session.id}
                 height={1}
                 flexDirection="row"
                 backgroundColor={bgColor}
@@ -774,6 +750,13 @@ export function SessionsList({
               >
                 <text height={1} width={3} fg={statusColor}>
                   {statusIcon}
+                </text>
+                <text
+                  height={1}
+                  width={1}
+                  fg={isSelected ? itemFg : providerColor}
+                >
+                  {providerBadge}
                 </text>
                 <text height={1} flexGrow={2} flexBasis={0} fg={itemFg}>
                   {session.name}
@@ -854,16 +837,6 @@ export function SessionsList({
           confirmColor={theme.warning}
           onConfirm={handleStop}
           onCancel={() => setStopModal(null)}
-        />
-      )}
-
-      {/* Toast notifications */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          duration={toast.duration}
-          onDismiss={() => setToast(null)}
         />
       )}
     </Frame>

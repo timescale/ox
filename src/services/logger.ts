@@ -8,8 +8,43 @@ export const LOG_FILE = join(LOGS_DIR, 'hermes.log');
 // Lazy-initialized logger to avoid sonic-boom errors when CLI exits early (e.g., --help)
 let _log: Logger | null = null;
 
+function isTruthyEnv(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes';
+}
+
+function shouldDisableFileLogging(): boolean {
+  if (isTruthyEnv(process.env.HERMES_DISABLE_FILE_LOGGING)) {
+    return true;
+  }
+
+  if (process.env.NODE_ENV === 'test' || process.env.BUN_ENV === 'test') {
+    return true;
+  }
+
+  if (typeof Bun !== 'undefined' && Bun.argv.includes('test')) {
+    return true;
+  }
+
+  return false;
+}
+
 export function getLogger(): Logger {
   if (!_log) {
+    const logLevel = process.env.HERMES_LOG_LEVEL || 'info';
+
+    if (shouldDisableFileLogging()) {
+      _log = pino({
+        enabled: false,
+        level: logLevel,
+      });
+      return _log;
+    }
+
     try {
       mkdirSync(LOGS_DIR, { recursive: true });
     } catch {
@@ -18,7 +53,7 @@ export function getLogger(): Logger {
 
     _log = pino(
       {
-        level: process.env.LOG_LEVEL || 'info',
+        level: logLevel,
         timestamp: pino.stdTimeFunctions.isoTime,
       },
       pino.destination({

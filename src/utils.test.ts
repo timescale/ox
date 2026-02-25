@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { unlink } from 'node:fs/promises';
-import { ensureGitignore, formatShellError, type ShellError } from './utils';
+import {
+  ensureGitignore,
+  formatShellError,
+  type ShellError,
+  shellEscape,
+} from './utils';
 
 describe('formatShellError', () => {
   test('formats error with stderr only', () => {
@@ -87,6 +92,43 @@ describe('formatShellError', () => {
     expect(result.message).toBe(
       'Command failed (exit code 1)\nstderr: error with spaces\nstdout: output with spaces',
     );
+  });
+});
+
+describe('shellEscape', () => {
+  test('wraps a basic string in single quotes', () => {
+    expect(shellEscape('hello')).toBe("'hello'");
+  });
+
+  test('escapes single quotes within the string', () => {
+    expect(shellEscape("it's")).toBe("'it'\\''s'");
+  });
+
+  test('handles multiple single quotes', () => {
+    expect(shellEscape("it's a 'test'")).toBe("'it'\\''s a '\\''test'\\'''");
+  });
+
+  test('wraps empty string in single quotes', () => {
+    expect(shellEscape('')).toBe("''");
+  });
+
+  test('preserves spaces within quotes', () => {
+    expect(shellEscape('hello world')).toBe("'hello world'");
+  });
+
+  test('handles strings with special shell characters', () => {
+    const result = shellEscape('$HOME && rm -rf /');
+    expect(result).toBe("'$HOME && rm -rf /'");
+  });
+
+  test('handles strings with backticks and semicolons', () => {
+    const result = shellEscape('`echo hi`; ls');
+    expect(result).toBe("'`echo hi`; ls'");
+  });
+
+  test('handles newlines', () => {
+    const result = shellEscape('line1\nline2');
+    expect(result).toBe("'line1\nline2'");
   });
 });
 

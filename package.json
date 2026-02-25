@@ -30,6 +30,7 @@
   "type": "module",
   "dependencies": {
     "@bomb.sh/tab": "^0.0.12",
+    "@deno/sandbox": "^0.12.0",
     "@napi-rs/keyring": "^1.2.0",
     "@opentui/react": "^0.1.79",
     "build-strap": "^5.2.0",
@@ -45,5 +46,8 @@
     "tail": "^2.2.6",
     "tar-stream": "^3.1.7",
     "zustand": "^5.0.11"
+  },
+  "patchedDependencies": {
+    "@deno/sandbox@0.12.0": "patches/@deno%2Fsandbox@0.12.0.patch"
   }
 }

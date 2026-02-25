@@ -2,19 +2,23 @@
 // Sessions Command - Unified TUI for hermes
 // ============================================================================
 
+import { useKeyboard } from '@opentui/react';
 import { YAML } from 'bun';
 import { Command } from 'commander';
 import { nanoid } from 'nanoid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfigWizard, type ConfigWizardResult } from '../commands/config.tsx';
+import { BackgroundTaskIndicator } from '../components/BackgroundTaskIndicator';
+import { CloudSetup, type CloudSetupResult } from '../components/CloudSetup';
 import { CopyOnSelect } from '../components/CopyOnSelect';
 import { DockerSetup, type DockerSetupResult } from '../components/DockerSetup';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
+import { GlobalToast } from '../components/GlobalToast';
 import { PromptScreen, type SubmitMode } from '../components/PromptScreen';
 import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
+import { ShutdownOverlay } from '../components/ShutdownOverlay';
 import { StartingScreen } from '../components/StartingScreen';
-import { Toast, type ToastType } from '../components/Toast';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
 import { CommandPaletteHost } from '../services/commands.tsx';
 import {
@@ -24,19 +28,7 @@ import {
   readConfig,
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
-import {
-  attachToContainer,
-  ensureDockerImage,
-  ensureDockerSandbox,
-  getSession,
-  type HermesSession,
-  listHermesSessions,
-  removeContainer,
-  resumeSession,
-  shellInContainer,
-  startContainer,
-  startShellContainer,
-} from '../services/docker';
+import { getDenoToken } from '../services/deno';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -49,16 +41,30 @@ import {
   checkOpencodeCredentials,
   ensureOpencodeAuth,
 } from '../services/opencode';
+import {
+  getDefaultProvider,
+  getProviderForSession,
+  getSandboxProvider,
+  type HermesSession,
+  listAllSessions,
+  type SandboxProvider,
+  type SandboxProviderType,
+  type ShellSession,
+} from '../services/sandbox';
+import { formatRelativeTime } from '../services/sessionDisplay';
 import { createTui } from '../services/tui.ts';
 import {
   checkForUpdate,
   isCompiledBinary,
   performUpdate,
 } from '../services/updater';
+import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
+import { useToastStore } from '../stores/toastStore';
 import {
   ensureGitignore,
   enterSubprocessScreen,
   resetTerminal,
+  TUI_SUBPROCESS_OPTS,
 } from '../utils';
 
 // ============================================================================
@@ -69,6 +75,24 @@ type SessionsView =
   | { type: 'init' } // Initial loading state
   | { type: 'docker' }
   | { type: 'config' }
+  | {
+      type: 'cloud-setup';
+      // Store the pending action so we can resume after setup completes
+      pendingStart?: {
+        prompt: string;
+        agent: AgentType;
+        model: string;
+        mode: SubmitMode;
+        mountDir?: string;
+      };
+      pendingResume?: {
+        session: HermesSession;
+        prompt: string;
+        model: string;
+        mode: SubmitMode;
+        mountDir?: string;
+      };
+    }
   | { type: 'prompt'; resumeSession?: HermesSession }
   | {
       type: 'starting';
@@ -85,6 +109,7 @@ type SessionsView =
       step: string;
       mode: SubmitMode;
     }
+  | { type: 'starting-shell'; step: string }
   | { type: 'detail'; session: HermesSession }
   | { type: 'list' };
 
@@ -92,37 +117,28 @@ interface SessionsResult {
   type:
     | 'quit'
     | 'attach'
+    | 'attach-session'
     | 'exec-shell'
-    | 'resume'
-    | 'start-interactive'
     | 'shell'
+    | 'connect-shell'
     | 'needs-agent-auth';
-  containerId?: string;
+  sessionId?: string;
   // For attach/exec-shell: the session to return to after detaching
   session?: HermesSession;
-  // For resume: optional model override
-  resumeModel?: string;
-  // For resume: optional mount directory
-  resumeMountDir?: string;
-  // For resume: agent args (e.g., plan mode flags)
-  resumeAgentArgs?: string[];
-  // For shell: container ID if resuming, undefined if fresh shell
-  resumeContainerId?: string;
+  // For attach-session: the provider type to use
+  attachProvider?: SandboxProviderType;
+  // For shell: session ID if resuming, undefined if fresh shell
+  resumeSessionId?: string;
+  // Provider to use when resuming an existing session
+  resumeProvider?: SandboxProviderType;
   // For shell: optional mount directory for fresh shell
   shellMountDir?: string;
   // For shell: whether running from a git repo
   shellIsGitRepo?: boolean;
-  // For start-interactive: info needed to start the container
-  startInfo?: {
-    prompt: string;
-    agent: AgentType;
-    model: string;
-    branchName: string;
-    envVars?: Record<string, string>;
-    mountDir?: string;
-    isGitRepo?: boolean;
-    agentArgs?: string[];
-  };
+  // For shell: provider to use
+  shellProvider?: SandboxProviderType;
+  // For connect-shell: prepared shell session ready to connect
+  shellSession?: ShellSession;
   // For needs-agent-auth: info needed to retry after login
   authInfo?: {
     agent: AgentType;
@@ -131,11 +147,6 @@ interface SessionsResult {
     mountDir?: string;
     isGitRepo?: boolean;
   };
-}
-
-interface ToastState {
-  message: string;
-  type: ToastType;
 }
 
 export interface RunSessionsTuiOptions {
@@ -152,6 +163,8 @@ export interface RunSessionsTuiOptions {
   mountDir?: string;
   /** Whether running from a git repository (affects git/gh operations) */
   isGitRepo?: boolean;
+  /** Sandbox provider override from CLI flag (overrides config) */
+  sandboxProvider?: SandboxProviderType;
 }
 
 // ============================================================================
@@ -165,6 +178,7 @@ interface SessionsAppProps {
   initialModel?: string;
   /** Session to display when initialView is 'detail' */
   initialSession?: HermesSession;
+  provider: SandboxProvider;
   serviceId?: string;
   dbFork?: boolean;
   /** Mount local directory instead of git clone */
@@ -182,6 +196,7 @@ function SessionsApp({
   initialAgent,
   initialModel,
   initialSession,
+  provider,
   serviceId,
   dbFork = true,
   initialMountDir,
@@ -191,7 +206,8 @@ function SessionsApp({
 }: SessionsAppProps) {
   const [view, setView] = useState<SessionsView>({ type: 'init' });
   const [config, setConfig] = useState<HermesConfig | null>(null);
-  const [toast, setToast] = useState<ToastState | null>(null);
+  // Counter to force PromptScreen remount (resets all state to defaults)
+  const [promptKey, setPromptKey] = useState(0);
 
   // Use refs to store props/config that we need in async functions
   // This avoids dependency issues with useCallback/useEffect
@@ -222,9 +238,35 @@ function SessionsApp({
     isGitRepo,
   };
 
-  const showToast = useCallback((message: string, type: ToastType) => {
-    setToast({ message, type });
-  }, []);
+  // Graceful shutdown: Ctrl+C handler
+  const pendingCount = useBackgroundTaskStore((s) => s.pendingCount);
+  const shuttingDown = useBackgroundTaskStore((s) => s.shuttingDown);
+  const setShuttingDown = useBackgroundTaskStore((s) => s.setShuttingDown);
+
+  useKeyboard((key) => {
+    if (key.name === 'c' && key.ctrl) {
+      if (shuttingDown) {
+        // Second Ctrl+C: force quit
+        process.exit(1);
+      }
+      if (pendingCount > 0) {
+        // First Ctrl+C with pending tasks: show shutdown overlay
+        setShuttingDown(true);
+        key.stopPropagation();
+        key.preventDefault();
+      } else {
+        // No pending tasks: exit immediately
+        onComplete({ type: 'quit' });
+      }
+    }
+  });
+
+  // Auto-quit when shutting down and all tasks complete
+  useEffect(() => {
+    if (shuttingDown && pendingCount === 0) {
+      onComplete({ type: 'quit' });
+    }
+  }, [shuttingDown, pendingCount, onComplete]);
 
   // Background auto-update check (fire-and-forget on mount)
   useEffect(() => {
@@ -237,12 +279,14 @@ function SessionsApp({
         const update = await checkForUpdate();
         if (cancelled || !update) return;
 
-        showToast(`Updating to v${update.latestVersion}...`, 'info');
+        useToastStore
+          .getState()
+          .show(`Updating to v${update.latestVersion}...`, 'info');
 
         await performUpdate(update, (progress) => {
           if (cancelled) return;
           if (progress.phase === 'complete') {
-            showToast(progress.message, 'success');
+            useToastStore.getState().show(progress.message, 'success');
           }
         });
       } catch (err) {
@@ -253,7 +297,7 @@ function SessionsApp({
     return () => {
       cancelled = true;
     };
-  }, [showToast]);
+  }, []);
 
   // Start session function - handles the full flow of starting an agent
   const startSession = useCallback(
@@ -263,14 +307,46 @@ function SessionsApp({
       model: string,
       mode: SubmitMode = 'async',
       passedMountDir?: string,
+      selectedProvider?: SandboxProviderType,
     ) => {
       try {
+        // Use selected provider or fall back to the default provider prop
+        const activeProvider = selectedProvider
+          ? getSandboxProvider(selectedProvider)
+          : provider;
+
         log.debug(
-          { agent, model, prompt, mode, mountDir: passedMountDir },
+          {
+            agent,
+            model,
+            prompt,
+            mode,
+            mountDir: passedMountDir,
+            provider: selectedProvider,
+          },
           'startSession received',
         );
 
         const isPlan = mode === 'plan';
+
+        // If using cloud provider, check that setup is complete (token exists)
+        if (activeProvider.type === 'cloud') {
+          const token = await getDenoToken();
+          if (!token) {
+            // Transition to cloud setup view, storing the pending action
+            setView({
+              type: 'cloud-setup',
+              pendingStart: {
+                prompt,
+                agent,
+                model,
+                mode,
+                mountDir: passedMountDir,
+              },
+            });
+            return;
+          }
+        }
 
         setView({
           type: 'starting',
@@ -280,7 +356,7 @@ function SessionsApp({
           step: 'Preparing sandbox environment',
           mode,
         });
-        await ensureDockerImage({
+        await activeProvider.ensureImage({
           onProgress: (progress) => {
             if (progress.type === 'pulling-cache') {
               setView((v) =>
@@ -307,9 +383,24 @@ function SessionsApp({
 
         const { isGitRepo: inGitRepo } = propsRef.current;
 
-        // Force mount mode if not in a git repo
+        // Force mount mode if not in a git repo (Docker only — cloud
+        // sandboxes don't support mount mode and always clone from GitHub).
         const mountDir =
-          passedMountDir ?? (!inGitRepo ? process.cwd() : undefined);
+          activeProvider.type === 'cloud'
+            ? undefined
+            : (passedMountDir ?? (!inGitRepo ? process.cwd() : undefined));
+
+        // Cloud sandboxes require a git repo (no mount mode support)
+        if (activeProvider.type === 'cloud' && !inGitRepo) {
+          useToastStore
+            .getState()
+            .show(
+              'Cloud sandboxes require a git remote. Use Docker for non-git directories.',
+              'error',
+            );
+          setView({ type: 'prompt' });
+          return;
+        }
 
         if (!agentAuthValid) {
           // Exit TUI to run interactive login, then retry
@@ -377,30 +468,12 @@ function SessionsApp({
           );
         }
 
-        // For interactive/plan mode, exit TUI and let the caller start the container
-        if (mode === 'interactive' || mode === 'plan') {
-          onComplete({
-            type: 'start-interactive',
-            startInfo: {
-              prompt,
-              agent,
-              model,
-              branchName,
-              envVars: forkResult?.envVars,
-              mountDir,
-              isGitRepo: inGitRepo,
-              ...(isPlan
-                ? {
-                    agentArgs:
-                      agent === 'claude'
-                        ? ['--permission-mode', 'plan']
-                        : ['--agent', 'plan'],
-                  }
-                : {}),
-            },
-          });
-          return;
-        }
+        const isInteractive = mode === 'interactive' || mode === 'plan';
+        const agentArgs = isPlan
+          ? agent === 'claude'
+            ? ['--permission-mode', 'plan']
+            : ['--agent', 'plan']
+          : undefined;
 
         setView((v) =>
           v.type === 'starting'
@@ -412,39 +485,47 @@ function SessionsApp({
               }
             : v,
         );
-        await startContainer({
+        const session = await activeProvider.create({
           branchName,
+          name: branchName,
           prompt,
           repoInfo,
           agent,
           model,
-          detach: true,
-          interactive: false,
+          detach: !isInteractive,
+          interactive: isInteractive,
           envVars: forkResult?.envVars,
           mountDir,
           isGitRepo: inGitRepo,
+          agentArgs,
+          onProgress: (step) => {
+            setView((v) => (v.type === 'starting' ? { ...v, step } : v));
+          },
         });
 
-        setView((v) =>
-          v.type === 'starting' ? { ...v, step: 'Loading session' } : v,
-        );
-        const session = await getSession(`hermes-${branchName}`);
-
-        if (session) {
-          setView({ type: 'detail', session });
+        if (isInteractive) {
+          // Exit TUI so the caller can attach to the interactive session
+          onComplete({
+            type: 'attach-session',
+            sessionId: session.id,
+            session,
+            attachProvider: activeProvider.type,
+          });
         } else {
-          throw new Error('Failed to find created session');
+          setView({ type: 'detail', session });
         }
       } catch (err) {
         log.error({ err }, 'Failed to start session');
-        showToast(
-          `Failed to start: ${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        useToastStore
+          .getState()
+          .show(
+            `Failed to start: ${err instanceof Error ? err.message : String(err)}`,
+            'error',
+          );
         setView({ type: 'prompt' });
       }
     },
-    [showToast, onComplete],
+    [onComplete, provider],
   );
 
   // Resume session function - handles the full flow of resuming an agent
@@ -455,14 +536,39 @@ function SessionsApp({
       model: string,
       mode: SubmitMode = 'async',
       mountDir?: string,
+      selectedProvider?: SandboxProviderType,
     ) => {
       try {
+        // Use selected provider or fall back to the default provider prop
+        const activeProvider = selectedProvider
+          ? getSandboxProvider(selectedProvider)
+          : provider;
+
         log.debug(
-          { session: session.name, model, prompt, mode, mountDir },
+          {
+            session: session.name,
+            model,
+            prompt,
+            mode,
+            mountDir,
+            provider: selectedProvider,
+          },
           'resumeSessionFlow received',
         );
 
         const isPlan = mode === 'plan';
+
+        // If using cloud provider, check that setup is complete (token exists)
+        if (activeProvider.type === 'cloud') {
+          const token = await getDenoToken();
+          if (!token) {
+            setView({
+              type: 'cloud-setup',
+              pendingResume: { session, prompt, model, mode, mountDir },
+            });
+            return;
+          }
+        }
 
         setView({
           type: 'resuming',
@@ -472,75 +578,117 @@ function SessionsApp({
           mode,
         });
 
-        // For interactive/plan mode, exit TUI and let the caller resume the container
-        if (mode === 'interactive' || mode === 'plan') {
-          setView((v) =>
-            v.type === 'resuming'
-              ? { ...v, step: 'Starting interactive session' }
-              : v,
-          );
+        const isInteractive = mode === 'interactive' || mode === 'plan';
 
-          // Build agentArgs for plan mode
-          const agentArgs = isPlan
-            ? session.agent === 'claude'
-              ? ['--permission-mode', 'plan']
-              : ['--agent', 'plan']
-            : undefined;
+        // Build agentArgs for plan mode
+        const agentArgs = isPlan
+          ? session.agent === 'claude'
+            ? ['--permission-mode', 'plan']
+            : ['--agent', 'plan']
+          : undefined;
 
-          onComplete({
-            type: 'resume',
-            containerId: session.containerId,
-            resumeModel: model,
-            resumeMountDir: mountDir,
-            resumeAgentArgs: agentArgs,
-          });
-          return;
-        }
-
-        // Detached resume - create commit image and start new container
-        setView((v) =>
-          v.type === 'resuming'
-            ? { ...v, step: 'Creating session snapshot' }
-            : v,
-        );
-
-        // Small delay to ensure UI updates before the potentially slow operation
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        const resumeMode = isInteractive ? 'interactive' : 'detached';
 
         setView((v) =>
-          v.type === 'resuming'
-            ? { ...v, step: 'Starting resumed container' }
-            : v,
+          v.type === 'resuming' ? { ...v, step: 'Resuming session' } : v,
         );
 
-        const newContainerId = await resumeSession(session.containerId, {
-          mode: 'detached',
-          prompt,
+        const newSession = await activeProvider.resume(session.id, {
+          mode: resumeMode,
+          prompt: resumeMode === 'detached' ? prompt : undefined,
           model,
           mountDir,
+          agentArgs,
+          onProgress: (step) => {
+            setView((v) => (v.type === 'resuming' ? { ...v, step } : v));
+          },
         });
 
-        setView((v) =>
-          v.type === 'resuming' ? { ...v, step: 'Loading session' } : v,
-        );
-
-        // Fetch the newly created session and show its detail
-        const newSession = await getSession(newContainerId);
-        if (newSession) {
-          setView({ type: 'detail', session: newSession });
+        if (isInteractive) {
+          // Exit TUI so the caller can attach to the interactive session
+          onComplete({
+            type: 'attach-session',
+            sessionId: newSession.id,
+            session: newSession,
+            attachProvider: activeProvider.type,
+          });
         } else {
-          setView({ type: 'list' });
+          setView({ type: 'detail', session: newSession });
         }
       } catch (err) {
         log.error({ err }, 'Failed to resume session');
-        showToast(
-          `Failed to resume: ${err instanceof Error ? err.message : String(err)}`,
-          'error',
-        );
+        useToastStore
+          .getState()
+          .show(
+            `Failed to resume: ${err instanceof Error ? err.message : String(err)}`,
+            'error',
+          );
         setView({ type: 'prompt', resumeSession: session });
       }
     },
-    [showToast, onComplete],
+    [onComplete, provider],
+  );
+
+  // Start shell session - prepare the shell sandbox and hand off to connect
+  const startShellSession = useCallback(
+    async (
+      shellMountDir?: string,
+      shellIsGitRepo?: boolean,
+      selectedProvider?: SandboxProviderType,
+    ) => {
+      try {
+        const activeProvider = selectedProvider
+          ? getSandboxProvider(selectedProvider)
+          : provider;
+
+        setView({
+          type: 'starting-shell',
+          step: 'Preparing sandbox environment',
+        });
+
+        await activeProvider.ensureImage({
+          onProgress: (progress) => {
+            if (
+              progress.type === 'pulling-cache' ||
+              progress.type === 'building'
+            ) {
+              setView((v) =>
+                v.type === 'starting-shell'
+                  ? { ...v, step: progress.message }
+                  : v,
+              );
+            }
+          },
+        });
+
+        const shellRepoInfo = shellIsGitRepo ? await tryGetRepoInfo() : null;
+
+        const shell = await activeProvider.createShell({
+          repoInfo: shellRepoInfo,
+          mountDir: shellMountDir,
+          isGitRepo: shellIsGitRepo,
+          onProgress: (step) => {
+            setView((v) => (v.type === 'starting-shell' ? { ...v, step } : v));
+          },
+        });
+
+        // Shell is prepared — exit TUI so the outer loop can connect
+        onComplete({
+          type: 'connect-shell',
+          shellSession: shell,
+        });
+      } catch (err) {
+        log.error({ err }, 'Failed to start shell');
+        useToastStore
+          .getState()
+          .show(
+            `Failed to start shell: ${err instanceof Error ? err.message : String(err)}`,
+            'error',
+          );
+        setView({ type: 'prompt' });
+      }
+    },
+    [onComplete, provider],
   );
 
   // Handle docker setup completion
@@ -551,7 +699,9 @@ function SessionsApp({
         return;
       }
       if (result.type === 'error') {
-        showToast(result.error ?? 'Docker setup failed', 'error');
+        useToastStore
+          .getState()
+          .show(result.error ?? 'Docker setup failed', 'error');
         onComplete({ type: 'quit' });
         return;
       }
@@ -588,7 +738,7 @@ function SessionsApp({
         setView({ type: 'list' });
       }
     },
-    [onComplete, showToast, startSession],
+    [onComplete, startSession],
   );
 
   useEffect(() => {
@@ -605,7 +755,7 @@ function SessionsApp({
         return;
       }
       if (result.type === 'error') {
-        showToast(result.message, 'error');
+        useToastStore.getState().show(result.message, 'error');
         onComplete({ type: 'quit' });
         return;
       }
@@ -638,7 +788,7 @@ function SessionsApp({
         setView({ type: 'list' });
       }
     },
-    [onComplete, showToast, startSession],
+    [onComplete, startSession],
   );
 
   // Handle resume from session detail - navigate to PromptScreen with resume context
@@ -646,18 +796,47 @@ function SessionsApp({
     setView({ type: 'prompt', resumeSession: session });
   }, []);
 
+  // Handle cloud setup completion - resume pending start/resume action
+  const handleCloudSetupComplete = useCallback(
+    (result: CloudSetupResult) => {
+      if (result.type === 'cancelled') {
+        setView({ type: 'prompt' });
+        return;
+      }
+      if (result.type === 'error') {
+        useToastStore
+          .getState()
+          .show(result.error ?? 'Cloud setup failed', 'error');
+        setView({ type: 'prompt' });
+        return;
+      }
+
+      // Cloud is ready - resume the pending action
+      if (view.type === 'cloud-setup') {
+        if (view.pendingStart) {
+          const { prompt, agent, model, mode, mountDir } = view.pendingStart;
+          startSession(prompt, agent, model, mode, mountDir, 'cloud');
+        } else if (view.pendingResume) {
+          const { session, prompt, model, mode, mountDir } = view.pendingResume;
+          resumeSessionFlow(session, prompt, model, mode, mountDir, 'cloud');
+        } else {
+          setView({ type: 'prompt' });
+        }
+      } else {
+        setView({ type: 'prompt' });
+      }
+    },
+    [view, startSession, resumeSessionFlow],
+  );
+
   // ---- Initial Loading View ----
   if (view.type === 'init') {
     return (
       <>
         <StartingScreen step="Initializing" />
-        {toast && (
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onDismiss={() => setToast(null)}
-          />
-        )}
+        <GlobalToast />
+        <BackgroundTaskIndicator />
+        <ShutdownOverlay />
       </>
     );
   }
@@ -671,13 +850,26 @@ function SessionsApp({
           onComplete={handleDockerComplete}
           showBack={false}
         />
-        {toast && (
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onDismiss={() => setToast(null)}
-          />
-        )}
+        <GlobalToast />
+        <BackgroundTaskIndicator />
+        <ShutdownOverlay />
+      </>
+    );
+  }
+
+  // ---- Cloud Setup View ----
+  if (view.type === 'cloud-setup') {
+    return (
+      <>
+        <CloudSetup
+          title="Cloud Setup"
+          onComplete={handleCloudSetupComplete}
+          showBack
+          onBack={() => setView({ type: 'prompt' })}
+        />
+        <GlobalToast />
+        <BackgroundTaskIndicator />
+        <ShutdownOverlay />
       </>
     );
   }
@@ -687,13 +879,9 @@ function SessionsApp({
     return (
       <>
         <ConfigWizard onComplete={handleConfigComplete} />
-        {toast && (
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onDismiss={() => setToast(null)}
-          />
-        )}
+        <GlobalToast />
+        <BackgroundTaskIndicator />
+        <ShutdownOverlay />
       </>
     );
   }
@@ -704,48 +892,73 @@ function SessionsApp({
     return (
       <>
         <PromptScreen
+          key={`${resumeSess?.id ?? 'new'}-${promptKey}`}
           defaultAgent={
             resumeSess?.agent ?? initialAgent ?? config?.agent ?? 'opencode'
           }
           defaultModel={resumeSess?.model ?? initialModel ?? config?.model}
+          defaultSandboxProvider={
+            resumeSess?.provider ?? config?.sandboxProvider ?? provider.type
+          }
           resumeSession={resumeSess}
           initialMountDir={resumeSess?.mountDir ?? initialMountDir}
           forceMountMode={!isGitRepo}
-          onSubmit={({ prompt, agent, model, mode, mountDir }) => {
+          onNewPrompt={() => {
+            setPromptKey((k) => k + 1);
+            setView({ type: 'prompt' });
+          }}
+          onSubmit={({
+            prompt,
+            agent,
+            model,
+            mode,
+            mountDir,
+            sandboxProvider: selectedProvider,
+          }) => {
             if (resumeSess) {
               // Resume flow - use resumeSessionFlow for loading screen
-              resumeSessionFlow(resumeSess, prompt, model, mode, mountDir);
+              resumeSessionFlow(
+                resumeSess,
+                prompt,
+                model,
+                mode,
+                mountDir,
+                selectedProvider,
+              );
             } else {
               // Fresh session
-              startSession(prompt, agent, model, mode, mountDir);
+              startSession(
+                prompt,
+                agent,
+                model,
+                mode,
+                mountDir,
+                selectedProvider,
+              );
             }
           }}
-          onShell={(shellMountDir) => {
+          onShell={(shellMountDir, selectedProvider) => {
             if (resumeSess) {
-              // Shell on resumed container
+              // Shell on resumed container — still needs outer loop for resume + shell
               onComplete({
                 type: 'shell',
-                resumeContainerId: resumeSess.containerId,
+                resumeSessionId: resumeSess.id,
+                resumeProvider: resumeSess.provider,
               });
             } else {
-              // Fresh shell container
-              onComplete({
-                type: 'shell',
+              // Fresh shell container — prepare in TUI with loading screen
+              startShellSession(
                 shellMountDir,
-                shellIsGitRepo: propsRef.current.isGitRepo,
-              });
+                propsRef.current.isGitRepo,
+                selectedProvider,
+              );
             }
           }}
           onCancel={() => onComplete({ type: 'quit' })}
           onViewSessions={() => setView({ type: 'list' })}
         />
-        {toast && (
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onDismiss={() => setToast(null)}
-          />
-        )}
+        <GlobalToast />
+        <ShutdownOverlay />
         <CommandPaletteHost />
       </>
     );
@@ -760,13 +973,21 @@ function SessionsApp({
     return (
       <>
         <StartingScreen step={view.step} hint={hint} />
-        {toast && (
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onDismiss={() => setToast(null)}
-          />
-        )}
+        <GlobalToast />
+        <BackgroundTaskIndicator />
+        <ShutdownOverlay />
+      </>
+    );
+  }
+
+  // ---- Starting Shell Screen View ----
+  if (view.type === 'starting-shell') {
+    return (
+      <>
+        <StartingScreen step={view.step} />
+        <GlobalToast />
+        <BackgroundTaskIndicator />
+        <ShutdownOverlay />
       </>
     );
   }
@@ -778,17 +999,17 @@ function SessionsApp({
         <SessionDetail
           session={view.session}
           onBack={() => setView({ type: 'list' })}
-          onAttach={(containerId) =>
+          onAttach={(sessionId) =>
             onComplete({
               type: 'attach',
-              containerId,
+              sessionId,
               session: view.session,
             })
           }
-          onShell={(containerId) =>
+          onShell={(sessionId) =>
             onComplete({
               type: 'exec-shell',
-              containerId,
+              sessionId,
               session: view.session,
             })
           }
@@ -796,13 +1017,9 @@ function SessionsApp({
           onSessionDeleted={() => setView({ type: 'list' })}
           onNewPrompt={() => setView({ type: 'prompt' })}
         />
-        {toast && (
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onDismiss={() => setToast(null)}
-          />
-        )}
+        <GlobalToast />
+        <BackgroundTaskIndicator />
+        <ShutdownOverlay />
         <CommandPaletteHost />
       </>
     );
@@ -818,27 +1035,23 @@ function SessionsApp({
         onAttach={(session) =>
           onComplete({
             type: 'attach',
-            containerId: session.containerId,
+            sessionId: session.id,
             session,
           })
         }
         onShell={(session) =>
           onComplete({
             type: 'exec-shell',
-            containerId: session.containerId,
+            sessionId: session.id,
             session,
           })
         }
         onResume={handleResume}
         currentRepo={currentRepoInfo?.fullName}
       />
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onDismiss={() => setToast(null)}
-        />
-      )}
+      <GlobalToast />
+      <BackgroundTaskIndicator />
+      <ShutdownOverlay />
       <CommandPaletteHost />
     </>
   );
@@ -857,8 +1070,11 @@ export async function runSessionsTui({
   dbFork,
   mountDir,
   isGitRepo,
+  sandboxProvider,
 }: RunSessionsTuiOptions = {}): Promise<void> {
-  await ensureDockerSandbox();
+  const provider = sandboxProvider
+    ? getSandboxProvider(sandboxProvider)
+    : await getDefaultProvider();
 
   // Try to detect current repo (returns null if not in a git repo)
   const currentRepoInfo = await tryGetRepoInfo();
@@ -896,6 +1112,7 @@ export async function runSessionsTui({
           initialAgent={nextAgent}
           initialModel={nextModel}
           initialSession={nextSession}
+          provider={provider}
           serviceId={serviceId}
           dbFork={dbFork}
           initialMountDir={nextMountDir}
@@ -921,13 +1138,31 @@ export async function runSessionsTui({
 
     // Quit exits the loop
     if (result.type === 'quit') {
+      // Wait for background tasks before exiting
+      const bgStore = useBackgroundTaskStore.getState();
+      if (bgStore.pendingCount > 0) {
+        await bgStore.waitForAll();
+      }
       break;
     }
 
     // Handle attach action - needs to happen after TUI cleanup
-    if (result.type === 'attach' && result.containerId) {
-      await attachToContainer(result.containerId);
-      // Return to the session detail view after detaching
+    if (result.type === 'attach' && result.sessionId) {
+      const actionProvider = result.session
+        ? getProviderForSession(result.session)
+        : provider;
+      try {
+        await actionProvider.attach(result.sessionId);
+      } catch (err) {
+        log.error(
+          { err, sessionId: result.sessionId },
+          'Failed to attach to session',
+        );
+        console.error(
+          `Failed to attach: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      // Return to the session detail view after detaching (or on error)
       if (result.session) {
         nextView = 'detail';
         nextSession = result.session;
@@ -936,9 +1171,19 @@ export async function runSessionsTui({
     }
 
     // Handle exec-shell action - open a bash shell in a running container
-    if (result.type === 'exec-shell' && result.containerId) {
-      await shellInContainer(result.containerId);
-      // Return to the session detail view after exiting the shell
+    if (result.type === 'exec-shell' && result.sessionId) {
+      const actionProvider = result.session
+        ? getProviderForSession(result.session)
+        : provider;
+      try {
+        await actionProvider.shell(result.sessionId);
+      } catch (err) {
+        log.error({ err, sessionId: result.sessionId }, 'Failed to open shell');
+        console.error(
+          `Failed to open shell: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      // Return to the session detail view after exiting the shell (or on error)
       if (result.session) {
         nextView = 'detail';
         nextSession = result.session;
@@ -946,82 +1191,64 @@ export async function runSessionsTui({
       continue;
     }
 
-    if (result.type === 'resume' && result.containerId) {
-      enterSubprocessScreen();
+    // Handle attach-session — attach to a newly created/resumed interactive session
+    if (result.type === 'attach-session' && result.sessionId) {
+      const actionProvider = getSandboxProvider(
+        result.attachProvider ?? provider.type,
+      );
       try {
-        await resumeSession(result.containerId, {
-          mode: 'interactive',
-          model: result.resumeModel,
-          mountDir: result.resumeMountDir,
-          agentArgs: result.resumeAgentArgs,
-        });
+        await actionProvider.attach(result.sessionId);
       } catch (err) {
-        log.error({ err }, 'Failed to resume session');
-        console.error(`Failed to resume: ${err}`);
+        log.error(
+          { err, sessionId: result.sessionId },
+          'Failed to attach to new session',
+        );
+        console.error(
+          `Failed to attach: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
-      resetTerminal();
+      // Return to the session detail view after detaching (or on error)
+      if (result.session) {
+        nextView = 'detail';
+        nextSession = result.session;
+      }
       continue;
     }
 
-    // Handle shell action - start bash shell in container
-    if (result.type === 'shell') {
-      enterSubprocessScreen();
+    // Handle shell action - resume a stopped container and open a shell in it
+    if (result.type === 'shell' && result.resumeSessionId) {
+      enterSubprocessScreen(TUI_SUBPROCESS_OPTS);
       try {
-        if (result.resumeContainerId) {
-          // Shell on resumed container
-          await resumeSession(result.resumeContainerId, { mode: 'shell' });
-        } else {
-          // Fresh shell container
-          const shellRepoInfo = result.shellIsGitRepo
-            ? await getRepoInfo()
-            : null;
-          await startShellContainer({
-            repoInfo: shellRepoInfo,
-            mountDir: result.shellMountDir,
-            isGitRepo: result.shellIsGitRepo,
-          });
-        }
+        const actionProvider = getSandboxProvider(
+          result.resumeProvider ?? provider.type,
+        );
+        const resumed = await actionProvider.resume(result.resumeSessionId, {
+          mode: 'shell',
+        });
+        await actionProvider.shell(resumed.id);
       } catch (err) {
         log.error({ err }, 'Failed to start shell');
         console.error(`Failed to start shell: ${err}`);
       }
-      resetTerminal();
+      resetTerminal(TUI_SUBPROCESS_OPTS);
       continue;
     }
 
-    // Handle start-interactive action - start container attached to terminal
-    if (result.type === 'start-interactive' && result.startInfo) {
-      const {
-        prompt,
-        agent,
-        model,
-        branchName,
-        envVars,
-        mountDir: startMountDir,
-        isGitRepo: startIsGitRepo = true,
-        agentArgs,
-      } = result.startInfo;
-      enterSubprocessScreen();
+    // Handle connect-shell action - shell was prepared in the TUI, now connect
+    if (result.type === 'connect-shell' && result.shellSession) {
+      enterSubprocessScreen(TUI_SUBPROCESS_OPTS);
       try {
-        const startRepoInfo = startIsGitRepo ? await getRepoInfo() : null;
-        await startContainer({
-          branchName,
-          prompt,
-          repoInfo: startRepoInfo,
-          agent,
-          model,
-          detach: false,
-          interactive: true,
-          envVars,
-          mountDir: startMountDir,
-          isGitRepo: startIsGitRepo,
-          agentArgs,
-        });
+        await result.shellSession.connect();
       } catch (err) {
-        log.error({ err }, 'Failed to start session interactively');
-        console.error(`Failed to start: ${err}`);
+        log.error({ err }, 'Failed to connect to shell');
+        console.error(`Failed to connect to shell: ${err}`);
       }
-      resetTerminal();
+      resetTerminal(TUI_SUBPROCESS_OPTS);
+      // Enqueue cleanup as a background task so the TUI returns immediately
+      const { cleanup } = result.shellSession;
+      useBackgroundTaskStore
+        .getState()
+        .enqueue('Cleaning up shell sandbox', cleanup);
       continue;
     }
 
@@ -1067,27 +1294,6 @@ interface SessionsOptions {
   all: boolean;
 }
 
-export function formatRelativeTime(isoDate: string): string {
-  const date = new Date(isoDate);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  const diffMins = Math.floor(diffSecs / 60);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffDays > 0) {
-    return `${diffDays}d ago`;
-  }
-  if (diffHours > 0) {
-    return `${diffHours}h ago`;
-  }
-  if (diffMins > 0) {
-    return `${diffMins}m ago`;
-  }
-  return 'just now';
-}
-
 export function getStatusDisplay(session: HermesSession): string {
   switch (session.status) {
     case 'running':
@@ -1096,15 +1302,14 @@ export function getStatusDisplay(session: HermesSession): string {
       if (session.exitCode === 0) {
         return '\x1b[34mcomplete\x1b[0m'; // blue
       }
+      if (session.exitCode == null) {
+        return '\x1b[33mexited\x1b[0m'; // yellow
+      }
       return `\x1b[31mfailed (${session.exitCode})\x1b[0m`; // red
-    case 'paused':
-      return '\x1b[33mpaused\x1b[0m'; // yellow
-    case 'restarting':
-      return '\x1b[33mrestarting\x1b[0m'; // yellow
-    case 'dead':
-      return '\x1b[31mdead\x1b[0m'; // red
-    case 'created':
-      return '\x1b[36mcreated\x1b[0m'; // cyan
+    case 'stopped':
+      return '\x1b[33mstopped\x1b[0m'; // yellow
+    case 'unknown':
+      return '\x1b[90munknown\x1b[0m'; // gray
     default:
       return session.status;
   }
@@ -1174,7 +1379,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
   }
 
   // CLI output modes
-  const sessions = await listHermesSessions();
+  const sessions = await listAllSessions();
 
   // Filter to only running sessions unless --all is specified
   const filteredSessions = options.all
@@ -1245,7 +1450,7 @@ const cleanCommand = new Command('clean')
   .option('-a, --all', 'Remove all containers (including running)')
   .option('-f, --force', 'Skip confirmation')
   .action(async (options: { all: boolean; force: boolean }) => {
-    const sessions = await listHermesSessions();
+    const sessions = await listAllSessions();
 
     const toRemove = options.all
       ? sessions
@@ -1256,9 +1461,11 @@ const cleanCommand = new Command('clean')
       return;
     }
 
+    const displayName = (s: HermesSession) => s.containerName ?? s.id;
+
     console.log(`Found ${toRemove.length} container(s) to remove:`);
     for (const session of toRemove) {
-      console.log(`  - ${session.containerName} (${session.status})`);
+      console.log(`  - ${displayName(session)} (${session.status})`);
     }
 
     if (!options.force) {
@@ -1281,12 +1488,14 @@ const cleanCommand = new Command('clean')
 
     console.log('');
     for (const session of toRemove) {
+      const name = displayName(session);
       try {
-        await removeContainer(session.containerName);
-        console.log(`Removed ${session.containerName}`);
+        const actionProvider = getProviderForSession(session);
+        await actionProvider.remove(session.id);
+        console.log(`Removed ${name}`);
       } catch (err) {
-        log.error({ err }, `Failed to remove ${session.containerName}`);
-        console.error(`Failed to remove ${session.containerName}: ${err}`);
+        log.error({ err }, `Failed to remove ${name}`);
+        console.error(`Failed to remove ${name}: ${err}`);
       }
     }
   });

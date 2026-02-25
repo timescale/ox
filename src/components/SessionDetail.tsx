@@ -5,24 +5,25 @@ import { useContainerStats } from '../hooks/useContainerStats';
 import { useWindowSize } from '../hooks/useWindowSize';
 import { copyToClipboard } from '../services/clipboard';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
-import {
-  formatCpuPercent,
-  formatMemUsage,
-  getSession,
-  type HermesSession,
-  removeContainer,
-  stopContainer,
-} from '../services/docker';
+import { formatCpuPercent, formatMemUsage } from '../services/docker';
 import { getPrForBranch, type PrInfo } from '../services/github';
 import { log } from '../services/logger';
+import { getSandboxProvider, type HermesSession } from '../services/sandbox';
+import {
+  fetchDockerStats,
+  formatRelativeTime,
+  getStatusIcon,
+  getStatusText,
+} from '../services/sessionDisplay';
+import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
+import { useToastStore } from '../stores/toastStore';
 import { formatShellError, type ShellError } from '../utils';
 import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
 import { LogViewer } from './LogViewer';
-import { Toast, type ToastType } from './Toast';
 
 /** Cache TTL in milliseconds (60 seconds) */
 const PR_CACHE_TTL = 60_000;
@@ -30,63 +31,14 @@ const PR_CACHE_TTL = 60_000;
 export interface SessionDetailProps {
   session: HermesSession;
   onBack: () => void;
-  onAttach: (containerId: string) => void;
-  onShell: (containerId: string) => void;
+  onAttach: (sessionId: string) => void;
+  onShell: (sessionId: string) => void;
   onResume: (session: HermesSession) => void;
   onSessionDeleted: () => void;
   onNewPrompt?: () => void;
 }
 
 type ModalType = 'stop' | 'delete' | null;
-
-interface ToastState {
-  message: string;
-  type: ToastType;
-  duration?: number;
-}
-
-function formatRelativeTime(isoDate: string): string {
-  const date = new Date(isoDate);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSecs = Math.floor(diffMs / 1000);
-  const diffMins = Math.floor(diffSecs / 60);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffDays > 0) {
-    return `${diffDays}d ago`;
-  }
-  if (diffHours > 0) {
-    return `${diffHours}h ago`;
-  }
-  if (diffMins > 0) {
-    return `${diffMins}m ago`;
-  }
-  return 'just now';
-}
-
-function getStatusIcon(session: HermesSession): string {
-  switch (session.status) {
-    case 'running':
-      return '●';
-    case 'exited':
-      return session.exitCode === 0 ? '✓' : '✗';
-    case 'paused':
-      return '⏸';
-    case 'dead':
-      return '✗';
-    default:
-      return '○';
-  }
-}
-
-function getStatusText(session: HermesSession): string {
-  if (session.status === 'exited') {
-    return session.exitCode === 0 ? 'complete' : `failed (${session.exitCode})`;
-  }
-  return session.status;
-}
 
 export function SessionDetail({
   session: initialSession,
@@ -98,26 +50,35 @@ export function SessionDetail({
   onNewPrompt,
 }: SessionDetailProps) {
   const { theme } = useTheme();
-  const { prCache, setPrInfo } = useSessionStore();
+  const { prCache, setPrInfo, addPendingDelete, removePendingDelete } =
+    useSessionStore();
   const [session, setSession] = useState(initialSession);
   const [modal, setModal] = useState<ModalType>(null);
-  const [toast, setToast] = useState<ToastState | null>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
   const { isTall } = useWindowSize();
 
   const isRunning = session.status === 'running';
-  const isStopped = session.status === 'exited' || session.status === 'dead';
-
-  // Poll CPU/memory stats for running containers
-  const statsIds = useMemo(
-    () => (isRunning ? [session.containerId] : []),
-    [isRunning, session.containerId],
+  const isStopped = session.status === 'exited' || session.status === 'stopped';
+  const providerType = session.provider;
+  const sessionProvider = useMemo(
+    () => getSandboxProvider(providerType),
+    [providerType],
   );
-  const containerStats = useContainerStats(statsIds);
-  const stats = containerStats.get(session.containerId);
+
+  // Poll CPU/memory stats for running Docker containers only
+  const statsIds = useMemo(
+    () => (isRunning && providerType === 'docker' ? [session.id] : []),
+    [isRunning, providerType, session.id],
+  );
+  const getStats = useCallback(
+    (ids: string[]) => fetchDockerStats(ids, [session]),
+    [session],
+  );
+  const containerStats = useContainerStats(statsIds, getStats);
+  const stats = containerStats.get(session.id);
 
   // Get PR info from cache
-  const cachedPr = prCache[session.containerId];
+  const cachedPr = prCache[session.id];
   const prInfo: PrInfo | null = cachedPr?.prInfo ?? null;
 
   // Hover state for PR indicator
@@ -128,14 +89,14 @@ export function SessionDetail({
   // Fetch PR info if not cached or stale
   const fetchPrInfo = useCallback(async () => {
     const now = Date.now();
-    const cached = prCache[session.containerId];
+    const cached = prCache[session.id];
     const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
 
     if (isStale) {
       const info = await getPrForBranch(session.repo, session.branch);
-      setPrInfo(session.containerId, info);
+      setPrInfo(session.id, info);
     }
-  }, [session.containerId, session.repo, session.branch, prCache, setPrInfo]);
+  }, [session.id, session.repo, session.branch, prCache, setPrInfo]);
 
   // Fetch PR info on mount
   useEffect(() => {
@@ -145,12 +106,12 @@ export function SessionDetail({
   // Refresh session metadata periodically
   useEffect(() => {
     const interval = setInterval(async () => {
-      const updated = await getSession(session.containerId);
+      const updated = await sessionProvider.get(session.id);
       if (updated) {
         setSession(updated);
       } else {
         // Container no longer exists
-        setToast({ message: 'Container no longer exists', type: 'error' });
+        useToastStore.getState().show('Container no longer exists', 'error');
         setTimeout(() => onSessionDeleted(), 1500);
       }
       // Also refresh PR info if stale
@@ -158,66 +119,71 @@ export function SessionDetail({
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [session.containerId, onSessionDeleted, fetchPrInfo]);
-
-  const showToast = useCallback((message: string, type: ToastType) => {
-    setToast({ message, type });
-  }, []);
+  }, [session.id, sessionProvider, onSessionDeleted, fetchPrInfo]);
 
   const handleStop = useCallback(async () => {
     setModal(null);
     setActionInProgress(true);
-    showToast('Stopping container...', 'info');
+    useToastStore.getState().show('Stopping container...', 'info');
     try {
-      await stopContainer(session.containerId);
-      showToast('Container stopped', 'success');
+      await sessionProvider.stop(session.id);
+      useToastStore.getState().show('Container stopped', 'success');
       // Refresh session
-      const updated = await getSession(session.containerId);
+      const updated = await sessionProvider.get(session.id);
       if (updated) {
         setSession(updated);
       }
     } catch (err) {
-      log.error({ err }, `Failed to stop container ${session.containerId}`);
-      showToast(`Failed to stop: ${err}`, 'error');
+      log.error({ err }, `Failed to stop container ${session.id}`);
+      useToastStore.getState().show(`Failed to stop: ${err}`, 'error');
     } finally {
       setActionInProgress(false);
     }
-  }, [session.containerId, showToast]);
+  }, [session.id, sessionProvider]);
 
-  const handleDelete = useCallback(async () => {
+  const handleDelete = useCallback(() => {
     setModal(null);
-    setActionInProgress(true);
-    try {
-      await removeContainer(session.containerId);
-      showToast('Container removed', 'success');
-      setTimeout(() => onSessionDeleted(), 1000);
-    } catch (err) {
-      log.error({ err }, `Failed to remove container ${session.containerId}`);
-      showToast(`Failed to remove: ${err}`, 'error');
-      setActionInProgress(false);
-    }
-  }, [session.containerId, showToast, onSessionDeleted]);
+
+    // Mark as pending delete (Layer 1: immediate in-memory hide)
+    addPendingDelete(session.id);
+
+    useToastStore.getState().show('Session deleted', 'success');
+
+    // Enqueue background deletion
+    useBackgroundTaskStore
+      .getState()
+      .enqueue(`Deleting "${session.name}"`, async () => {
+        try {
+          await sessionProvider.remove(session.id);
+        } finally {
+          removePendingDelete(session.id);
+        }
+      });
+
+    // Navigate back to list immediately
+    onSessionDeleted();
+  }, [
+    session.id,
+    session.name,
+    sessionProvider,
+    onSessionDeleted,
+    addPendingDelete,
+    removePendingDelete,
+  ]);
 
   const handleResume = useCallback(() => {
     onResume(session);
   }, [onResume, session]);
 
-  const handleLogError = useCallback(
-    (error: string) => {
-      showToast(error, 'error');
-    },
-    [showToast],
-  );
+  const handleLogError = useCallback((error: string) => {
+    useToastStore.getState().show(error, 'error');
+  }, []);
 
   // Handle prompt click to copy to clipboard
   const handlePromptClick = useCallback(() => {
     if (session.prompt) {
       copyToClipboard(session.prompt);
-      setToast({
-        message: 'Prompt copied to clipboard',
-        type: 'info',
-        duration: 1500,
-      });
+      useToastStore.getState().show('Prompt copied to clipboard', 'info', 1500);
     }
   }, [session.prompt]);
 
@@ -226,18 +192,15 @@ export function SessionDetail({
     if (prInfo) {
       open(prInfo.url)
         .then(() => {
-          setToast({
-            message: `Opening PR #${prInfo.number}...`,
-            type: 'info',
-            duration: 1000,
-          });
+          useToastStore
+            .getState()
+            .show(`Opening PR #${prInfo.number}...`, 'info', 1000);
         })
         .catch((err) => {
           log.error({ err }, 'Failed to open PR URL in browser');
-          setToast({
-            message: `Failed to open PR in browser`,
-            type: 'error',
-          });
+          useToastStore
+            .getState()
+            .show('Failed to open PR in browser', 'error');
         });
     }
   }, [prInfo]);
@@ -247,15 +210,17 @@ export function SessionDetail({
     setActionInProgress(true);
     try {
       await Bun.$`git fetch && git switch ${branchName}`.quiet();
-      showToast(`Switched to branch ${branchName}`, 'success');
+      useToastStore
+        .getState()
+        .show(`Switched to branch ${branchName}`, 'success');
     } catch (err) {
       const formattedError = formatShellError(err as ShellError);
       log.error({ err }, `Failed to switch to branch ${branchName}`);
-      showToast(formattedError.message, 'error');
+      useToastStore.getState().show(formattedError.message, 'error');
     } finally {
       setActionInProgress(false);
     }
-  }, [session.branch, showToast]);
+  }, [session.branch]);
 
   // Suspend command keybind dispatch when modal is open
   const suspend = useCommandStore((s) => s.suspend);
@@ -292,7 +257,7 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 'a', ctrl: true },
         enabled: isRunning,
-        onSelect: () => onAttach(session.containerId),
+        onSelect: () => onAttach(session.id),
       },
       {
         id: 'session.shell',
@@ -301,7 +266,7 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 's', ctrl: true },
         enabled: isRunning,
-        onSelect: () => onShell(session.containerId),
+        onSelect: () => onShell(session.id),
       },
       {
         id: 'session.stop',
@@ -338,10 +303,9 @@ export function SessionDetail({
         keybind: { key: 'o', ctrl: true },
         onSelect: () => {
           if (!prInfo) {
-            setToast({
-              message: 'No PR found for this session',
-              type: 'warning',
-            });
+            useToastStore
+              .getState()
+              .show('No PR found for this session', 'warning');
             return;
           }
           handlePrClick();
@@ -361,7 +325,7 @@ export function SessionDetail({
       onNewPrompt,
       isRunning,
       isStopped,
-      session.containerId,
+      session.id,
       onAttach,
       onShell,
       handleResume,
@@ -387,12 +351,10 @@ export function SessionDetail({
 
   const statusColor =
     {
-      created: theme.info,
-      exited: session.exitCode === 0 ? theme.text : theme.error,
-      restarting: theme.accent,
       running: theme.success,
-      paused: theme.warning,
-      dead: theme.error,
+      exited: session.exitCode === 0 ? theme.text : theme.error,
+      stopped: theme.warning,
+      unknown: theme.textMuted,
     }[session.status] || theme.textMuted;
   const statusIcon = getStatusIcon(session);
   const statusText = getStatusText(session);
@@ -446,7 +408,7 @@ export function SessionDetail({
               }
               wrapMode="none"
             >
-              #{prInfo.number} {prInfo.state.toLowerCase()}
+              {`#${prInfo.number} ${prInfo.state.toLowerCase()}`}
             </text>
           </box>
         )}
@@ -464,7 +426,13 @@ export function SessionDetail({
             {statusIcon} {statusText}
           </text>
         </box>
-        {isRunning && stats && (
+        <box flexDirection="row" gap={1}>
+          <text fg={theme.textMuted}>provider</text>
+          <text fg={session.provider === 'cloud' ? theme.accent : theme.text}>
+            {session.provider === 'cloud' ? 'cloud' : 'docker'}
+          </text>
+        </box>
+        {isRunning && stats && session.provider !== 'cloud' && (
           <box flexDirection="row" gap={3}>
             <box flexDirection="row" gap={1}>
               <text fg={theme.textMuted}>cpu</text>
@@ -484,6 +452,28 @@ export function SessionDetail({
         <box height={1} flexDirection="row" gap={1} overflow="hidden">
           <text fg={theme.textMuted}>resumed from</text>
           <text>{session.resumedFrom}</text>
+        </box>
+      )}
+      {session.provider === 'cloud' && (
+        <box flexDirection="row" gap={3} height={1} overflow="hidden">
+          {session.region && (
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>region</text>
+              <text>{session.region}</text>
+            </box>
+          )}
+          {session.volumeSlug && (
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>volume</text>
+              <text fg={theme.textMuted}>{session.volumeSlug}</text>
+            </box>
+          )}
+          {session.snapshotSlug && (
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>snapshot</text>
+              <text fg={theme.textMuted}>{session.snapshotSlug}</text>
+            </box>
+          )}
         </box>
       )}
 
@@ -516,7 +506,8 @@ export function SessionDetail({
         flexDirection="column"
       >
         <LogViewer
-          containerId={session.containerId}
+          containerId={session.id}
+          streamLogs={(id) => sessionProvider.streamLogs(id)}
           isInteractive={session.interactive}
           onError={handleLogError}
         />
@@ -528,7 +519,7 @@ export function SessionDetail({
       {modal === 'stop' && (
         <ConfirmModal
           title="Stop Container?"
-          message={`Are you sure you want to stop ${session.containerName}?`}
+          message={`Are you sure you want to stop ${session.containerName ?? session.name}?`}
           detail="This will terminate the running agent session."
           confirmLabel="Stop"
           confirmColor={theme.warning}
@@ -540,22 +531,12 @@ export function SessionDetail({
       {modal === 'delete' && (
         <ConfirmModal
           title="Delete Container?"
-          message={`Are you sure you want to delete ${session.containerName}?`}
+          message={`Are you sure you want to delete ${session.containerName ?? session.name}?`}
           detail="This action cannot be undone."
           confirmLabel="Delete"
           confirmColor={theme.warning}
           onConfirm={handleDelete}
           onCancel={() => setModal(null)}
-        />
-      )}
-
-      {/* Toast notifications */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          duration={toast.duration}
-          onDismiss={() => setToast(null)}
         />
       )}
     </Frame>

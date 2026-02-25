@@ -1,27 +1,28 @@
 import { useEffect, useState } from 'react';
-import { type ContainerStats, getContainerStats } from '../services/docker';
 import { log } from '../services/logger';
+import type { SandboxStats } from '../services/sandbox';
 
 /** Polling interval for container stats (1 second) */
 const STATS_POLL_INTERVAL = 1000;
 
 /**
- * Hook that polls `docker stats` every second for the given running container IDs.
- * Returns a Map<containerId, ContainerStats>.
- * Only fetches when there are running container IDs provided.
+ * Hook that polls sandbox stats every second for the given running session IDs.
+ * Returns a Map<sessionId, SandboxStats>.
+ * Only fetches when there are running session IDs and a getStats function provided.
  *
  * Important: callers must pass a stable (memoized) array reference to avoid
  * restarting the polling interval on every render.
  */
 export function useContainerStats(
   containerIds: string[],
-): Map<string, ContainerStats> {
-  const [stats, setStats] = useState<Map<string, ContainerStats>>(
+  getStats?: (ids: string[]) => Promise<Map<string, SandboxStats>>,
+): Map<string, SandboxStats> {
+  const [stats, setStats] = useState<Map<string, SandboxStats>>(
     () => new Map(),
   );
 
   useEffect(() => {
-    if (containerIds.length === 0) {
+    if (containerIds.length === 0 || !getStats) {
       setStats(new Map());
       return;
     }
@@ -31,7 +32,7 @@ export function useContainerStats(
 
     const fetchStats = async () => {
       if (cancelled) return;
-      const result = await getContainerStats(containerIds);
+      const result = await getStats(containerIds);
       if (!cancelled) {
         log.trace(
           { statsCount: result.size, containerCount: containerIds.length },
@@ -50,7 +51,7 @@ export function useContainerStats(
       cancelled = true;
       clearInterval(interval);
     };
-  }, [containerIds]);
+  }, [containerIds, getStats]);
 
   return stats;
 }

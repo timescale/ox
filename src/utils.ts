@@ -41,43 +41,112 @@ export function printErr(msg: string): void {
 // ============================================================================
 
 /**
- * Enter the alternate screen buffer before handing the terminal to a
- * subprocess (docker attach, docker exec, etc.).
+ * Ensure the local terminal's line discipline is in cooked mode with
+ * standard output processing (in particular `onlcr` — translate `\n` to
+ * `\r\n`).
  *
- * This isolates all subprocess output from the main screen buffer, so
- * nothing leaks into the user's terminal scrollback. Pair with
- * {@link resetTerminal} after the subprocess exits.
+ * TUI libraries put the terminal into raw mode which disables `onlcr`.
+ * If a previous hermes session crashed or didn't fully clean up, the
+ * terminal can be left in this state.  Call this before spawning any
+ * interactive subprocess whose output assumes normal newline handling.
  */
-export function enterSubprocessScreen(): void {
-  const sequences = [
-    '\x1b[?1049h', // Enter alternate screen buffer
-    '\x1b[?1000h', // Enable X11 mouse button tracking
-    '\x1b[?1002h', // Enable button-event tracking (drag)
-    '\x1b[?1003h', // Enable any-event tracking (all motion)
-    '\x1b[?1006h', // Enable SGR extended mouse mode
-  ].join('');
-  process.stdout.write(sequences);
+export function ensureSaneTerminal(): void {
+  try {
+    Bun.spawnSync(['stty', 'sane'], {
+      stdin: 'inherit',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+  } catch {
+    // Best-effort: if stty isn't available, continue anyway
+  }
+}
+
+export interface SubprocessScreenOptions {
+  /**
+   * Use the alternate screen buffer to isolate subprocess output from the
+   * user's main scrollback. Set to true when launching a subprocess from
+   * within a TUI that will be restored afterward.
+   */
+  alternateScreen?: boolean;
+  /**
+   * Enable mouse tracking escape sequences. Only needed when the subprocess
+   * is a TUI that consumes mouse events (e.g. tmux with mouse support).
+   * Plain shells and most CLI tools do NOT need this — enabling it causes
+   * garbage escape codes to appear when the user moves the mouse.
+   */
+  mouse?: boolean;
+}
+
+/** Default options used when entering a subprocess from the TUI. */
+export const TUI_SUBPROCESS_OPTS: SubprocessScreenOptions = {
+  alternateScreen: true,
+};
+
+/**
+ * Prepare the terminal before handing it to a subprocess (docker attach,
+ * docker exec, SSH, etc.).
+ *
+ * By default this is a no-op. Pass options to opt-in to alternate screen
+ * and/or mouse tracking:
+ *
+ * - **From TUI:** use `{ alternateScreen: true }` so subprocess output
+ *   doesn't pollute the TUI's scrollback.
+ * - **From standalone CLI:** omit options (or pass `{}`) so progress
+ *   messages remain visible in the user's terminal.
+ * - **Mouse tracking:** only enable for subprocesses that actually
+ *   consume mouse events (very rare for shell sessions).
+ *
+ * Pair with {@link resetTerminal} using the same options after the
+ * subprocess exits.
+ */
+export function enterSubprocessScreen(
+  options: SubprocessScreenOptions = {},
+): void {
+  const { alternateScreen = false, mouse = false } = options;
+  const sequences: string[] = [];
+  if (alternateScreen) {
+    sequences.push('\x1b[?1049h'); // Enter alternate screen buffer
+  }
+  if (mouse) {
+    sequences.push(
+      '\x1b[?1000h', // Enable X11 mouse button tracking
+      '\x1b[?1002h', // Enable button-event tracking (drag)
+      '\x1b[?1003h', // Enable any-event tracking (all motion)
+      '\x1b[?1006h', // Enable SGR extended mouse mode
+    );
+  }
+  if (sequences.length > 0) {
+    process.stdout.write(sequences.join(''));
+  }
 }
 
 /**
  * Reset terminal to a clean state after a subprocess exits.
  *
- * Exits the alternate screen buffer (entered by {@link enterSubprocessScreen}),
- * restoring the main screen to its pre-subprocess state. Also resets cursor
- * visibility and text attributes defensively, and refreshes the cached
- * terminal dimensions which may be stale after the subprocess.
+ * Pass the same options used for {@link enterSubprocessScreen} so only the
+ * features that were enabled get disabled. Also resets cursor visibility
+ * and text attributes defensively, and refreshes the cached terminal
+ * dimensions which may be stale after the subprocess.
  */
-export function resetTerminal(): void {
-  const sequences = [
-    '\x1b[?1003l', // Disable any-event mouse tracking
-    '\x1b[?1002l', // Disable button-event mouse tracking
-    '\x1b[?1000l', // Disable X11 mouse button tracking
-    '\x1b[?1006l', // Disable SGR extended mouse mode
-    '\x1b[?1049l', // Exit alternate screen buffer → restores main screen
+export function resetTerminal(options: SubprocessScreenOptions = {}): void {
+  const { alternateScreen = false, mouse = false } = options;
+  const sequences: string[] = [
     '\x1b[?25h', // Show cursor (if subprocess hid it)
     '\x1b[0m', // Reset text attributes (colors, bold, etc.)
-  ].join('');
-  process.stdout.write(sequences);
+  ];
+  if (mouse) {
+    sequences.push(
+      '\x1b[?1003l', // Disable any-event mouse tracking
+      '\x1b[?1002l', // Disable button-event mouse tracking
+      '\x1b[?1000l', // Disable X11 mouse button tracking
+      '\x1b[?1006l', // Disable SGR extended mouse mode
+    );
+  }
+  if (alternateScreen) {
+    sequences.push('\x1b[?1049l'); // Exit alternate screen buffer → restores main screen
+  }
+  process.stdout.write(sequences.join(''));
 
   // Force a fresh ioctl(TIOCGWINSZ) to update cached terminal dimensions.
   // While attached to a Docker subprocess, SIGWINCH signals go to Docker
@@ -107,6 +176,11 @@ export function formatShellError(error: ShellError): Error {
   return new Error(
     `Command failed (exit code ${error.exitCode})${details ? `\n${details}` : ''}`,
   );
+}
+
+/** Escape a value for safe interpolation in a shell command string. */
+export function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export async function ensureGitignore(): Promise<void> {

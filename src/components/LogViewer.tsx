@@ -1,18 +1,20 @@
 import type { ScrollBoxRenderable } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { useEffect, useRef, useState } from 'react';
-import { type LogStream, streamContainerLogs } from '../services/docker';
+import type { LogStream } from '../services/sandbox';
 import { useTheme } from '../stores/themeStore';
 import { AnsiText } from './AnsiText';
 
 export interface LogViewerProps {
   containerId: string;
+  streamLogs: (id: string) => LogStream;
   isInteractive: boolean;
   onError?: (error: string) => void;
 }
 
 export function LogViewer({
   containerId,
+  streamLogs,
   isInteractive,
   onError,
 }: LogViewerProps) {
@@ -21,6 +23,13 @@ export function LogViewer({
   const [loading, setLoading] = useState(true);
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
   const streamRef = useRef<LogStream | null>(null);
+
+  // Use refs for callbacks to avoid restarting the stream when parent
+  // re-renders with a new function identity (e.g. from inline arrows).
+  const streamLogsRef = useRef(streamLogs);
+  streamLogsRef.current = streamLogs;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   // Load initial logs and start streaming for running containers
   // Skip for interactive sessions since their logs are TUI state, not text
@@ -35,7 +44,7 @@ export function LogViewer({
     async function loadLogs() {
       try {
         setLines([]);
-        const stream = streamContainerLogs(containerId);
+        const stream = streamLogsRef.current(containerId);
         streamRef.current = stream;
         setLoading(false);
 
@@ -47,16 +56,16 @@ export function LogViewer({
               setLines((prev) => [...prev, line]);
             }
           } catch (err) {
-            if (mounted && onError) {
-              onError(`Log stream error: ${err}`);
+            if (mounted && onErrorRef.current) {
+              onErrorRef.current(`Log stream error: ${err}`);
             }
           }
         })();
       } catch (err) {
         if (mounted) {
           setLoading(false);
-          if (onError) {
-            onError(`Failed to load logs: ${err}`);
+          if (onErrorRef.current) {
+            onErrorRef.current(`Failed to load logs: ${err}`);
           }
         }
       }
@@ -71,7 +80,7 @@ export function LogViewer({
         streamRef.current = null;
       }
     };
-  }, [containerId, isInteractive, onError]);
+  }, [containerId, isInteractive]);
 
   useKeyboard((key) => {
     if (key.name === 'up' || key.raw === 'k') {

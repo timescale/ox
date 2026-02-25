@@ -18,10 +18,11 @@ import {
 } from '../services/agents';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import type { AgentType } from '../services/config';
-import type { HermesSession } from '../services/docker';
 import { log } from '../services/logger';
+import type { HermesSession, SandboxProviderType } from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { useTheme } from '../stores/themeStore.ts';
+import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
 import { FilterableSelector } from './FilterableSelector';
 import { HermesTitle } from './HermesTitle';
 import { HotkeysBar } from './HotkeysBar';
@@ -36,6 +37,7 @@ export type SubmitMode = 'async' | 'interactive' | 'plan';
 export interface PromptScreenProps {
   defaultAgent: AgentType;
   defaultModel?: string | null;
+  defaultSandboxProvider?: SandboxProviderType;
   resumeSession?: HermesSession; // If set, we're resuming this session
   /** Initial mount directory from CLI flag (enables mount mode if set) */
   initialMountDir?: string | null;
@@ -48,10 +50,13 @@ export interface PromptScreenProps {
     mode: SubmitMode;
     /** If set, mount this directory instead of git clone */
     mountDir?: string;
+    sandboxProvider: SandboxProviderType;
   }) => void;
-  onShell: (mountDir?: string) => void; // Launch bash shell
+  onShell: (mountDir?: string, sandboxProvider?: SandboxProviderType) => void; // Launch bash shell
   onCancel: () => void;
   onViewSessions?: () => void;
+  /** Reset to a fresh new-prompt screen (clears resume state + all settings) */
+  onNewPrompt?: () => void;
 }
 
 interface ToastState {
@@ -91,17 +96,22 @@ function findEquivalentModel(
 export function PromptScreen({
   defaultAgent,
   defaultModel = null,
+  defaultSandboxProvider,
   resumeSession,
   initialMountDir,
   forceMountMode = false,
   onSubmit,
   onShell,
   onViewSessions,
+  onNewPrompt,
 }: PromptScreenProps) {
   const { theme } = useTheme();
   const textareaRef = useRef<TextareaRenderable>(null);
   const inputAnchorRef = useRef<BoxRenderable | null>(null);
   const [agent, setAgent] = useState<AgentType>(defaultAgent);
+  const [sandboxProvider, setSandboxProvider] = useState<SandboxProviderType>(
+    defaultSandboxProvider ?? 'docker',
+  );
   const [modelId, setModelId] = useState<string | null>(defaultModel);
   const modelMem = useRef({
     [defaultAgent]: defaultModel,
@@ -112,7 +122,9 @@ export function PromptScreen({
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [slashQuery, setSlashQuery] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [submitMode, setSubmitMode] = useState<SubmitMode>('async');
+  const [submitMode, setSubmitMode] = useState<SubmitMode>(
+    resumeSession?.interactive ? 'interactive' : 'async',
+  );
   // Mount mode state - enabled when initialMountDir is set, forced, or toggled via Ctrl+D
   // When forceMountMode is true, mount mode cannot be toggled off
   const [mountMode, setMountMode] = useState<boolean>(
@@ -196,7 +208,10 @@ export function PromptScreen({
         keybind: { key: 's', ctrl: true },
         hidden: true,
         onSelect: () =>
-          onShell(mountMode ? (mountDir ?? undefined) : undefined),
+          onShell(
+            mountMode ? (mountDir ?? undefined) : undefined,
+            sandboxProvider,
+          ),
       },
       {
         id: 'sessions.view',
@@ -211,15 +226,75 @@ export function PromptScreen({
         title: `${mountMode ? 'Disable' : 'Enable'} local mount mode`,
         description: forceMountMode
           ? 'Mount mode is required (no git remote)'
-          : 'Toggle between git clone and local directory mount',
+          : sandboxProvider === 'cloud'
+            ? 'Mount mode is not available with cloud sandboxes'
+            : 'Toggle between git clone and local directory mount',
         category: 'Prompt',
         keybind: { key: 'd', ctrl: true },
-        enabled: !forceMountMode,
-        onSelect: () =>
+        enabled: !forceMountMode && sandboxProvider !== 'cloud',
+        onSelect: () => {
+          if (sandboxProvider === 'cloud') {
+            setToast({
+              message: 'Mount mode is not available with cloud sandboxes',
+              type: 'warning',
+            });
+            return;
+          }
           setMountMode((m) => {
             if (!m) setMountDir(process.cwd());
             return !m;
-          }),
+          });
+        },
+      },
+      {
+        id: 'provider.toggle',
+        title: `Switch to ${sandboxProvider === 'docker' ? 'cloud' : 'Docker'} provider`,
+        description: resumeSession
+          ? 'Provider is locked when resuming a session'
+          : forceMountMode && sandboxProvider === 'docker'
+            ? 'Cloud sandboxes require a git remote'
+            : 'Toggle between Docker and Cloud sandbox providers',
+        category: 'Prompt',
+        keybind: { key: 'e', ctrl: true },
+        hidden: !!resumeSession,
+        enabled:
+          !resumeSession && !(forceMountMode && sandboxProvider === 'docker'),
+        onSelect: () => {
+          if (resumeSession) {
+            setToast({
+              message: 'Provider cannot be changed when resuming a session.',
+              type: 'warning',
+            });
+            return;
+          }
+          if (forceMountMode && sandboxProvider === 'docker') {
+            setToast({
+              message:
+                'Cloud sandboxes require a git remote. Add a remote or use Docker.',
+              type: 'warning',
+            });
+            return;
+          }
+          setSandboxProvider((p) => {
+            if (p === 'docker') {
+              // Switching to cloud — disable mount mode (not supported)
+              if (mountMode && !forceMountMode) {
+                setMountMode(false);
+              }
+              return 'cloud';
+            }
+            return 'docker';
+          });
+        },
+      },
+      {
+        id: 'task.new',
+        title: 'New task',
+        description: 'Reset to a fresh new prompt',
+        category: 'Navigation',
+        keybind: { key: 'n', ctrl: true },
+        enabled: !!onNewPrompt,
+        onSelect: () => onNewPrompt?.(),
       },
       {
         id: 'theme.select',
@@ -237,8 +312,10 @@ export function PromptScreen({
       mountMode,
       forceMountMode,
       mountDir,
+      sandboxProvider,
       onShell,
       onViewSessions,
+      onNewPrompt,
     ],
   );
 
@@ -301,9 +378,11 @@ export function PromptScreen({
         name: 'mount',
         description: forceMountMode
           ? 'Local mount mode required'
-          : mountMode
-            ? 'Disable local mount mode (use git clone)'
-            : 'Enable local mount mode (use local directory)',
+          : sandboxProvider === 'cloud'
+            ? 'Mount mode is not available with cloud sandboxes'
+            : mountMode
+              ? 'Disable local mount mode (use git clone)'
+              : 'Enable local mount mode (use local directory)',
         onSelect: () => {
           setShowSlashCommands(false);
           setSlashQuery('');
@@ -314,12 +393,114 @@ export function PromptScreen({
           if (forceMountMode) {
             return;
           }
+          // Don't allow mount mode with cloud sandboxes
+          if (sandboxProvider === 'cloud') {
+            setToast({
+              message: 'Mount mode is not available with cloud sandboxes',
+              type: 'warning',
+            });
+            return;
+          }
           setMountMode((m) => {
             if (!m) {
               // Enabling mount mode - set default mount dir to cwd
               setMountDir(process.cwd());
             }
             return !m;
+          });
+        },
+      },
+      {
+        name: 'cloud',
+        description: resumeSession
+          ? 'Provider is locked when resuming a session'
+          : forceMountMode
+            ? 'Cloud sandboxes require a git remote'
+            : 'Use cloud sandbox provider',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          if (resumeSession) {
+            setToast({
+              message: 'Provider cannot be changed when resuming a session.',
+              type: 'warning',
+            });
+            return;
+          }
+          if (forceMountMode) {
+            setToast({
+              message:
+                'Cloud sandboxes require a git remote. Add a remote or use Docker.',
+              type: 'warning',
+            });
+            return;
+          }
+          // Disable mount mode when switching to cloud
+          if (mountMode) {
+            setMountMode(false);
+          }
+          setSandboxProvider('cloud');
+        },
+      },
+      {
+        name: 'docker',
+        description: resumeSession
+          ? 'Provider is locked when resuming a session'
+          : 'Use Docker sandbox provider',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          if (resumeSession) {
+            setToast({
+              message: 'Provider cannot be changed when resuming a session.',
+              type: 'warning',
+            });
+            return;
+          }
+          setSandboxProvider('docker');
+        },
+      },
+      {
+        name: 'provider',
+        description: resumeSession
+          ? 'Provider is locked when resuming a session'
+          : 'Toggle sandbox provider',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          if (resumeSession) {
+            setToast({
+              message: 'Provider cannot be changed when resuming a session.',
+              type: 'warning',
+            });
+            return;
+          }
+          if (forceMountMode && sandboxProvider === 'docker') {
+            setToast({
+              message:
+                'Cloud sandboxes require a git remote. Add a remote or use Docker.',
+              type: 'warning',
+            });
+            return;
+          }
+          setSandboxProvider((p) => {
+            if (p === 'docker') {
+              // Switching to cloud — disable mount mode
+              if (mountMode && !forceMountMode) {
+                setMountMode(false);
+              }
+              return 'cloud';
+            }
+            return 'docker';
           });
         },
       },
@@ -367,6 +548,7 @@ export function PromptScreen({
       switchAgent,
       mountMode,
       forceMountMode,
+      sandboxProvider,
     ],
   );
 
@@ -420,6 +602,7 @@ export function PromptScreen({
       model: modelId,
       mode: submitMode,
       mountDir: mountMode ? (mountDir ?? process.cwd()) : undefined,
+      sandboxProvider,
     });
   };
 
@@ -584,6 +767,9 @@ export function PromptScreen({
                 {submitMode === 'plan' ? (
                   <text fg={theme.info}>[plan]</text>
                 ) : null}
+                {sandboxProvider === 'cloud' ? (
+                  <text fg={theme.accent}>[cloud]</text>
+                ) : null}
                 {mountMode ? <text fg={theme.warning}>[mount]</text> : null}
                 <text fg={model?.name ? theme.text : theme.textMuted}>
                   {model?.name || modelId || 'Loading...'}
@@ -621,7 +807,16 @@ export function PromptScreen({
                 ? []
                 : [['shift+tab', 'agent'] as [string, string]]),
               ['ctrl+space', 'model'],
+              ...(resumeSession
+                ? []
+                : [
+                    [
+                      'ctrl+e',
+                      sandboxProvider === 'docker' ? 'Docker' : 'Cloud',
+                    ] as [string, string],
+                  ]),
               ['ctrl+l', 'sessions'],
+              ...(onNewPrompt ? [['ctrl+n', 'new'] as [string, string]] : []),
               ['ctrl+p', 'commands'],
             ]}
           />
@@ -697,6 +892,8 @@ export function PromptScreen({
           anchor={inputAnchorRef.current}
         />
       )}
+
+      <BackgroundTaskIndicator bottom={3} />
     </box>
   );
 }

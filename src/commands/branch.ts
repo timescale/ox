@@ -2,18 +2,20 @@
 // Branch Command - Creates feature branch with isolated DB fork and agent
 // ============================================================================
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { ensureClaudeAuth } from '../services/claude';
 import { type AgentType, projectConfig, readConfig } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
-import { ensureDockerSandbox, startContainer } from '../services/docker';
 import {
   generateBranchName,
   type RepoInfo,
   tryGetRepoInfo,
 } from '../services/git';
+import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
+import type { SandboxProviderType } from '../services/sandbox';
+import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
 import { ensureGitignore } from '../utils';
 import { configAction } from './config';
 
@@ -26,6 +28,8 @@ interface BranchOptions {
   interactive: boolean;
   /** Mount local directory instead of git clone. True = cwd, string = specific path */
   mount?: string | true;
+  /** Sandbox provider override (docker or cloud) */
+  provider?: SandboxProviderType;
 }
 
 function printSummary(
@@ -33,6 +37,15 @@ function printSummary(
   repoInfo: RepoInfo | null,
   forkResult: ForkResult | null,
 ): void {
+  log.info(
+    {
+      branchName,
+      repo: repoInfo?.fullName ?? 'local',
+      database: forkResult?.name,
+      container: `hermes-${branchName}`,
+    },
+    'Branch session created',
+  );
   console.log(`
 ${repoInfo ? `Repository: ${repoInfo.fullName}\nBranch: hermes/${branchName}` : 'Mode: Local directory (no git repo)'}${
   forkResult
@@ -41,12 +54,6 @@ Database: ${forkResult.name} (service ID: ${forkResult.service_id})`
     : ''
 }
 Container: hermes-${branchName}
-
-To view agent logs:
-  docker logs -f hermes-${branchName}
-
-To stop the agent:
-  docker stop hermes-${branchName}
 `);
 }
 
@@ -56,11 +63,16 @@ export async function branchAction(
 ): Promise<void> {
   // Validate mutually exclusive options
   if (options.print && options.interactive) {
+    log.error('--print and --interactive are mutually exclusive');
     console.error('Error: --print and --interactive are mutually exclusive');
     process.exit(1);
   }
 
-  await ensureDockerSandbox();
+  const provider = options.provider
+    ? getSandboxProvider(options.provider)
+    : await getDefaultProvider();
+  await provider.ensureReady();
+  await provider.ensureImage();
 
   // Step 1: Check if we're in a git repository
   const repoInfo = await tryGetRepoInfo();
@@ -69,6 +81,9 @@ export async function branchAction(
   // Force mount mode if not in a git repo
   const forcedMount = !isGitRepo && !options.mount;
   if (forcedMount) {
+    log.info(
+      'Not in a git repository. Using mount mode with current directory.',
+    );
     console.log(
       'Not in a git repository. Using mount mode with current directory.',
     );
@@ -87,10 +102,12 @@ export async function branchAction(
 
   // Step 3: Read merged config for defaults, run config wizard if no project config exists
   if (!(await projectConfig.exists())) {
+    log.info('No project config found. Running config wizard...');
     console.log('No project config found. Running config wizard...\n');
     await configAction();
     // Verify project config was created
     if (!(await projectConfig.exists())) {
+      log.error('Config was cancelled or failed. Cannot continue.');
       console.error('Config was cancelled or failed. Cannot continue.');
       process.exit(1);
     }
@@ -107,11 +124,13 @@ export async function branchAction(
 
   // Step 5: Get repo info (if in a git repo)
   if (isGitRepo) {
+    log.debug({ repo: repoInfo.fullName }, 'Repository info resolved');
     console.log('Getting repository info...');
     console.log(`  Repository: ${repoInfo.fullName}`);
   }
 
   // Step 6: Generate branch name using configured agent and model
+  log.debug('Generating branch name');
   console.log('Generating branch name...');
   const branchName = await generateBranchName({
     prompt,
@@ -119,22 +138,28 @@ export async function branchAction(
     model: effectiveModel,
     onProgress: console.log,
   });
+  log.debug({ branchName }, 'Branch name generated');
   console.log(`  Branch name: ${branchName}`);
 
   // Step 7: Fork database (only if explicitly configured with a service ID)
   let forkResult: ForkResult | null = null;
   if (!options.dbFork) {
+    log.debug('Skipping database fork (--no-db-fork)');
     console.log('Skipping database fork (--no-db-fork)');
   } else if (!effectiveServiceId) {
     // Default is to skip fork unless a service ID is explicitly configured
+    log.debug('Skipping database fork (no service ID configured)');
     console.log('Skipping database fork (no service ID configured)');
   } else {
+    log.info('Forking database (this may take a few minutes)...');
     console.log('Forking database (this may take a few minutes)...');
     forkResult = await forkDatabase(branchName, effectiveServiceId);
+    log.info({ name: forkResult.name }, 'Database fork created');
     console.log(`  Database fork created: ${forkResult.name}`);
   }
 
   // Step 8: Ensure agent credentials are valid
+  log.debug({ agent: effectiveAgent }, 'Checking agent credentials');
   console.log(`Checking ${effectiveAgent} credentials...`);
   const authValid =
     effectiveAgent === 'claude'
@@ -142,6 +167,10 @@ export async function branchAction(
       : await ensureOpencodeAuth(effectiveModel);
 
   if (!authValid) {
+    log.error(
+      { agent: effectiveAgent },
+      'Agent credentials are invalid. Cannot start agent.',
+    );
     console.error(
       `\nError: ${effectiveAgent} credentials are invalid. Cannot start agent.`,
     );
@@ -157,14 +186,19 @@ export async function branchAction(
         ? options.mount
         : undefined;
 
+  log.info(
+    { agent: effectiveAgent, model: effectiveModel, mountDir },
+    'Starting agent container',
+  );
   console.log(
     `Starting agent container (using ${effectiveAgent}${effectiveModel ? ` with ${effectiveModel}` : ''})${mountDir ? ' [mount mode]' : ''}...`,
   );
   // Default to detached mode unless --print or --interactive is specified
   const detach = !options.print && !options.interactive;
 
-  const containerId = await startContainer({
+  const session = await provider.create({
     branchName,
+    name: branchName,
     prompt,
     repoInfo,
     agent: effectiveAgent,
@@ -177,11 +211,13 @@ export async function branchAction(
   });
 
   if (detach) {
-    console.log(`  Container started: ${containerId?.substring(0, 12)}`);
+    log.debug({ sessionId: session?.id }, 'Container started');
+    console.log(`  Container started: ${session?.id?.substring(0, 12)}`);
     // Summary only shown in detached mode
     printSummary(branchName, repoInfo, forkResult);
   } else if (options.interactive) {
     // Interactive mode exited
+    log.info({ agent: effectiveAgent }, 'Agent session ended');
     console.log(`\n${effectiveAgent} session ended.`);
   }
 }
@@ -212,6 +248,12 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
     .option(
       '--mount [dir]',
       'Mount local directory into container instead of git clone (defaults to cwd)',
+    )
+    .addOption(
+      new Option(
+        '-r, --provider <type>',
+        'Sandbox provider: docker or cloud (overrides config)',
+      ).choices(['docker', 'cloud']),
     ) as T;
 }
 
@@ -234,6 +276,9 @@ export const branchCommand = withBranchOptions(
 
   // Force mount mode if not in a git repo
   if (!isGitRepo && !options.mount) {
+    log.info(
+      'Not in a git repository. Using mount mode with current directory.',
+    );
     console.log(
       'Not in a git repository. Using mount mode with current directory.',
     );
@@ -259,5 +304,6 @@ export const branchCommand = withBranchOptions(
     dbFork: options.dbFork,
     mountDir,
     isGitRepo,
+    sandboxProvider: options.provider,
   });
 });
