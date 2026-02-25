@@ -46,6 +46,15 @@ function printSummary(
     },
     'Branch session created',
   );
+  console.log(`
+${repoInfo ? `Repository: ${repoInfo.fullName}\nBranch: hermes/${branchName}` : 'Mode: Local directory (no git repo)'}${
+  forkResult
+    ? `
+Database: ${forkResult.name} (service ID: ${forkResult.service_id})`
+    : ''
+}
+Container: hermes-${branchName}
+`);
 }
 
 export async function branchAction(
@@ -55,6 +64,7 @@ export async function branchAction(
   // Validate mutually exclusive options
   if (options.print && options.interactive) {
     log.error('--print and --interactive are mutually exclusive');
+    console.error('Error: --print and --interactive are mutually exclusive');
     process.exit(1);
   }
 
@@ -74,6 +84,9 @@ export async function branchAction(
     log.info(
       'Not in a git repository. Using mount mode with current directory.',
     );
+    console.log(
+      'Not in a git repository. Using mount mode with current directory.',
+    );
     options.mount = true;
   }
 
@@ -90,12 +103,15 @@ export async function branchAction(
   // Step 3: Read merged config for defaults, run config wizard if no project config exists
   if (!(await projectConfig.exists())) {
     log.info('No project config found. Running config wizard...');
+    console.log('No project config found. Running config wizard...\n');
     await configAction();
     // Verify project config was created
     if (!(await projectConfig.exists())) {
       log.error('Config was cancelled or failed. Cannot continue.');
+      console.error('Config was cancelled or failed. Cannot continue.');
       process.exit(1);
     }
+    console.log(''); // blank line after config
   }
 
   // Read merged config for effective values
@@ -109,33 +125,42 @@ export async function branchAction(
   // Step 5: Get repo info (if in a git repo)
   if (isGitRepo) {
     log.debug({ repo: repoInfo.fullName }, 'Repository info resolved');
+    console.log('Getting repository info...');
+    console.log(`  Repository: ${repoInfo.fullName}`);
   }
 
   // Step 6: Generate branch name using configured agent and model
   log.debug('Generating branch name');
+  console.log('Generating branch name...');
   const branchName = await generateBranchName({
     prompt,
     agent: effectiveAgent,
     model: effectiveModel,
-    onProgress: (msg) => log.debug(msg),
+    onProgress: console.log,
   });
   log.debug({ branchName }, 'Branch name generated');
+  console.log(`  Branch name: ${branchName}`);
 
   // Step 7: Fork database (only if explicitly configured with a service ID)
   let forkResult: ForkResult | null = null;
   if (!options.dbFork) {
     log.debug('Skipping database fork (--no-db-fork)');
+    console.log('Skipping database fork (--no-db-fork)');
   } else if (!effectiveServiceId) {
     // Default is to skip fork unless a service ID is explicitly configured
     log.debug('Skipping database fork (no service ID configured)');
+    console.log('Skipping database fork (no service ID configured)');
   } else {
     log.info('Forking database (this may take a few minutes)...');
+    console.log('Forking database (this may take a few minutes)...');
     forkResult = await forkDatabase(branchName, effectiveServiceId);
     log.info({ name: forkResult.name }, 'Database fork created');
+    console.log(`  Database fork created: ${forkResult.name}`);
   }
 
   // Step 8: Ensure agent credentials are valid
   log.debug({ agent: effectiveAgent }, 'Checking agent credentials');
+  console.log(`Checking ${effectiveAgent} credentials...`);
   const authValid =
     effectiveAgent === 'claude'
       ? await ensureClaudeAuth(effectiveModel)
@@ -145,6 +170,9 @@ export async function branchAction(
     log.error(
       { agent: effectiveAgent },
       'Agent credentials are invalid. Cannot start agent.',
+    );
+    console.error(
+      `\nError: ${effectiveAgent} credentials are invalid. Cannot start agent.`,
     );
     process.exit(1);
   }
@@ -161,6 +189,9 @@ export async function branchAction(
   log.info(
     { agent: effectiveAgent, model: effectiveModel, mountDir },
     'Starting agent container',
+  );
+  console.log(
+    `Starting agent container (using ${effectiveAgent}${effectiveModel ? ` with ${effectiveModel}` : ''})${mountDir ? ' [mount mode]' : ''}...`,
   );
   // Default to detached mode unless --print or --interactive is specified
   const detach = !options.print && !options.interactive;
@@ -181,11 +212,13 @@ export async function branchAction(
 
   if (detach) {
     log.debug({ sessionId: session?.id }, 'Container started');
+    console.log(`  Container started: ${session?.id?.substring(0, 12)}`);
     // Summary only shown in detached mode
     printSummary(branchName, repoInfo, forkResult);
   } else if (options.interactive) {
     // Interactive mode exited
     log.info({ agent: effectiveAgent }, 'Agent session ended');
+    console.log(`\n${effectiveAgent} session ended.`);
   }
 }
 
@@ -244,6 +277,9 @@ export const branchCommand = withBranchOptions(
   // Force mount mode if not in a git repo
   if (!isGitRepo && !options.mount) {
     log.info(
+      'Not in a git repository. Using mount mode with current directory.',
+    );
+    console.log(
       'Not in a git repository. Using mount mode with current directory.',
     );
     options.mount = true;

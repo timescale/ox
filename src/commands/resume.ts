@@ -17,11 +17,13 @@ export async function resumeAction(
 ): Promise<void> {
   if (options.detach && (!prompt || prompt.trim().length === 0)) {
     log.error('Prompt is required for detached resume');
+    console.error('Error: prompt is required for detached resume');
     process.exit(1);
   }
 
   if (options.detach && options.shell) {
     log.error('--detach and --shell cannot be used together');
+    console.error('Error: --detach and --shell cannot be used together');
     process.exit(1);
   }
 
@@ -74,6 +76,7 @@ export async function resumeAction(
         { name: result.name, sessionId: result.id },
         'Resumed session started',
       );
+      console.log(`Resumed session started: ${result.name ?? result.id}`);
     } else if (mode === 'shell') {
       // Shell mode — open a plain bash shell in the container
       await provider.shell(result.id);
@@ -83,6 +86,7 @@ export async function resumeAction(
     }
   } catch (err) {
     log.error({ err }, 'Failed to resume session');
+    console.error(`Failed to resume: ${err}`);
     process.exit(1);
   }
 }

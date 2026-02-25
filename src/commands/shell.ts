@@ -66,6 +66,7 @@ export const shellCommand = new Command('shell')
       }
     } catch (err) {
       log.error({ err }, 'Error starting shell');
+      console.error(`Error starting shell: ${err}`);
       process.exit(1);
     }
   });
