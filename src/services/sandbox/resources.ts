@@ -81,18 +81,31 @@ interface ImageClassificationContext {
 // Classification Functions (pure — no API calls)
 // ============================================================================
 
+/** Known Hermes snapshot slug prefixes. */
+const HERMES_SNAPSHOT_PREFIXES = ['hermes-base-', 'hsnap-'];
+
+/** Known Hermes volume slug prefixes. */
+const HERMES_VOLUME_PREFIXES = ['hbb-', 'hsh-', 'hs-', 'hr-'];
+
 /**
  * Classify a cloud snapshot as current/active/old/orphaned.
+ * Returns null for non-Hermes snapshots (unrecognized slug prefix).
  *
  * Rules:
  * - `hermes-base-*` → "Base Snapshot": `current` if matches getBaseSnapshotSlug(), else `old`
  * - `hsnap-*` → "Session Snapshot": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
+ * - Other prefixes → null (not a Hermes resource, skip)
  */
 export function classifyCloudSnapshot(
   snapshot: DenoSnapshot,
   ctx: SnapshotClassificationContext,
-): SandboxResource {
+): SandboxResource | null {
+  // Skip non-Hermes snapshots entirely to avoid accidental cleanup
+  if (!HERMES_SNAPSHOT_PREFIXES.some((p) => snapshot.slug.startsWith(p))) {
+    return null;
+  }
+
   const base: Omit<SandboxResource, 'category' | 'status' | 'sessionName'> = {
     id: snapshot.id,
     provider: 'cloud',
@@ -142,6 +155,7 @@ export function classifyCloudSnapshot(
 
 /**
  * Classify a cloud volume as current/active/old/orphaned.
+ * Returns null for non-Hermes volumes (unrecognized slug prefix).
  *
  * Rules:
  * - `hbb-*` → "Build Volume": `current` if it is the source volume of the
@@ -149,11 +163,17 @@ export function classifyCloudSnapshot(
  * - `hs-*` / `hr-*` → "Session Volume": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
  * - `hsh-*` → "Shell Volume": always `orphaned` (ephemeral, shouldn't persist)
+ * - Other prefixes → null (not a Hermes resource, skip)
  */
 export function classifyCloudVolume(
   volume: DenoVolume,
   ctx: VolumeClassificationContext,
-): SandboxResource {
+): SandboxResource | null {
+  // Skip non-Hermes volumes entirely to avoid accidental cleanup
+  if (!HERMES_VOLUME_PREFIXES.some((p) => volume.slug.startsWith(p))) {
+    return null;
+  }
+
   const base: Omit<SandboxResource, 'category' | 'status' | 'sessionName'> = {
     id: volume.id,
     provider: 'cloud',
@@ -359,23 +379,25 @@ async function discoverCloudResources(
   const resources: SandboxResource[] = [];
 
   for (const snapshot of snapshots) {
-    resources.push(
-      classifyCloudSnapshot(snapshot, {
-        currentBaseSlug,
-        sessionsBySnapshotSlug: lookups.sessionsBySnapshotSlug,
-        deletedSessionsBySnapshotSlug: lookups.deletedSessionsBySnapshotSlug,
-      }),
-    );
+    const classified = classifyCloudSnapshot(snapshot, {
+      currentBaseSlug,
+      sessionsBySnapshotSlug: lookups.sessionsBySnapshotSlug,
+      deletedSessionsBySnapshotSlug: lookups.deletedSessionsBySnapshotSlug,
+    });
+    if (classified) {
+      resources.push(classified);
+    }
   }
 
   for (const volume of volumes) {
-    resources.push(
-      classifyCloudVolume(volume, {
-        currentBaseVolumeSlug,
-        sessionsByVolumeSlug: lookups.sessionsByVolumeSlug,
-        deletedSessionsByVolumeSlug: lookups.deletedSessionsByVolumeSlug,
-      }),
-    );
+    const classified = classifyCloudVolume(volume, {
+      currentBaseVolumeSlug,
+      sessionsByVolumeSlug: lookups.sessionsByVolumeSlug,
+      deletedSessionsByVolumeSlug: lookups.deletedSessionsByVolumeSlug,
+    });
+    if (classified) {
+      resources.push(classified);
+    }
   }
 
   return resources;
@@ -515,7 +537,7 @@ export async function deleteResource(resource: SandboxResource): Promise<void> {
       }
     } else if (resource.provider === 'docker') {
       if (resource.kind === 'image') {
-        await Bun.$`docker rmi ${resource.name}`.quiet().nothrow();
+        await Bun.$`docker rmi ${resource.name}`.quiet();
       }
     }
 

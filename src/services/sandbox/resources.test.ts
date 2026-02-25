@@ -19,6 +19,14 @@ import type { HermesSession } from './types.ts';
 // Helpers
 // ============================================================================
 
+/** Assert non-null and return typed value (for classify functions that may return null) */
+function assertResource(result: SandboxResource | null): SandboxResource {
+  if (result === null) {
+    throw new Error('Expected non-null SandboxResource');
+  }
+  return result;
+}
+
 function makeSnapshot(overrides?: Partial<DenoSnapshot>): DenoSnapshot {
   return {
     id: 'snp_ord_abc123',
@@ -83,11 +91,13 @@ describe('classifyCloudSnapshot', () => {
       slug: 'hermes-base-0-12-0-a1b2c3',
     });
 
-    const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
-      sessionsBySnapshotSlug: new Map(),
-      deletedSessionsBySnapshotSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudSnapshot(snapshot, {
+        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        sessionsBySnapshotSlug: new Map(),
+        deletedSessionsBySnapshotSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('current');
     expect(result.category).toBe('Base Snapshot');
@@ -102,11 +112,13 @@ describe('classifyCloudSnapshot', () => {
       slug: 'hermes-base-0-11-0-oldold',
     });
 
-    const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
-      sessionsBySnapshotSlug: new Map(),
-      deletedSessionsBySnapshotSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudSnapshot(snapshot, {
+        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        sessionsBySnapshotSlug: new Map(),
+        deletedSessionsBySnapshotSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('old');
     expect(result.category).toBe('Base Snapshot');
@@ -121,11 +133,13 @@ describe('classifyCloudSnapshot', () => {
       name: 'my-session',
     });
 
-    const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
-      sessionsBySnapshotSlug: new Map([['hsnap-my-session-abc123', session]]),
-      deletedSessionsBySnapshotSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudSnapshot(snapshot, {
+        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        sessionsBySnapshotSlug: new Map([['hsnap-my-session-abc123', session]]),
+        deletedSessionsBySnapshotSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('active');
     expect(result.category).toBe('Session Snapshot');
@@ -141,13 +155,15 @@ describe('classifyCloudSnapshot', () => {
       name: 'old-session',
     });
 
-    const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
-      sessionsBySnapshotSlug: new Map(),
-      deletedSessionsBySnapshotSlug: new Map([
-        ['hsnap-old-session-abc123', deletedSession],
-      ]),
-    });
+    const result = assertResource(
+      classifyCloudSnapshot(snapshot, {
+        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        sessionsBySnapshotSlug: new Map(),
+        deletedSessionsBySnapshotSlug: new Map([
+          ['hsnap-old-session-abc123', deletedSession],
+        ]),
+      }),
+    );
 
     expect(result.status).toBe('old');
     expect(result.category).toBe('Session Snapshot');
@@ -159,11 +175,13 @@ describe('classifyCloudSnapshot', () => {
       slug: 'hsnap-mystery-abc123',
     });
 
-    const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
-      sessionsBySnapshotSlug: new Map(),
-      deletedSessionsBySnapshotSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudSnapshot(snapshot, {
+        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        sessionsBySnapshotSlug: new Map(),
+        deletedSessionsBySnapshotSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('orphaned');
     expect(result.category).toBe('Session Snapshot');
@@ -177,15 +195,45 @@ describe('classifyCloudSnapshot', () => {
       region: 'ams',
     });
 
+    const result = assertResource(
+      classifyCloudSnapshot(snapshot, {
+        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        sessionsBySnapshotSlug: new Map(),
+        deletedSessionsBySnapshotSlug: new Map(),
+      }),
+    );
+
+    expect(result.size).toBe(5000);
+    expect(result.region).toBe('ams');
+    expect(result.bootable).toBe(true);
+  });
+
+  test('non-Hermes snapshot returns null', () => {
+    const snapshot = makeSnapshot({
+      slug: 'my-custom-snapshot',
+    });
+
     const result = classifyCloudSnapshot(snapshot, {
       currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
       sessionsBySnapshotSlug: new Map(),
       deletedSessionsBySnapshotSlug: new Map(),
     });
 
-    expect(result.size).toBe(5000);
-    expect(result.region).toBe('ams');
-    expect(result.bootable).toBe(true);
+    expect(result).toBeNull();
+  });
+
+  test('builtin snapshot returns null', () => {
+    const snapshot = makeSnapshot({
+      slug: 'builtin:debian-13',
+    });
+
+    const result = classifyCloudSnapshot(snapshot, {
+      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      sessionsBySnapshotSlug: new Map(),
+      deletedSessionsBySnapshotSlug: new Map(),
+    });
+
+    expect(result).toBeNull();
   });
 });
 
@@ -199,11 +247,13 @@ describe('classifyCloudVolume', () => {
       slug: 'hbb-build-abc123',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: null,
-      sessionsByVolumeSlug: new Map(),
-      deletedSessionsByVolumeSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: null,
+        sessionsByVolumeSlug: new Map(),
+        deletedSessionsByVolumeSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('orphaned');
     expect(result.category).toBe('Build Volume');
@@ -216,11 +266,13 @@ describe('classifyCloudVolume', () => {
       slug: 'hbb-build-abc123',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: 'hbb-build-abc123',
-      sessionsByVolumeSlug: new Map(),
-      deletedSessionsByVolumeSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: 'hbb-build-abc123',
+        sessionsByVolumeSlug: new Map(),
+        deletedSessionsByVolumeSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('current');
     expect(result.category).toBe('Build Volume');
@@ -231,11 +283,13 @@ describe('classifyCloudVolume', () => {
       slug: 'hbb-old-build-xyz789',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: 'hbb-build-abc123',
-      sessionsByVolumeSlug: new Map(),
-      deletedSessionsByVolumeSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: 'hbb-build-abc123',
+        sessionsByVolumeSlug: new Map(),
+        deletedSessionsByVolumeSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('orphaned');
     expect(result.category).toBe('Build Volume');
@@ -250,11 +304,13 @@ describe('classifyCloudVolume', () => {
       name: 'my-session',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: null,
-      sessionsByVolumeSlug: new Map([['hs-my-session-abc123', session]]),
-      deletedSessionsByVolumeSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: null,
+        sessionsByVolumeSlug: new Map([['hs-my-session-abc123', session]]),
+        deletedSessionsByVolumeSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('active');
     expect(result.category).toBe('Session Volume');
@@ -270,11 +326,13 @@ describe('classifyCloudVolume', () => {
       name: 'resumed-session',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: null,
-      sessionsByVolumeSlug: new Map([['hr-resumed-abc123', session]]),
-      deletedSessionsByVolumeSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: null,
+        sessionsByVolumeSlug: new Map([['hr-resumed-abc123', session]]),
+        deletedSessionsByVolumeSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('active');
     expect(result.category).toBe('Session Volume');
@@ -290,13 +348,15 @@ describe('classifyCloudVolume', () => {
       name: 'deleted-session',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: null,
-      sessionsByVolumeSlug: new Map(),
-      deletedSessionsByVolumeSlug: new Map([
-        ['hs-deleted-abc123', deletedSession],
-      ]),
-    });
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: null,
+        sessionsByVolumeSlug: new Map(),
+        deletedSessionsByVolumeSlug: new Map([
+          ['hs-deleted-abc123', deletedSession],
+        ]),
+      }),
+    );
 
     expect(result.status).toBe('old');
     expect(result.category).toBe('Session Volume');
@@ -308,11 +368,13 @@ describe('classifyCloudVolume', () => {
       slug: 'hs-mystery-abc123',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: null,
-      sessionsByVolumeSlug: new Map(),
-      deletedSessionsByVolumeSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: null,
+        sessionsByVolumeSlug: new Map(),
+        deletedSessionsByVolumeSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('orphaned');
     expect(result.category).toBe('Session Volume');
@@ -323,11 +385,13 @@ describe('classifyCloudVolume', () => {
       slug: 'hsh-shell-abc123',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: null,
-      sessionsByVolumeSlug: new Map(),
-      deletedSessionsByVolumeSlug: new Map(),
-    });
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: null,
+        sessionsByVolumeSlug: new Map(),
+        deletedSessionsByVolumeSlug: new Map(),
+      }),
+    );
 
     expect(result.status).toBe('orphaned');
     expect(result.category).toBe('Shell Volume');
@@ -341,15 +405,31 @@ describe('classifyCloudVolume', () => {
       bootable: false,
     });
 
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        currentBaseVolumeSlug: null,
+        sessionsByVolumeSlug: new Map(),
+        deletedSessionsByVolumeSlug: new Map(),
+      }),
+    );
+
+    expect(result.size).toBe(9999);
+    expect(result.region).toBe('ord');
+    expect(result.bootable).toBe(false);
+  });
+
+  test('non-Hermes volume returns null', () => {
+    const volume = makeVolume({
+      slug: 'my-custom-volume',
+    });
+
     const result = classifyCloudVolume(volume, {
       currentBaseVolumeSlug: null,
       sessionsByVolumeSlug: new Map(),
       deletedSessionsByVolumeSlug: new Map(),
     });
 
-    expect(result.size).toBe(9999);
-    expect(result.region).toBe('ord');
-    expect(result.bootable).toBe(false);
+    expect(result).toBeNull();
   });
 });
 
