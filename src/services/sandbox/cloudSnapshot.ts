@@ -19,13 +19,13 @@ export type SnapshotBuildProgress =
   | { type: 'done'; snapshotSlug: string }
   | { type: 'error'; message: string };
 
-function toolVersionsHash(): string {
+export function toolVersionsHash(): string {
   const hasher = new Bun.CryptoHasher('md5');
   hasher.update(`${toolVersions.claudeCode},${toolVersions.opencode}`);
   return hasher.digest('hex').slice(0, 6);
 }
 
-function getBaseSnapshotSlug(): string {
+export function getBaseSnapshotSlug(): string {
   // The base snapshot slug is deterministic (no nanoid) so we can find
   // an existing snapshot across runs. Includes hermes version + a hash
   // of pinned tool versions so that updating either triggers a rebuild.

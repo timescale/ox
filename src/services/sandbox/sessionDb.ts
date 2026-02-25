@@ -243,6 +243,13 @@ export function listSessions(
   return rows.map(rowToSession);
 }
 
+/** List ALL sessions including soft-deleted ones (for resource cleanup classification) */
+export function listAllSessionsIncludingDeleted(db: Database): HermesSession[] {
+  const stmt = db.prepare('SELECT * FROM sessions ORDER BY created DESC');
+  const rows = stmt.all() as SessionRow[];
+  return rows.map(rowToSession);
+}
+
 /** Delete a session by ID */
 export function deleteSession(db: Database, id: string): void {
   const stmt = db.prepare('DELETE FROM sessions WHERE id = $id');

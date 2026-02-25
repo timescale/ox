@@ -57,12 +57,21 @@ export interface DenoVolume {
   id: string;
   slug: string;
   region: string;
+  capacity: number;
+  allocatedSize: number;
+  flattenedSize: number;
+  bootable: boolean;
+  baseSnapshot: { id: string; slug: string } | null;
 }
 
 export interface DenoSnapshot {
   id: string;
   slug: string;
   region: string;
+  allocatedSize: number;
+  flattenedSize: number;
+  bootable: boolean;
+  volume: { id: string; slug: string };
 }
 
 /**
@@ -234,16 +243,38 @@ export class DenoApiClient {
   async createVolume(init: VolumeInit): Promise<DenoVolume> {
     log.debug({ slug: init.slug, region: init.region }, 'Creating volume');
     const vol = await this.client.volumes.create(init);
-    return { id: vol.id, slug: vol.slug, region: vol.region };
+    return {
+      id: vol.id,
+      slug: vol.slug,
+      region: vol.region,
+      capacity: vol.capacity,
+      allocatedSize: vol.estimatedAllocatedSize,
+      flattenedSize: vol.estimatedFlattenedSize,
+      bootable: vol.isBootable,
+      baseSnapshot: vol.baseSnapshot
+        ? { id: vol.baseSnapshot.id, slug: vol.baseSnapshot.slug }
+        : null,
+    };
   }
 
   async listVolumes(): Promise<DenoVolume[]> {
     const result = await this.client.volumes.list();
-    return result.items.map((v) => ({
-      id: v.id,
-      slug: v.slug,
-      region: v.region,
-    }));
+    const volumes: DenoVolume[] = [];
+    for await (const v of result) {
+      volumes.push({
+        id: v.id,
+        slug: v.slug,
+        region: v.region,
+        capacity: v.capacity,
+        allocatedSize: v.estimatedAllocatedSize,
+        flattenedSize: v.estimatedFlattenedSize,
+        bootable: v.isBootable,
+        baseSnapshot: v.baseSnapshot
+          ? { id: v.baseSnapshot.id, slug: v.baseSnapshot.slug }
+          : null,
+      });
+    }
+    return volumes;
   }
 
   async deleteVolume(idOrSlug: string): Promise<void> {
@@ -257,7 +288,15 @@ export class DenoApiClient {
   ): Promise<DenoSnapshot> {
     log.debug({ volumeIdOrSlug, slug: init.slug }, 'Snapshotting volume');
     const snap = await this.client.volumes.snapshot(volumeIdOrSlug, init);
-    return { id: snap.id, slug: snap.slug, region: snap.region };
+    return {
+      id: snap.id,
+      slug: snap.slug,
+      region: snap.region,
+      allocatedSize: snap.allocatedSize,
+      flattenedSize: snap.flattenedSize,
+      bootable: snap.isBootable,
+      volume: { id: snap.volume.id, slug: snap.volume.slug },
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -266,18 +305,35 @@ export class DenoApiClient {
 
   async listSnapshots(): Promise<DenoSnapshot[]> {
     const result = await this.client.snapshots.list();
-    return result.items.map((s) => ({
-      id: s.id,
-      slug: s.slug,
-      region: s.region,
-    }));
+    const snapshots: DenoSnapshot[] = [];
+    for await (const s of result) {
+      snapshots.push({
+        id: s.id,
+        slug: s.slug,
+        region: s.region,
+        allocatedSize: s.allocatedSize,
+        flattenedSize: s.flattenedSize,
+        bootable: s.isBootable,
+        volume: { id: s.volume.id, slug: s.volume.slug },
+      });
+    }
+    return snapshots;
   }
 
   async getSnapshot(idOrSlug: string): Promise<DenoSnapshot | null> {
     // Try direct lookup first (works for proper IDs like snp_ord_...)
     try {
       const snap = await this.client.snapshots.get(idOrSlug);
-      if (snap) return { id: snap.id, slug: snap.slug, region: snap.region };
+      if (snap)
+        return {
+          id: snap.id,
+          slug: snap.slug,
+          region: snap.region,
+          allocatedSize: snap.allocatedSize,
+          flattenedSize: snap.flattenedSize,
+          bootable: snap.isBootable,
+          volume: { id: snap.volume.id, slug: snap.volume.slug },
+        };
     } catch {
       // Fall through to search by slug
     }
@@ -285,7 +341,15 @@ export class DenoApiClient {
     const result = await this.client.snapshots.list({ search: idOrSlug });
     const match = result.items.find((s) => s.slug === idOrSlug);
     if (!match) return null;
-    return { id: match.id, slug: match.slug, region: match.region };
+    return {
+      id: match.id,
+      slug: match.slug,
+      region: match.region,
+      allocatedSize: match.allocatedSize,
+      flattenedSize: match.flattenedSize,
+      bootable: match.isBootable,
+      volume: { id: match.volume.id, slug: match.volume.slug },
+    };
   }
 
   async deleteSnapshot(idOrSlug: string): Promise<void> {

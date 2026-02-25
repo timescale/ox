@@ -236,7 +236,7 @@ async function shouldPull(imageTag: string): Promise<boolean> {
 
 type DockerfileVariant = 'slim' | 'full';
 
-function computeDockerfileHash(content: string): string {
+export function computeDockerfileHash(content: string): string {
   const hasher = new Bun.CryptoHasher('md5');
   hasher.update(content);
   // Include pinned tool versions so a version bump produces a new image tag
@@ -246,7 +246,7 @@ function computeDockerfileHash(content: string): string {
   return hasher.digest('hex').slice(0, 12);
 }
 
-function getGhcrImageTags(variant: DockerfileVariant): {
+export function getGhcrImageTags(variant: DockerfileVariant): {
   version: string;
   latest: string;
 } {
@@ -391,6 +391,63 @@ async function imageExists(imageName: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export interface DockerImageInfo {
+  id: string;
+  repository: string;
+  tag: string;
+  size: number;
+  created: string;
+}
+
+/**
+ * List all Docker images matching hermes-related patterns.
+ */
+export async function listHermesImages(): Promise<DockerImageInfo[]> {
+  const patterns = [
+    'hermes-sandbox',
+    `${GHCR_BASE}/sandbox-slim`,
+    `${GHCR_BASE}/sandbox-full`,
+    'hermes-resume',
+  ];
+
+  const images: DockerImageInfo[] = [];
+  for (const pattern of patterns) {
+    try {
+      const result = await $`docker image ls --format json ${pattern}`.quiet();
+      const lines = result.stdout.toString().trim().split('\n').filter(Boolean);
+      for (const line of lines) {
+        const info = JSON.parse(line);
+        images.push({
+          id: info.ID,
+          repository: info.Repository,
+          tag: info.Tag,
+          size: parseDockerSize(info.Size),
+          created: info.CreatedAt,
+        });
+      }
+    } catch {
+      // Pattern had no matches or docker not available
+    }
+  }
+  return images;
+}
+
+/** Parse Docker size strings like "1.23GB", "456MB" to bytes */
+function parseDockerSize(sizeStr: string): number {
+  const match = sizeStr.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)$/i);
+  if (!match) return 0;
+  const value = Number.parseFloat(match[1] ?? '0');
+  const unit = (match[2] ?? 'B').toUpperCase();
+  const multipliers: Record<string, number> = {
+    B: 1,
+    KB: 1024,
+    MB: 1024 ** 2,
+    GB: 1024 ** 3,
+    TB: 1024 ** 4,
+  };
+  return Math.round(value * (multipliers[unit] ?? 1));
 }
 
 /**
