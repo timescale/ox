@@ -656,7 +656,7 @@ export function SessionsList({
         <box flexGrow={1} alignItems="center" justifyContent="center">
           <text fg={theme.textMuted}>
             {sessions.length === 0
-              ? 'No sessions found. Run `hermes branch <prompt>` to create one.'
+              ? 'No sessions found. Press `ctrl+n` to create one.'
               : 'No sessions match the current filter.'}
           </text>
         </box>

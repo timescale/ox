@@ -1436,7 +1436,7 @@ export const sessionsCommand = new Command('sessions')
   .option(
     '-o, --output <format>',
     'Output format: tui, table, json, yaml',
-    'tui',
+    'table',
   )
   .option(
     '-a, --all',
