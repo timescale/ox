@@ -1,0 +1,623 @@
+// ============================================================================
+// Resource Discovery & Classification Tests
+// ============================================================================
+
+import { describe, expect, test } from 'bun:test';
+import type { DockerImageInfo } from '../docker.ts';
+import type { DenoSnapshot, DenoVolume } from './denoApi.ts';
+import {
+  classifyCloudSnapshot,
+  classifyCloudVolume,
+  classifyDockerImage,
+  getCleanupTargets,
+  type SandboxResource,
+} from './resources.ts';
+import type { HermesSession } from './types.ts';
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function makeSnapshot(overrides?: Partial<DenoSnapshot>): DenoSnapshot {
+  return {
+    id: 'snp_ord_abc123',
+    slug: 'hsnap-test-abc123',
+    region: 'ord',
+    allocatedSize: 1024 * 1024 * 100,
+    flattenedSize: 1024 * 1024 * 200,
+    bootable: true,
+    volume: { id: 'vol_ord_xyz', slug: 'hs-test-xyz' },
+    ...overrides,
+  };
+}
+
+function makeVolume(overrides?: Partial<DenoVolume>): DenoVolume {
+  return {
+    id: 'vol_ord_abc123',
+    slug: 'hs-test-abc123',
+    region: 'ord',
+    capacity: 10 * 1024 * 1024 * 1024,
+    allocatedSize: 1024 * 1024 * 100,
+    flattenedSize: 1024 * 1024 * 200,
+    bootable: true,
+    baseSnapshot: null,
+    ...overrides,
+  };
+}
+
+function makeImage(overrides?: Partial<DockerImageInfo>): DockerImageInfo {
+  return {
+    id: 'sha256:abc123',
+    repository: 'hermes-sandbox',
+    tag: 'md5-abcdef123456',
+    size: 1024 * 1024 * 500,
+    created: '2025-01-15T10:00:00Z',
+    ...overrides,
+  };
+}
+
+function makeSession(overrides?: Partial<HermesSession>): HermesSession {
+  return {
+    id: 'test-session-1',
+    provider: 'cloud',
+    name: 'test-session',
+    branch: 'main',
+    agent: 'claude',
+    prompt: 'fix the bug',
+    repo: 'timescale/hermes',
+    created: '2025-01-15T10:00:00Z',
+    status: 'running',
+    interactive: true,
+    ...overrides,
+  };
+}
+
+// ============================================================================
+// classifyCloudSnapshot
+// ============================================================================
+
+describe('classifyCloudSnapshot', () => {
+  test('current base snapshot matches getBaseSnapshotSlug()', () => {
+    const snapshot = makeSnapshot({
+      slug: 'hermes-base-0-12-0-a1b2c3',
+    });
+
+    const result = classifyCloudSnapshot(snapshot, {
+      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      sessionsBySnapshotSlug: new Map(),
+      deletedSessionsBySnapshotSlug: new Map(),
+    });
+
+    expect(result.status).toBe('current');
+    expect(result.category).toBe('Base Snapshot');
+    expect(result.provider).toBe('cloud');
+    expect(result.kind).toBe('snapshot');
+    expect(result.id).toBe('snp_ord_abc123');
+    expect(result.name).toBe('hermes-base-0-12-0-a1b2c3');
+  });
+
+  test('old base snapshot does not match current slug', () => {
+    const snapshot = makeSnapshot({
+      slug: 'hermes-base-0-11-0-oldold',
+    });
+
+    const result = classifyCloudSnapshot(snapshot, {
+      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      sessionsBySnapshotSlug: new Map(),
+      deletedSessionsBySnapshotSlug: new Map(),
+    });
+
+    expect(result.status).toBe('old');
+    expect(result.category).toBe('Base Snapshot');
+  });
+
+  test('active session snapshot linked to non-deleted session', () => {
+    const snapshot = makeSnapshot({
+      slug: 'hsnap-my-session-abc123',
+    });
+    const session = makeSession({
+      snapshotSlug: 'hsnap-my-session-abc123',
+      name: 'my-session',
+    });
+
+    const result = classifyCloudSnapshot(snapshot, {
+      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      sessionsBySnapshotSlug: new Map([['hsnap-my-session-abc123', session]]),
+      deletedSessionsBySnapshotSlug: new Map(),
+    });
+
+    expect(result.status).toBe('active');
+    expect(result.category).toBe('Session Snapshot');
+    expect(result.sessionName).toBe('my-session');
+  });
+
+  test('old session snapshot linked to deleted session', () => {
+    const snapshot = makeSnapshot({
+      slug: 'hsnap-old-session-abc123',
+    });
+    const deletedSession = makeSession({
+      snapshotSlug: 'hsnap-old-session-abc123',
+      name: 'old-session',
+    });
+
+    const result = classifyCloudSnapshot(snapshot, {
+      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      sessionsBySnapshotSlug: new Map(),
+      deletedSessionsBySnapshotSlug: new Map([
+        ['hsnap-old-session-abc123', deletedSession],
+      ]),
+    });
+
+    expect(result.status).toBe('old');
+    expect(result.category).toBe('Session Snapshot');
+    expect(result.sessionName).toBe('old-session');
+  });
+
+  test('orphaned session snapshot has no session reference', () => {
+    const snapshot = makeSnapshot({
+      slug: 'hsnap-mystery-abc123',
+    });
+
+    const result = classifyCloudSnapshot(snapshot, {
+      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      sessionsBySnapshotSlug: new Map(),
+      deletedSessionsBySnapshotSlug: new Map(),
+    });
+
+    expect(result.status).toBe('orphaned');
+    expect(result.category).toBe('Session Snapshot');
+    expect(result.sessionName).toBeUndefined();
+  });
+
+  test('snapshot size and region are included', () => {
+    const snapshot = makeSnapshot({
+      slug: 'hsnap-sized-abc123',
+      allocatedSize: 5000,
+      region: 'ams',
+    });
+
+    const result = classifyCloudSnapshot(snapshot, {
+      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      sessionsBySnapshotSlug: new Map(),
+      deletedSessionsBySnapshotSlug: new Map(),
+    });
+
+    expect(result.size).toBe(5000);
+    expect(result.region).toBe('ams');
+    expect(result.bootable).toBe(true);
+  });
+});
+
+// ============================================================================
+// classifyCloudVolume
+// ============================================================================
+
+describe('classifyCloudVolume', () => {
+  test('build volume (hbb-*) is always orphaned', () => {
+    const volume = makeVolume({
+      slug: 'hbb-build-abc123',
+    });
+
+    const result = classifyCloudVolume(volume, {
+      sessionsByVolumeSlug: new Map(),
+      deletedSessionsByVolumeSlug: new Map(),
+    });
+
+    expect(result.status).toBe('orphaned');
+    expect(result.category).toBe('Build Volume');
+    expect(result.provider).toBe('cloud');
+    expect(result.kind).toBe('volume');
+  });
+
+  test('active session volume (hs-*) linked to non-deleted session', () => {
+    const volume = makeVolume({
+      slug: 'hs-my-session-abc123',
+    });
+    const session = makeSession({
+      volumeSlug: 'hs-my-session-abc123',
+      name: 'my-session',
+    });
+
+    const result = classifyCloudVolume(volume, {
+      sessionsByVolumeSlug: new Map([['hs-my-session-abc123', session]]),
+      deletedSessionsByVolumeSlug: new Map(),
+    });
+
+    expect(result.status).toBe('active');
+    expect(result.category).toBe('Session Volume');
+    expect(result.sessionName).toBe('my-session');
+  });
+
+  test('active resume volume (hr-*) linked to non-deleted session', () => {
+    const volume = makeVolume({
+      slug: 'hr-resumed-abc123',
+    });
+    const session = makeSession({
+      volumeSlug: 'hr-resumed-abc123',
+      name: 'resumed-session',
+    });
+
+    const result = classifyCloudVolume(volume, {
+      sessionsByVolumeSlug: new Map([['hr-resumed-abc123', session]]),
+      deletedSessionsByVolumeSlug: new Map(),
+    });
+
+    expect(result.status).toBe('active');
+    expect(result.category).toBe('Session Volume');
+    expect(result.sessionName).toBe('resumed-session');
+  });
+
+  test('old session volume linked to deleted session', () => {
+    const volume = makeVolume({
+      slug: 'hs-deleted-abc123',
+    });
+    const deletedSession = makeSession({
+      volumeSlug: 'hs-deleted-abc123',
+      name: 'deleted-session',
+    });
+
+    const result = classifyCloudVolume(volume, {
+      sessionsByVolumeSlug: new Map(),
+      deletedSessionsByVolumeSlug: new Map([
+        ['hs-deleted-abc123', deletedSession],
+      ]),
+    });
+
+    expect(result.status).toBe('old');
+    expect(result.category).toBe('Session Volume');
+    expect(result.sessionName).toBe('deleted-session');
+  });
+
+  test('orphaned session volume has no session reference', () => {
+    const volume = makeVolume({
+      slug: 'hs-mystery-abc123',
+    });
+
+    const result = classifyCloudVolume(volume, {
+      sessionsByVolumeSlug: new Map(),
+      deletedSessionsByVolumeSlug: new Map(),
+    });
+
+    expect(result.status).toBe('orphaned');
+    expect(result.category).toBe('Session Volume');
+  });
+
+  test('shell volume (hsh-*) is always orphaned', () => {
+    const volume = makeVolume({
+      slug: 'hsh-shell-abc123',
+    });
+
+    const result = classifyCloudVolume(volume, {
+      sessionsByVolumeSlug: new Map(),
+      deletedSessionsByVolumeSlug: new Map(),
+    });
+
+    expect(result.status).toBe('orphaned');
+    expect(result.category).toBe('Shell Volume');
+  });
+
+  test('volume size and region are included', () => {
+    const volume = makeVolume({
+      slug: 'hs-sized-abc123',
+      allocatedSize: 9999,
+      region: 'ord',
+      bootable: false,
+    });
+
+    const result = classifyCloudVolume(volume, {
+      sessionsByVolumeSlug: new Map(),
+      deletedSessionsByVolumeSlug: new Map(),
+    });
+
+    expect(result.size).toBe(9999);
+    expect(result.region).toBe('ord');
+    expect(result.bootable).toBe(false);
+  });
+});
+
+// ============================================================================
+// classifyDockerImage
+// ============================================================================
+
+describe('classifyDockerImage', () => {
+  test('current local build matches computeDockerfileHash', () => {
+    const image = makeImage({
+      repository: 'hermes-sandbox',
+      tag: 'md5-abcdef123456',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set([
+        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
+        'ghcr.io/timescale/hermes/sandbox-slim:latest',
+      ]),
+      activeContainerImageIds: new Set(),
+    });
+
+    expect(result.status).toBe('current');
+    expect(result.category).toBe('Local Build');
+    expect(result.provider).toBe('docker');
+    expect(result.kind).toBe('image');
+  });
+
+  test('old local build does not match current hash', () => {
+    const image = makeImage({
+      repository: 'hermes-sandbox',
+      tag: 'md5-oldoldhash999',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set(),
+      activeContainerImageIds: new Set(),
+    });
+
+    expect(result.status).toBe('old');
+    expect(result.category).toBe('Local Build');
+  });
+
+  test('current GHCR image matches version tag', () => {
+    const image = makeImage({
+      repository: 'ghcr.io/timescale/hermes/sandbox-slim',
+      tag: '0.12.0',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set([
+        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
+        'ghcr.io/timescale/hermes/sandbox-slim:latest',
+      ]),
+      activeContainerImageIds: new Set(),
+    });
+
+    expect(result.status).toBe('current');
+    expect(result.category).toBe('GHCR Image');
+  });
+
+  test('current GHCR image matches latest tag', () => {
+    const image = makeImage({
+      repository: 'ghcr.io/timescale/hermes/sandbox-slim',
+      tag: 'latest',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set([
+        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
+        'ghcr.io/timescale/hermes/sandbox-slim:latest',
+      ]),
+      activeContainerImageIds: new Set(),
+    });
+
+    expect(result.status).toBe('current');
+    expect(result.category).toBe('GHCR Image');
+  });
+
+  test('old GHCR image does not match current tags', () => {
+    const image = makeImage({
+      repository: 'ghcr.io/timescale/hermes/sandbox-slim',
+      tag: '0.10.0',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set([
+        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
+        'ghcr.io/timescale/hermes/sandbox-slim:latest',
+      ]),
+      activeContainerImageIds: new Set(),
+    });
+
+    expect(result.status).toBe('old');
+    expect(result.category).toBe('GHCR Image');
+  });
+
+  test('GHCR full variant is also classified', () => {
+    const image = makeImage({
+      repository: 'ghcr.io/timescale/hermes/sandbox-full',
+      tag: '0.12.0',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set([
+        'ghcr.io/timescale/hermes/sandbox-full:0.12.0',
+        'ghcr.io/timescale/hermes/sandbox-full:latest',
+      ]),
+      activeContainerImageIds: new Set(),
+    });
+
+    expect(result.status).toBe('current');
+    expect(result.category).toBe('GHCR Image');
+  });
+
+  test('active resume image has matching container', () => {
+    const image = makeImage({
+      repository: 'hermes-resume',
+      tag: 'abc123def456-x9y8z7',
+      id: 'sha256:resumeimg001',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set(),
+      activeContainerImageIds: new Set(['sha256:resumeimg001']),
+    });
+
+    expect(result.status).toBe('active');
+    expect(result.category).toBe('Resume Image');
+  });
+
+  test('orphaned resume image has no matching container', () => {
+    const image = makeImage({
+      repository: 'hermes-resume',
+      tag: 'abc123def456-x9y8z7',
+      id: 'sha256:resumeimg001',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set(),
+      activeContainerImageIds: new Set(),
+    });
+
+    expect(result.status).toBe('orphaned');
+    expect(result.category).toBe('Resume Image');
+  });
+
+  test('image size and created time are included', () => {
+    const image = makeImage({
+      repository: 'hermes-sandbox',
+      tag: 'md5-abcdef123456',
+      size: 123456789,
+      created: '2025-02-01T12:00:00Z',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set(),
+      activeContainerImageIds: new Set(),
+    });
+
+    expect(result.size).toBe(123456789);
+    expect(result.createdAt).toBe('2025-02-01T12:00:00Z');
+  });
+});
+
+// ============================================================================
+// getCleanupTargets
+// ============================================================================
+
+describe('getCleanupTargets', () => {
+  test('returns only old and orphaned resources', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: '1',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'current-snap',
+        category: 'Base Snapshot',
+        status: 'current',
+      },
+      {
+        id: '2',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'active-snap',
+        category: 'Session Snapshot',
+        status: 'active',
+      },
+      {
+        id: '3',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'old-snap',
+        category: 'Session Snapshot',
+        status: 'old',
+      },
+      {
+        id: '4',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'orphaned-vol',
+        category: 'Build Volume',
+        status: 'orphaned',
+      },
+      {
+        id: '5',
+        provider: 'docker',
+        kind: 'image',
+        name: 'current-img',
+        category: 'Local Build',
+        status: 'current',
+      },
+      {
+        id: '6',
+        provider: 'docker',
+        kind: 'image',
+        name: 'old-img',
+        category: 'Local Build',
+        status: 'old',
+      },
+    ];
+
+    const targets = getCleanupTargets(resources);
+
+    expect(targets).toHaveLength(3);
+    const ids = targets.map((t) => t.id);
+    expect(ids).toContain('3');
+    expect(ids).toContain('4');
+    expect(ids).toContain('6');
+    // current and active should NOT be included
+    expect(ids).not.toContain('1');
+    expect(ids).not.toContain('2');
+    expect(ids).not.toContain('5');
+  });
+
+  test('orders snapshots before volumes before images', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: 'img',
+        provider: 'docker',
+        kind: 'image',
+        name: 'old-img',
+        category: 'Local Build',
+        status: 'old',
+      },
+      {
+        id: 'vol',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'old-vol',
+        category: 'Session Volume',
+        status: 'old',
+      },
+      {
+        id: 'snap',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'old-snap',
+        category: 'Session Snapshot',
+        status: 'old',
+      },
+    ];
+
+    const targets = getCleanupTargets(resources);
+
+    expect(targets).toHaveLength(3);
+    expect(targets[0]?.kind).toBe('snapshot');
+    expect(targets[1]?.kind).toBe('volume');
+    expect(targets[2]?.kind).toBe('image');
+  });
+
+  test('returns empty array when no cleanup targets exist', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: '1',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'current-snap',
+        category: 'Base Snapshot',
+        status: 'current',
+      },
+      {
+        id: '2',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'active-vol',
+        category: 'Session Volume',
+        status: 'active',
+      },
+    ];
+
+    const targets = getCleanupTargets(resources);
+    expect(targets).toHaveLength(0);
+  });
+
+  test('handles empty input', () => {
+    const targets = getCleanupTargets([]);
+    expect(targets).toHaveLength(0);
+  });
+});
