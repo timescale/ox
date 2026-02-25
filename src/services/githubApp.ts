@@ -29,6 +29,12 @@ import { log } from './logger';
  */
 export const GITHUB_APP_CLIENT_ID = 'Iv23likQt3nKCe1zzgkw';
 
+/** The URL-friendly slug of the Hermes GitHub App (from https://github.com/apps/<slug>). */
+export const GITHUB_APP_SLUG = 'hermes-cli';
+
+/** URL to install the Hermes GitHub App on new orgs/repos. */
+export const GITHUB_APP_INSTALL_URL = `https://github.com/apps/${GITHUB_APP_SLUG}/installations/new`;
+
 /** Keyring account name for the GitHub App user access token. */
 const KEYRING_ACCOUNT_TOKEN = 'github-app/user-token';
 
@@ -272,6 +278,85 @@ export async function deleteCredentials(): Promise<void> {
 export async function isGithubAppConfigured(): Promise<boolean> {
   const creds = await readCredentials();
   return creds !== null;
+}
+
+// ============================================================================
+// Installation Checks
+// ============================================================================
+
+/**
+ * Check whether the Hermes GitHub App has any installations accessible to
+ * the authenticated user. This is used after the device flow to determine
+ * if the user needs to install the app on their orgs/repos.
+ *
+ * @param token - A valid GitHub App user access token
+ * @returns true if at least one installation exists
+ */
+export async function hasAnyInstallation(token: string): Promise<boolean> {
+  try {
+    const response = await fetch(
+      'https://api.github.com/user/installations?per_page=1',
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      },
+    );
+
+    if (!response.ok) {
+      log.debug(`Failed to check app installations: ${response.status}`);
+      return false;
+    }
+
+    const data = (await response.json()) as {
+      total_count?: number;
+    };
+    return (data.total_count ?? 0) > 0;
+  } catch (err) {
+    log.debug({ err }, 'Failed to check app installations');
+    return false;
+  }
+}
+
+/**
+ * Check whether the GitHub App user access token has access to a specific
+ * repository. This verifies that the Hermes app is installed on the org/account
+ * that owns the repo AND that the user has access to it.
+ *
+ * @param token - A valid GitHub App user access token
+ * @param repoFullName - Repository in "owner/repo" format
+ * @returns true if the token can access the repository
+ */
+export async function checkRepoAccess(
+  token: string,
+  repoFullName: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${repoFullName}`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      },
+    );
+
+    if (!response.ok) {
+      log.debug(
+        `Repo access check failed for ${repoFullName}: ${response.status}`,
+      );
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    log.debug({ err }, `Failed to check repo access for ${repoFullName}`);
+    return false;
+  }
 }
 
 // ============================================================================

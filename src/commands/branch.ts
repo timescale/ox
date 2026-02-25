@@ -12,6 +12,11 @@ import {
   type RepoInfo,
   tryGetRepoInfo,
 } from '../services/git';
+import {
+  checkRepoAccess,
+  GITHUB_APP_INSTALL_URL,
+  readCredentialsUnchecked,
+} from '../services/githubApp';
 import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
 import type { SandboxProviderType } from '../services/sandbox';
@@ -177,7 +182,26 @@ export async function branchAction(
     process.exit(1);
   }
 
-  // Step 9: Start container (repo will be cloned or mounted)
+  // Step 9: Verify GitHub App has access to the repo (if using app credentials)
+  if (isGitRepo && repoInfo) {
+    const appCreds = await readCredentialsUnchecked();
+    if (appCreds) {
+      console.log('Checking GitHub repository access...');
+      const hasAccess = await checkRepoAccess(
+        appCreds.token,
+        repoInfo.fullName,
+      );
+      if (!hasAccess) {
+        console.error(
+          `\nError: The Hermes GitHub App does not have access to ${repoInfo.fullName}.`,
+        );
+        console.error(`Install it at: ${GITHUB_APP_INSTALL_URL}`);
+        process.exit(1);
+      }
+    }
+  }
+
+  // Step 10: Start container (repo will be cloned or mounted)
   // Resolve mount directory: true means cwd, string means specific path
   const mountDir =
     options.mount === true

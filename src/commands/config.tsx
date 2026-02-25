@@ -9,7 +9,7 @@ import { CloudSetup } from '../components/CloudSetup';
 import { CopyOnSelect } from '../components/CopyOnSelect';
 import { DockerSetup } from '../components/DockerSetup';
 import { FilterableSelector } from '../components/FilterableSelector';
-import { GhAuth } from '../components/GhAuth';
+import { GhAppInstall, GhAuth } from '../components/GhAuth';
 import { Loading } from '../components/Loading';
 import { Selector } from '../components/Selector';
 import { AGENT_SELECT_OPTIONS, useAgentModels } from '../services/agents';
@@ -20,6 +20,7 @@ import {
   projectConfig,
 } from '../services/config';
 import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
+import { readCredentialsUnchecked } from '../services/githubApp';
 import {
   type GithubAppAuthProcess,
   startGithubAppAuth,
@@ -62,7 +63,8 @@ type Step =
   | 'model'
   | 'agent-auth-check'
   | 'gh-auth-check'
-  | 'gh-auth';
+  | 'gh-auth'
+  | 'gh-install';
 
 export interface ConfigWizardProps {
   onComplete: (result: ConfigWizardResult) => void;
@@ -252,10 +254,15 @@ export function ConfigWizard({
 
     let cancelled = false;
 
-    ghAuthProcess.waitForCompletion().then((success) => {
+    ghAuthProcess.waitForCompletion().then((result) => {
       if (cancelled) return;
-      if (success) {
-        onComplete({ type: 'completed', config: config ?? {} });
+      if (result.success) {
+        if (result.needsInstallation) {
+          // Auth succeeded but app isn't installed — show install prompt
+          setStep('gh-install');
+        } else {
+          onComplete({ type: 'completed', config: config ?? {} });
+        }
       } else {
         onComplete({
           type: 'error',
@@ -607,6 +614,30 @@ export function ConfigWizard({
         onCancel={() => {
           ghAuthProcess.cancel();
           onComplete({ type: 'cancelled' });
+        }}
+      />
+    );
+  }
+
+  // ---- Step 6c: GitHub App Installation Prompt ----
+  if (step === 'gh-install') {
+    return (
+      <GhAppInstall
+        onDone={async () => {
+          // Verify installation was completed
+          const creds = await readCredentialsUnchecked();
+          if (creds) {
+            // Don't block completion even if install check fails —
+            // the session-start check will catch it later
+            onComplete({ type: 'completed', config: config ?? {} });
+          } else {
+            onComplete({ type: 'completed', config: config ?? {} });
+          }
+        }}
+        onSkip={() => {
+          // Allow skipping — the session-start repo access check will
+          // catch the missing installation later with a clear error
+          onComplete({ type: 'completed', config: config ?? {} });
         }}
       />
     );

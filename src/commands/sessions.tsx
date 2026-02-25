@@ -37,6 +37,11 @@ import {
   type RepoInfo,
   tryGetRepoInfo,
 } from '../services/git';
+import {
+  checkRepoAccess,
+  GITHUB_APP_INSTALL_URL,
+  readCredentialsUnchecked,
+} from '../services/githubApp';
 import { log } from '../services/logger';
 import {
   checkOpencodeCredentials,
@@ -464,10 +469,32 @@ function SessionsApp({
         }
 
         // Only check GitHub credentials if in a git repo
-        if (inGitRepo && !(await checkGhCredentials())) {
-          throw new Error(
-            'GitHub authentication not configured. Run `hermes config` to set up.',
+        if (inGitRepo) {
+          setView((v) =>
+            v.type === 'starting'
+              ? { ...v, step: 'Checking GitHub access' }
+              : v,
           );
+
+          // If using GitHub App credentials, verify the app has access to this repo
+          const appCreds = await readCredentialsUnchecked();
+          if (appCreds && repoInfo) {
+            const hasAccess = await checkRepoAccess(
+              appCreds.token,
+              repoInfo.fullName,
+            );
+            if (!hasAccess) {
+              throw new Error(
+                `The Hermes GitHub App does not have access to ${repoInfo.fullName}.\n` +
+                  `Install it at: ${GITHUB_APP_INSTALL_URL}`,
+              );
+            }
+          } else if (!(await checkGhCredentials())) {
+            // Fall back to Docker-based gh auth check for non-app credentials
+            throw new Error(
+              'GitHub authentication not configured. Run `hermes config` to set up.',
+            );
+          }
         }
 
         const isInteractive = mode === 'interactive' || mode === 'plan';
