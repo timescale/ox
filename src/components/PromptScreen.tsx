@@ -174,7 +174,7 @@ export function PromptScreen({
         title: 'Switch interaction mode',
         description: 'Cycle between async, interactive, and plan modes',
         category: 'Prompt',
-        keybind: { key: 'tab', display: 'tab' },
+        keybind: { key: 'tab', shift: true, display: 'shift+tab' },
         onSelect: () =>
           setSubmitMode((m) => {
             if (m === 'async') return 'interactive';
@@ -187,7 +187,7 @@ export function PromptScreen({
         title: 'Switch agent',
         description: 'Cycle through available AI agents',
         category: 'Agent',
-        keybind: { key: 'tab', shift: true, display: 'shift+tab' },
+        keybind: { key: 'tab', display: 'tab' },
         hidden: !!resumeSession,
         onSelect: switchAgent,
       },
@@ -802,19 +802,14 @@ export function PromptScreen({
           </box>
           <HotkeysBar
             keyList={[
-              ['tab', 'mode'],
+              ['tab', 'agent'],
               ...(resumeSession
                 ? []
-                : [['shift+tab', 'agent'] as [string, string]]),
+                : [['shift+tab', 'mode'] as [string, string]]),
               ['ctrl+space', 'model'],
               ...(resumeSession
                 ? []
-                : [
-                    [
-                      'ctrl+e',
-                      sandboxProvider === 'docker' ? 'Docker' : 'Cloud',
-                    ] as [string, string],
-                  ]),
+                : [['ctrl+e', 'provider'] as [string, string]]),
               ['ctrl+l', 'sessions'],
               ...(onNewPrompt ? [['ctrl+n', 'new'] as [string, string]] : []),
               ['ctrl+p', 'commands'],
