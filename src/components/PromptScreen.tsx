@@ -811,7 +811,6 @@ export function PromptScreen({
                 ? []
                 : [['ctrl+e', 'provider'] as [string, string]]),
               ['ctrl+l', 'sessions'],
-              ...(onNewPrompt ? [['ctrl+n', 'new'] as [string, string]] : []),
               ['ctrl+p', 'commands'],
             ]}
           />
