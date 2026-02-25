@@ -353,6 +353,15 @@ async function sshIntoSandbox(
     'LogLevel=ERROR',
     '-o',
     'SetEnv=TERM=xterm-256color',
+    // Detect dead connections: send a keepalive probe every 15 s and
+    // disconnect after 3 missed responses (~45 s).  Without this, a
+    // silently-dropped TCP connection (laptop sleep, Wi-Fi switch, NAT
+    // timeout) causes SSH to hang indefinitely, freezing the user's
+    // terminal with no way to regain control.
+    '-o',
+    'ServerAliveInterval=15',
+    '-o',
+    'ServerAliveCountMax=3',
   ];
 
   // Build the remote command
