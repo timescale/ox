@@ -1,45 +1,45 @@
 # hermes
 
-A CLI tool to run AI coding agents in isolated sandboxes per task.
+Un outil CLI pour exécuter des agents de codage IA dans des bacs à sable isolés par tâche.
 
 ## Installation
 
-### Quick Install (Recommended)
+### Installation rapide (recommandée)
 
 ```bash
 curl -fsSL https://install.hermetic.ly | sh
 ```
 
-After installation, restart your shell or run `source ~/.zshrc` (or `source ~/.bashrc`) to update your PATH.
+Après l'installation, redémarrez votre shell ou exécutez `source ~/.zshrc` (ou `source ~/.bashrc`) pour mettre à jour votre PATH.
 
-Re-run the above command at any time to update to the latest version.
+Réexécutez la commande ci-dessus à tout moment pour mettre à jour vers la dernière version.
 
-### Recommended Terminal
+### Terminal recommandé
 
-While any terminal should be usable, we recommend [Ghostty](https://ghostty.org/) for the best TUI experience:
+Bien que n'importe quel terminal soit utilisable, nous recommandons [Ghostty](https://ghostty.org/) pour la meilleure expérience TUI :
 
 ```bash
 brew install --cask ghostty
 ```
 
-### Source Installation (Developers)
+### Installation depuis la source (Développeurs)
 
-If you prefer to clone the repo and run from source:
+Si vous préférez cloner le dépôt et l'exécuter depuis la source :
 
 ```bash
 git clone https://github.com/timescale/hermes.git
 cd hermes
 ./bun i && ./bun link
-source ~/.zshrc # or restart your shell
+source ~/.zshrc # ou redémarrez votre shell
 ```
 
-## Usage
+## Utilisation
 
 ```bash
 cd myproject
-# Full TUI experience
+# Expérience TUI complète
 hermes
 
-# Or just run a single task:
+# Ou exécutez simplement une seule tâche :
 hermes "Build a new feature that ..."
 ```
