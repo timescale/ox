@@ -26,10 +26,8 @@ import { log } from './logger';
  *
  * This is a public identifier (not a secret). It is different from the App ID.
  * Find it on the GitHub App settings page under "Client ID".
- *
- * TODO: Replace with the real Hermes GitHub App client ID after registration.
  */
-export const GITHUB_APP_CLIENT_ID = 'Iv23liXXXXXXXXXXXXXX';
+export const GITHUB_APP_CLIENT_ID = 'Iv23likQt3nKCe1zzgkw';
 
 /** Keyring account name for the GitHub App user access token. */
 const KEYRING_ACCOUNT_TOKEN = 'github-app/user-token';
