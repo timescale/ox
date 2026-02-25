@@ -43,13 +43,18 @@ function validateVersion(version: string): void {
   }
 }
 
-const nextVersion = process.argv[2];
+const INCREMENT_TYPES = ['major', 'minor', 'patch'] as const;
+type IncrementType = (typeof INCREMENT_TYPES)[number];
 
-if (!nextVersion) {
-  fail('Usage: ./bun release <version>');
+function isIncrementType(value: string): value is IncrementType {
+  return (INCREMENT_TYPES as ReadonlyArray<string>).includes(value);
 }
 
-validateVersion(nextVersion);
+const versionArg = process.argv[2];
+
+if (!versionArg) {
+  fail('Usage: ./bun release <version | major | minor | patch>');
+}
 
 const releaseStatus = await run(['git', 'status', '--porcelain']);
 if (releaseStatus.stdout.trim().length > 0) {
@@ -71,6 +76,16 @@ if (!currentVersion || !semver.valid(currentVersion)) {
     `Current version '${currentVersion ?? '(missing)'}' in package.json is not valid semver.`,
   );
 }
+
+const nextVersion = isIncrementType(versionArg)
+  ? semver.inc(currentVersion, versionArg)
+  : versionArg;
+
+if (!nextVersion) {
+  fail(`Failed to compute next version from '${versionArg}'.`);
+}
+
+validateVersion(nextVersion);
 
 if (!semver.gt(nextVersion, currentVersion)) {
   fail(
