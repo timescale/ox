@@ -372,7 +372,7 @@ export function SessionsList({
         title: 'Manage Resources',
         description: 'View and manage sandbox images, volumes, and snapshots',
         category: 'Navigation',
-        keybind: { key: 'i', ctrl: true },
+        keybind: { key: 'e', ctrl: true, display: 'ctrl+e' },
         enabled: !!onResources,
         onSelect: () => onResources?.(),
       },

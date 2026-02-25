@@ -6,14 +6,7 @@ import {
   listAllResources,
   type SandboxResource,
 } from '../services/sandbox/resources.ts';
-
-function formatSize(bytes?: number): string {
-  if (bytes == null) return '-';
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)}K`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)}M`;
-  return `${(bytes / 1024 ** 3).toFixed(1)}G`;
-}
+import { formatSize } from '../services/sessionDisplay.ts';
 
 function printResourceTable(resources: SandboxResource[]): void {
   if (resources.length === 0) {

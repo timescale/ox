@@ -9,6 +9,7 @@ import {
   listAllResources,
   type SandboxResource,
 } from '../services/sandbox/resources.ts';
+import { formatSize } from '../services/sessionDisplay.ts';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { useToastStore } from '../stores/toastStore.ts';
@@ -46,14 +47,6 @@ const FILTER_ORDER: FilterMode[] = ['all', 'snapshot', 'volume', 'image'];
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function formatSize(bytes?: number): string {
-  if (bytes == null) return '-';
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)}K`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)}M`;
-  return `${(bytes / 1024 ** 3).toFixed(1)}G`;
-}
 
 function statusIcon(status: SandboxResource['status']): string {
   switch (status) {
@@ -95,6 +88,8 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(
     () => new Set(),
   );
+  const pendingDeletesRef = useRef(pendingDeletes);
+  pendingDeletesRef.current = pendingDeletes;
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(
     null,
   );
@@ -112,11 +107,13 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
     [resources],
   );
 
-  // Load resources
+  // Load resources — reads pendingDeletes via ref to avoid re-creating
+  // the callback (and resetting the auto-refresh timer) on every delete.
   const loadResources = useCallback(async () => {
     try {
       const loaded = await listAllResources();
-      setResources(loaded.filter((r) => !pendingDeletes.has(r.id)));
+      const pending = pendingDeletesRef.current;
+      setResources(loaded.filter((r) => !pending.has(r.id)));
       setLoading(false);
     } catch (err) {
       log.error({ err }, 'Failed to load resources');
@@ -125,7 +122,7 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
         .show(`Failed to load resources: ${err}`, 'error');
       setLoading(false);
     }
-  }, [pendingDeletes]);
+  }, []);
 
   // Initial load
   useEffect(() => {

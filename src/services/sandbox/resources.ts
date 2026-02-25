@@ -71,7 +71,8 @@ interface VolumeClassificationContext {
 interface ImageClassificationContext {
   currentDockerfileHash: string;
   currentGhcrTags: Set<string>;
-  activeContainerImageIds: Set<string>;
+  /** Container ID prefixes (12-char) for active containers */
+  activeContainerIdPrefixes: Set<string>;
 }
 
 // ============================================================================
@@ -247,20 +248,25 @@ export function classifyDockerImage(
     };
   }
 
-  // Resume images (hermes-resume:*)
+  // Resume images (hermes-resume:<containerId-12>-<nanoid-6>)
   if (image.repository === 'hermes-resume') {
+    // The tag format is: <12-char-container-id>-<6-char-nanoid>
+    // Check if any active container has a matching ID prefix
+    const containerIdPrefix = image.tag.slice(0, 12);
+    const isActive = ctx.activeContainerIdPrefixes.has(containerIdPrefix);
     return {
       ...base,
       category: 'Resume Image',
-      status: ctx.activeContainerImageIds.has(image.id) ? 'active' : 'orphaned',
+      status: isActive ? 'active' : 'orphaned',
     };
   }
 
-  // Unknown image — treat as old
+  // Unknown image — should be unreachable since listHermesImages queries
+  // specific patterns. Classify as current to avoid accidental cleanup.
   return {
     ...base,
     category: 'Unknown',
-    status: 'old',
+    status: 'current',
   };
 }
 
@@ -373,29 +379,13 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     fullTags.latest,
   ]);
 
-  // Build set of image IDs used by active containers
+  // Build set of container ID prefixes for matching resume images.
+  // Resume image tags use the format: <containerId-12>-<nanoid-6>,
+  // so we match by checking the container ID prefix in the tag.
   const containers = await listDockerContainers();
-  const activeContainerImageIds = new Set<string>();
-  for (const container of containers) {
-    // Docker inspect gives containerId; we need to find the image ID
-    // Resume images are tracked via the hermes.resume-image label,
-    // but we can match by checking if any container references this image.
-    // The simplest approach: check docker image ls IDs against container images.
-    // For resume images, the container's image is the resume image itself.
-    // We'll gather all container IDs and match against image IDs.
-    if (container.containerId) {
-      try {
-        const result =
-          await Bun.$`docker inspect --format={{.Image}} ${container.containerId}`.quiet();
-        const imageId = result.stdout.toString().trim();
-        if (imageId) {
-          activeContainerImageIds.add(imageId);
-        }
-      } catch {
-        // Container may have been removed between list and inspect
-      }
-    }
-  }
+  const activeContainerIdPrefixes = new Set(
+    containers.map((c) => c.containerId),
+  );
 
   const resources: SandboxResource[] = [];
   for (const image of images) {
@@ -403,7 +393,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
       classifyDockerImage(image, {
         currentDockerfileHash,
         currentGhcrTags,
-        activeContainerImageIds,
+        activeContainerIdPrefixes,
       }),
     );
   }
@@ -485,7 +475,7 @@ export async function deleteResource(resource: SandboxResource): Promise<void> {
     }
   } else if (resource.provider === 'docker') {
     if (resource.kind === 'image') {
-      await Bun.$`docker rmi ${resource.name}`.quiet();
+      await Bun.$`docker rmi ${resource.name}`.quiet().nothrow();
     }
   }
 }

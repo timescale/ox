@@ -93,3 +93,12 @@ export async function fetchDockerStats(
 
   return dockerProvider.getStats(dockerIds);
 }
+
+/** Format a byte count as a compact human-readable string (e.g. 1.2G, 456M). */
+export function formatSize(bytes?: number): string {
+  if (bytes == null) return '-';
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)}K`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)}M`;
+  return `${(bytes / 1024 ** 3).toFixed(1)}G`;
+}

@@ -332,7 +332,7 @@ describe('classifyDockerImage', () => {
         'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
         'ghcr.io/timescale/hermes/sandbox-slim:latest',
       ]),
-      activeContainerImageIds: new Set(),
+      activeContainerIdPrefixes: new Set(),
     });
 
     expect(result.status).toBe('current');
@@ -350,7 +350,7 @@ describe('classifyDockerImage', () => {
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
-      activeContainerImageIds: new Set(),
+      activeContainerIdPrefixes: new Set(),
     });
 
     expect(result.status).toBe('old');
@@ -369,7 +369,7 @@ describe('classifyDockerImage', () => {
         'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
         'ghcr.io/timescale/hermes/sandbox-slim:latest',
       ]),
-      activeContainerImageIds: new Set(),
+      activeContainerIdPrefixes: new Set(),
     });
 
     expect(result.status).toBe('current');
@@ -388,7 +388,7 @@ describe('classifyDockerImage', () => {
         'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
         'ghcr.io/timescale/hermes/sandbox-slim:latest',
       ]),
-      activeContainerImageIds: new Set(),
+      activeContainerIdPrefixes: new Set(),
     });
 
     expect(result.status).toBe('current');
@@ -407,7 +407,7 @@ describe('classifyDockerImage', () => {
         'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
         'ghcr.io/timescale/hermes/sandbox-slim:latest',
       ]),
-      activeContainerImageIds: new Set(),
+      activeContainerIdPrefixes: new Set(),
     });
 
     expect(result.status).toBe('old');
@@ -426,7 +426,7 @@ describe('classifyDockerImage', () => {
         'ghcr.io/timescale/hermes/sandbox-full:0.12.0',
         'ghcr.io/timescale/hermes/sandbox-full:latest',
       ]),
-      activeContainerImageIds: new Set(),
+      activeContainerIdPrefixes: new Set(),
     });
 
     expect(result.status).toBe('current');
@@ -443,7 +443,7 @@ describe('classifyDockerImage', () => {
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
-      activeContainerImageIds: new Set(['sha256:resumeimg001']),
+      activeContainerIdPrefixes: new Set(['abc123def456']),
     });
 
     expect(result.status).toBe('active');
@@ -460,7 +460,7 @@ describe('classifyDockerImage', () => {
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
-      activeContainerImageIds: new Set(),
+      activeContainerIdPrefixes: new Set(),
     });
 
     expect(result.status).toBe('orphaned');
@@ -478,7 +478,7 @@ describe('classifyDockerImage', () => {
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
-      activeContainerImageIds: new Set(),
+      activeContainerIdPrefixes: new Set(),
     });
 
     expect(result.size).toBe(123456789);
