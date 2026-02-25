@@ -7,7 +7,8 @@ import open from 'open';
 import { useEffect, useState } from 'react';
 import { copyToClipboard } from '../services/clipboard';
 import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
-import { startContainerGhAuth } from '../services/ghAuth';
+import { isGithubAppConfigured } from '../services/githubApp';
+import { startGithubAppAuth } from '../services/githubAppAuth';
 import { log } from '../services/logger';
 import { createTui } from '../services/tui';
 import { useTheme } from '../stores/themeStore';
@@ -83,16 +84,18 @@ export function GhAuth({ code, url, onCancel }: GhAuthProps) {
 }
 
 /**
- * Run the GitHub auth setup screen as a standalone TUI.
+ * Run the GitHub App auth screen as a standalone TUI.
+ * Uses the native GitHub App device flow (no Docker needed).
+ *
  * This is used by commands like `branch` that need to ensure creds are available
  * but aren't part of a larger wizard flow.
  *
  * @returns Promise that resolves with the setup result
  */
 export const runGhAuthScreen = async (): Promise<boolean> => {
-  const authProcess = await startContainerGhAuth();
+  const authProcess = await startGithubAppAuth();
   if (!authProcess) {
-    log.error('Failed to start GitHub auth process');
+    log.error('Failed to start GitHub App auth process');
     return false;
   }
 
@@ -101,8 +104,8 @@ export const runGhAuthScreen = async (): Promise<boolean> => {
   render(
     <CopyOnSelect>
       <GhAuth
-        code={authProcess.code}
-        url={authProcess.url}
+        code={authProcess.userCode}
+        url={authProcess.verificationUri}
         onCancel={() => {
           authProcess.cancel();
         }}
@@ -118,15 +121,22 @@ export const runGhAuthScreen = async (): Promise<boolean> => {
 };
 
 export const ensureGhAuth = async (): Promise<void> => {
+  // Check if we already have valid credentials (GitHub App, host gh, or keyring)
   if (await checkGhCredentials()) {
     return;
   }
   log.warn('GitHub credentials are missing or expired.');
 
+  // Check if GitHub App credentials are valid (may have been invalidated)
+  if (await isGithubAppConfigured()) {
+    return;
+  }
+
+  // Try to import host gh credentials
   if (await applyHostGhCreds()) return;
 
+  // Run the GitHub App device flow interactively
   if (!(await runGhAuthScreen())) {
-    // Show the TUI for interactive login
     throw new Error('GitHub authentication failed or was cancelled');
   }
 };

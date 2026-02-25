@@ -20,7 +20,10 @@ import {
   projectConfig,
 } from '../services/config';
 import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
-import { type GhAuthProcess, startContainerGhAuth } from '../services/ghAuth';
+import {
+  type GithubAppAuthProcess,
+  startGithubAppAuth,
+} from '../services/githubAppAuth';
 import {
   checkOpencodeCredentials,
   ensureOpencodeAuth,
@@ -88,9 +91,8 @@ export function ConfigWizard({
   const modelsMap = useAgentModels(modelRefreshKey);
 
   // GitHub auth state
-  const [ghAuthProcess, setGhAuthProcess] = useState<GhAuthProcess | null>(
-    null,
-  );
+  const [ghAuthProcess, setGhAuthProcess] =
+    useState<GithubAppAuthProcess | null>(null);
 
   const steps = useMemo((): Step[] => {
     const list: Step[] = [
@@ -217,9 +219,8 @@ export function ConfigWizard({
         return;
       }
 
-      // Need to do container-based auth
-      // Docker image is already ensured by the DockerSetup step
-      const authProcess = await startContainerGhAuth();
+      // Run the GitHub App device flow (no Docker needed)
+      const authProcess = await startGithubAppAuth();
 
       if (cancelled) {
         authProcess?.cancel();
@@ -601,8 +602,8 @@ export function ConfigWizard({
   if (step === 'gh-auth' && ghAuthProcess) {
     return (
       <GhAuth
-        code={ghAuthProcess.code}
-        url={ghAuthProcess.url}
+        code={ghAuthProcess.userCode}
+        url={ghAuthProcess.verificationUri}
         onCancel={() => {
           ghAuthProcess.cancel();
           onComplete({ type: 'cancelled' });

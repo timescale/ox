@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { YAML } from 'bun';
 import { Deferred } from '../types/deferred';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
+import { readCredentialsUnchecked } from './githubApp';
 import { getHermesSecret, setHermesSecret } from './keyring';
 import { log } from './logger';
 import {
@@ -118,15 +119,31 @@ export const captureGhCredentialsFromContainer = async (
 };
 
 /**
- * Get the best available gh credentials (host first, then keyring cache).
+ * Get the best available gh credentials.
+ * Priority: GitHub App token > host gh auth > keyring cache.
  * This is a read-only operation — it never writes to the keyring.
  */
 const resolveCredentials = async (): Promise<GhHostsYml> => {
+  // Priority 1: GitHub App user access token
+  const appCreds = await readCredentialsUnchecked();
+  if (appCreds) {
+    log.debug('Using GitHub App credentials for gh');
+    return {
+      'github.com': {
+        oauth_token: appCreds.token,
+        user: appCreds.username,
+        git_protocol: 'https',
+      },
+    };
+  }
+
+  // Priority 2: Host gh auth token
   const hostCreds = await readHostCredentials();
   if (hostCreds && ghCredsValid(hostCreds)) {
     return hostCreds;
   }
 
+  // Priority 3: Hermes keyring cache (from previous `gh auth login` in Docker)
   const cachedCreds = await readHermesCredentialCache();
   if (cachedCreds && ghCredsValid(cachedCreds)) {
     return cachedCreds;
@@ -140,6 +157,20 @@ const resolveCredentials = async (): Promise<GhHostsYml> => {
  * Use this only from explicit interactive flows where credentials may have changed.
  */
 const resolveAndCacheCredentials = async (): Promise<GhHostsYml> => {
+  // Priority 1: GitHub App user access token (already stored in its own keyring entry)
+  const appCreds = await readCredentialsUnchecked();
+  if (appCreds) {
+    log.debug('Using GitHub App credentials for gh (saveCredentials path)');
+    return {
+      'github.com': {
+        oauth_token: appCreds.token,
+        user: appCreds.username,
+        git_protocol: 'https',
+      },
+    };
+  }
+
+  // Priority 2: Host gh auth token
   const hostCreds = await readHostCredentials();
   if (hostCreds && ghCredsValid(hostCreds)) {
     // Cache host creds in keyring for when host gh isn't available
@@ -147,6 +178,7 @@ const resolveAndCacheCredentials = async (): Promise<GhHostsYml> => {
     return hostCreds;
   }
 
+  // Priority 3: Hermes keyring cache
   const cachedCreds = await readHermesCredentialCache();
   if (cachedCreds && ghCredsValid(cachedCreds)) {
     return cachedCreds;
