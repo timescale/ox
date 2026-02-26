@@ -30,6 +30,7 @@ import {
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { getDenoToken } from '../services/deno';
+import { ensureDockerImage } from '../services/docker';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -371,6 +372,24 @@ function SessionsApp({
             }
           },
         });
+
+        // Credential checks always run via Docker containers, so ensure the
+        // Docker image is available even when using a non-Docker sandbox provider.
+        if (activeProvider.type !== 'docker') {
+          await ensureDockerImage({
+            onProgress: (progress) => {
+              if (
+                progress.type === 'pulling-cache' ||
+                progress.type === 'building' ||
+                progress.type === 'pulling'
+              ) {
+                setView((v) =>
+                  v.type === 'starting' ? { ...v, step: progress.message } : v,
+                );
+              }
+            },
+          });
+        }
 
         // Check agent credentials before starting container
         setView((v) =>
@@ -1276,6 +1295,17 @@ export async function runSessionsTui({
     if (result.type === 'needs-agent-auth' && result.authInfo) {
       const { agent, model, prompt } = result.authInfo;
       const agentName = agent === 'claude' ? 'Claude' : 'Opencode';
+
+      // Auth flows run inside Docker containers, so ensure the image is
+      // available before attempting login.
+      try {
+        await ensureDockerImage();
+      } catch (err) {
+        console.error(
+          `\nFailed to prepare Docker sandbox: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
 
       console.log(`\n${agentName} credentials are missing or expired.`);
       console.log(`Starting ${agentName} login...\n`);
