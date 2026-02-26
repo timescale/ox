@@ -216,8 +216,14 @@ export const getClaudeCredentialsJson = async (
       return cached.value;
     }
   }
+  const hostCreds = await readHostCredentials();
+  const hermesCreds = await readHermesCredentialCache();
   const creds =
-    (await readHostCredentials()) || (await readHermesCredentialCache());
+    hostCreds?.claudeAiOauth?.expiresAt &&
+    hermesCreds?.claudeAiOauth?.expiresAt &&
+    hermesCreds.claudeAiOauth?.expiresAt > hostCreds.claudeAiOauth?.expiresAt
+      ? hermesCreds
+      : hostCreds || hermesCreds;
   writeCache('claudeCredentialsJson', creds);
   return creds;
 };
