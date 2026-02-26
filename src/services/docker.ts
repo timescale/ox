@@ -318,6 +318,15 @@ export interface SandboxImageConfig {
 }
 
 /**
+ * Module-level cache for the image name that `ensureDockerImage` actually
+ * resolved (which may differ from the versioned tag returned by the default
+ * resolution logic — e.g. when falling back to `:latest`).
+ * Once set, `resolveSandboxImage` returns this image so that all downstream
+ * callers (runInDocker, ghAuth, etc.) use the image that is actually present.
+ */
+let ensuredImageOverride: string | null = null;
+
+/**
  * Resolve which Docker image to use based on configuration.
  *
  * Priority:
@@ -361,12 +370,21 @@ export async function resolveSandboxImage(
     };
   }
 
-  // Default: use GHCR sandbox-slim image
-  // Always return the version-tagged image. The caller (ensureDockerImage)
-  // handles pulling and falling back to :latest if the versioned image
-  // isn't available. We intentionally don't fall back to :latest here,
-  // because that would cause dockerImageExists() to return true and skip
-  // the pull flow entirely — meaning the versioned image would never be pulled.
+  // Default: use GHCR sandbox-slim image.
+  // If ensureDockerImage has already resolved the actual image (e.g. fell back
+  // to :latest because the versioned tag wasn't available), use that. Otherwise
+  // return the version-tagged image — ensureDockerImage handles pulling and
+  // falling back to :latest. We intentionally don't fall back to :latest in the
+  // cold path, because that would cause dockerImageExists() to return true and
+  // skip the pull flow entirely — meaning the versioned image would never be pulled.
+  if (ensuredImageOverride) {
+    return {
+      image: ensuredImageOverride,
+      needsBuild: false,
+      cacheVariant: 'slim',
+    };
+  }
+
   const ghcrTags = getGhcrImageTags('slim');
 
   return {
@@ -595,120 +613,128 @@ export async function ensureDockerImage(
 
   onProgress?.({ type: 'checking' });
 
-  // Flow 1: Build from Dockerfile
-  if (imageConfig.needsBuild) {
-    // Check if image already exists locally
-    if (await imageExists(imageConfig.image)) {
-      onProgress?.({ type: 'exists' });
-      return imageConfig.image;
-    }
+  const resolved = await (async (): Promise<string> => {
+    // Flow 1: Build from Dockerfile
+    if (imageConfig.needsBuild) {
+      // Check if image already exists locally
+      if (await imageExists(imageConfig.image)) {
+        onProgress?.({ type: 'exists' });
+        return imageConfig.image;
+      }
 
-    // Try to pull GHCR image for cache
-    onProgress?.({
-      type: 'pulling-cache',
-      message: 'Pulling sandbox image for cache',
-    });
-    const ghcrTags = getGhcrImageTags(imageConfig.cacheVariant);
-    const cacheImage = await pullGhcrImageForCache(ghcrTags, (message) =>
-      onProgress?.({ type: 'pulling-cache', message }),
-    );
-
-    // Build from Dockerfile
-    onProgress?.({
-      type: 'building',
-      message: 'Building sandbox docker image',
-    });
-    if (!imageConfig.dockerfileContent) {
-      throw new Error('Dockerfile content is required for building');
-    }
-    await buildDockerImage(
-      imageConfig.image,
-      imageConfig.dockerfileContent,
-      cacheImage,
-    );
-
-    onProgress?.({ type: 'done' });
-    return imageConfig.image;
-  }
-
-  // Flow 2: sandboxBaseImage configured - must pull, fail if unavailable
-  if (config.sandboxBaseImage) {
-    // Check if already exists locally
-    if (await imageExists(imageConfig.image)) {
-      onProgress?.({ type: 'exists' });
-      return imageConfig.image;
-    }
-
-    onProgress?.({
-      type: 'pulling',
-      message: `Pulling ${imageConfig.image}`,
-    });
-    const pulled = await tryPullImage(imageConfig.image);
-    if (!pulled) {
-      throw new Error(
-        `Failed to pull configured sandbox image: ${imageConfig.image}`,
+      // Try to pull GHCR image for cache
+      onProgress?.({
+        type: 'pulling-cache',
+        message: 'Pulling sandbox image for cache',
+      });
+      const ghcrTags = getGhcrImageTags(imageConfig.cacheVariant);
+      const cacheImage = await pullGhcrImageForCache(ghcrTags, (message) =>
+        onProgress?.({ type: 'pulling-cache', message }),
       );
+
+      // Build from Dockerfile
+      onProgress?.({
+        type: 'building',
+        message: 'Building sandbox docker image',
+      });
+      if (!imageConfig.dockerfileContent) {
+        throw new Error('Dockerfile content is required for building');
+      }
+      await buildDockerImage(
+        imageConfig.image,
+        imageConfig.dockerfileContent,
+        cacheImage,
+      );
+
+      onProgress?.({ type: 'done' });
+      return imageConfig.image;
     }
-    onProgress?.({ type: 'done' });
-    return imageConfig.image;
-  }
 
-  // Flow 3: Default - pull GHCR image (version first, then latest)
-  const ghcrTags = getGhcrImageTags('slim');
+    // Flow 2: sandboxBaseImage configured - must pull, fail if unavailable
+    if (config.sandboxBaseImage) {
+      // Check if already exists locally
+      if (await imageExists(imageConfig.image)) {
+        onProgress?.({ type: 'exists' });
+        return imageConfig.image;
+      }
 
-  // Check if versioned image exists locally (exact version match, no pull needed)
-  if (await imageExists(ghcrTags.version)) {
-    onProgress?.({ type: 'exists' });
-    return ghcrTags.version;
-  }
+      onProgress?.({
+        type: 'pulling',
+        message: `Pulling ${imageConfig.image}`,
+      });
+      const pulled = await tryPullImage(imageConfig.image);
+      if (!pulled) {
+        throw new Error(
+          `Failed to pull configured sandbox image: ${imageConfig.image}`,
+        );
+      }
+      onProgress?.({ type: 'done' });
+      return imageConfig.image;
+    }
 
-  // Try to pull versioned image
-  onProgress?.({
-    type: 'pulling',
-    message: 'Pulling versioned sandbox image',
-  });
-  if (await tryPullImage(ghcrTags.version)) {
-    onProgress?.({ type: 'done' });
-    return ghcrTags.version;
-  }
+    // Flow 3: Default - pull GHCR image (version first, then latest)
+    const ghcrTags = getGhcrImageTags('slim');
 
-  // Versioned image not available — fall back to :latest
-  // If :latest exists locally, re-pull it if the TTL has expired to ensure freshness
-  const latestExistsLocally = await imageExists(ghcrTags.latest);
-  if (latestExistsLocally && (await shouldPull(ghcrTags.latest))) {
+    // Check if versioned image exists locally (exact version match, no pull needed)
+    if (await imageExists(ghcrTags.version)) {
+      onProgress?.({ type: 'exists' });
+      return ghcrTags.version;
+    }
+
+    // Try to pull versioned image
     onProgress?.({
       type: 'pulling',
-      message: 'Refreshing latest sandbox image',
+      message: 'Pulling versioned sandbox image',
     });
-    await tryPullImage(ghcrTags.latest);
-    // Use the local image regardless of whether the refresh pull succeeded
-    onProgress?.({ type: 'done' });
-    return ghcrTags.latest;
-  }
-  if (latestExistsLocally) {
-    // TTL has not expired — use the local image as-is
-    onProgress?.({ type: 'exists' });
-    return ghcrTags.latest;
-  }
+    if (await tryPullImage(ghcrTags.version)) {
+      onProgress?.({ type: 'done' });
+      return ghcrTags.version;
+    }
 
-  // :latest doesn't exist locally either — pull it
-  onProgress?.({
-    type: 'pulling',
-    message: 'Pulling latest sandbox image',
-  });
-  if (await tryPullImage(ghcrTags.latest)) {
-    onProgress?.({ type: 'done' });
-    return ghcrTags.latest;
-  }
+    // Versioned image not available — fall back to :latest
+    // If :latest exists locally, re-pull it if the TTL has expired to ensure freshness
+    const latestExistsLocally = await imageExists(ghcrTags.latest);
+    if (latestExistsLocally && (await shouldPull(ghcrTags.latest))) {
+      onProgress?.({
+        type: 'pulling',
+        message: 'Refreshing latest sandbox image',
+      });
+      await tryPullImage(ghcrTags.latest);
+      // Use the local image regardless of whether the refresh pull succeeded
+      onProgress?.({ type: 'done' });
+      return ghcrTags.latest;
+    }
+    if (latestExistsLocally) {
+      // TTL has not expired — use the local image as-is
+      onProgress?.({ type: 'exists' });
+      return ghcrTags.latest;
+    }
 
-  // Final fallback: build the slim image locally
-  const info = await getDockerfileInfo('slim');
-  if (!info) {
-    throw new Error('Failed to get Dockerfile content embedded slim image.');
-  }
-  await buildDockerImage(info.image, info.content);
-  onProgress?.({ type: 'done' });
-  return info.image;
+    // :latest doesn't exist locally either — pull it
+    onProgress?.({
+      type: 'pulling',
+      message: 'Pulling latest sandbox image',
+    });
+    if (await tryPullImage(ghcrTags.latest)) {
+      onProgress?.({ type: 'done' });
+      return ghcrTags.latest;
+    }
+
+    // Final fallback: build the slim image locally
+    const info = await getDockerfileInfo('slim');
+    if (!info) {
+      throw new Error('Failed to get Dockerfile content embedded slim image.');
+    }
+    await buildDockerImage(info.image, info.content);
+    onProgress?.({ type: 'done' });
+    return info.image;
+  })();
+
+  // Cache the resolved image so subsequent calls to resolveSandboxImage()
+  // return the image that is actually available locally, rather than the
+  // versioned tag that may not exist (e.g. when we fell back to :latest).
+  ensuredImageOverride = resolved;
+  return resolved;
 }
 
 // ============================================================================
