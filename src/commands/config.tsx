@@ -1,5 +1,5 @@
 // ============================================================================
-// Init Command - Configure hermes for a project
+// Init Command - Configure ox for a project
 // ============================================================================
 
 import type { SelectOption } from '@opentui/core';
@@ -16,7 +16,7 @@ import { AGENT_SELECT_OPTIONS, useAgentModels } from '../services/agents';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
 import {
   type AgentType,
-  type HermesConfig,
+  type OxConfig,
   projectConfig,
 } from '../services/config';
 import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
@@ -39,9 +39,9 @@ import { ensureGitignore } from '../utils';
 // ============================================================================
 
 export type ConfigWizardResult =
-  | { type: 'completed'; config: HermesConfig }
-  | { type: 'needs-agent-auth'; config: HermesConfig; agent: AgentType }
-  | { type: 'needs-opencode-provider'; config: HermesConfig }
+  | { type: 'completed'; config: OxConfig }
+  | { type: 'needs-agent-auth'; config: OxConfig; agent: AgentType }
+  | { type: 'needs-opencode-provider'; config: OxConfig }
   | { type: 'cancelled' }
   | { type: 'error'; message: string };
 
@@ -63,7 +63,7 @@ type Step =
 
 export interface ConfigWizardProps {
   onComplete: (result: ConfigWizardResult) => void;
-  initialConfig?: HermesConfig;
+  initialConfig?: OxConfig;
   skipToStep?: Step;
 }
 
@@ -77,9 +77,7 @@ export function ConfigWizard({
   const tigerAvailablePromise = useMemo(() => isTigerAvailable(), []);
 
   const [step, setStep] = useState<Step>(skipToStep ?? 'docker');
-  const [config, setConfig] = useState<HermesConfig | null>(
-    initialConfig ?? null,
-  );
+  const [config, setConfig] = useState<OxConfig | null>(initialConfig ?? null);
 
   // Async data - null means still loading
   const [tigerAvailable, setTigerAvailable] = useState<boolean | null>(null);
@@ -619,7 +617,7 @@ export function ConfigWizard({
 // ============================================================================
 
 export async function configAction(): Promise<void> {
-  let currentConfig: HermesConfig | undefined;
+  let currentConfig: OxConfig | undefined;
   let skipToStep: 'model' | 'agent-auth-check' | 'gh-auth-check' | undefined;
 
   // Loop to handle interactive login flows that require exiting and re-entering the wizard
@@ -696,12 +694,12 @@ export async function configAction(): Promise<void> {
     // result.type === 'completed'
     const config = result.config;
 
-    // Ensure .gitignore has .hermes/ entry
+    // Ensure .gitignore has .ox/ entry
     await ensureGitignore();
 
     await projectConfig.write(config);
 
-    console.log('\nConfiguration saved to .hermes/config.yml');
+    console.log('\nConfiguration saved to .ox/config.yml');
     console.log('\nSummary:');
 
     console.log(
@@ -721,11 +719,11 @@ export async function configAction(): Promise<void> {
 
     console.log('  GitHub: authenticated');
 
-    console.log('\nConfiguration complete! Run `hermes "<task>"` to start.');
+    console.log('\nConfiguration complete! Run `ox "<task>"` to start.');
     break;
   }
 }
 
 export const configCommand = new Command('config')
-  .description('Configure hermes for this project')
+  .description('Configure ox for this project')
   .action(configAction);

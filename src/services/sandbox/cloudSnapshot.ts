@@ -27,11 +27,11 @@ export function toolVersionsHash(): string {
 
 export function getBaseSnapshotSlug(): string {
   // The base snapshot slug is deterministic (no nanoid) so we can find
-  // an existing snapshot across runs. Includes hermes version + a hash
+  // an existing snapshot across runs. Includes ox version + a hash
   // of pinned tool versions so that updating either triggers a rebuild.
   const safeVersion = packageJson.version.replace(/[^a-z0-9-]/g, '-');
   const tvHash = toolVersionsHash();
-  return `hermes-base-${safeVersion}-${tvHash}`.slice(0, 32);
+  return `ox-base-${safeVersion}-${tvHash}`.slice(0, 32);
 }
 
 /**
@@ -60,7 +60,7 @@ async function isSnapshotBootable(
 }
 
 /**
- * Ensure the base cloud snapshot exists for the current hermes version.
+ * Ensure the base cloud snapshot exists for the current ox version.
  * Creates it if it doesn't exist by:
  * 1. Creating a bootable volume from `builtin:debian-13`
  * 2. Booting a sandbox directly from that volume
@@ -218,18 +218,18 @@ export async function ensureCloudSnapshot(options: {
     });
     await sandboxExec(
       sandbox,
-      'git config --global user.email "hermes@tigerdata.com" && git config --global user.name "Hermes Agent"',
+      'git config --global user.email "ox@tigerdata.com" && git config --global user.name "Ox Agent"',
       { label: 'Configure git' },
     );
     // Ensure ~/.local/bin and ~/.opencode/bin are in PATH for all shell types.
     // SSH login shells source /etc/profile.d/*.sh (alphabetically).  The Deno
     // platform generates app-env.sh which resets PATH to system dirs.  Our
-    // hermes-path.sh (h > a) runs after and appends user bin dirs.
+    // ox-path.sh (h > a) runs after and appends user bin dirs.
     // Also set DISABLE_AUTOUPDATER=1 to prevent Claude Code from self-updating
     // past the pinned version at runtime.
     await sandboxExec(
       sandbox,
-      `printf 'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\\nexport DISABLE_AUTOUPDATER=1\\n' | sudo tee /etc/profile.d/hermes-path.sh > /dev/null && sudo chmod +x /etc/profile.d/hermes-path.sh`,
+      `printf 'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\\nexport DISABLE_AUTOUPDATER=1\\n' | sudo tee /etc/profile.d/ox-path.sh > /dev/null && sudo chmod +x /etc/profile.d/ox-path.sh`,
       { label: 'Configure PATH and env in profile.d' },
     );
     // Also add to .bashrc for non-login shells that use BASH_ENV
@@ -250,7 +250,7 @@ export async function ensureCloudSnapshot(options: {
 bind -n C-\\\\ detach-client -E true
 # Keep default prefix (ctrl+b) for other tmux commands
 set -g mouse on
-# Hide status bar — hermes manages the session, no need for tmux chrome
+# Hide status bar — ox manages the session, no need for tmux chrome
 set -g status off
 # True-color support — xterm-256color + Tc flag enables 24-bit RGB
 # passthrough so TUI apps (OpenCode, Claude) render correctly
@@ -501,7 +501,7 @@ chmod +x /etc/profile.d/docker-start.sh`,
     // Deleting the volume while the platform is still processing the
     // snapshot kills the snapshot job (observed as JOB_IS_DEAD / 500).
     // On success, leave the volume — it can be cleaned up manually or
-    // via `hermes sessions clean`.
+    // via `ox sessions clean`.
     if (!snapshotCreated) {
       try {
         await client.deleteVolume(volume.id);

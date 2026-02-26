@@ -31,10 +31,10 @@ export function handleCompletionRequest(program: CommandType): boolean {
     t.parse(args);
   } else if (shell && SHELLS.includes(shell as Shell)) {
     // Generate shell completion script
-    t.setup('hermes', 'hermes', shell);
+    t.setup('ox', 'ox', shell);
   } else {
-    console.error(`Usage: hermes complete <${SHELLS.join('|')}>`);
-    console.error('       hermes complete -- <args...>');
+    console.error(`Usage: ox complete <${SHELLS.join('|')}>`);
+    console.error('       ox complete -- <args...>');
     process.exit(1);
   }
   process.exit(0);
@@ -53,14 +53,14 @@ export const completionCommand = new Command('completions')
         '\nTo enable tab completion, add one of these to your shell config:\n',
       );
       console.log('  Zsh (~/.zshrc):');
-      console.log('    source <(hermes complete zsh)\n');
+      console.log('    source <(ox complete zsh)\n');
       console.log('  Bash (~/.bashrc):');
-      console.log('    source <(hermes complete bash)\n');
+      console.log('    source <(ox complete bash)\n');
       console.log('  Fish (~/.config/fish/config.fish):');
-      console.log('    hermes complete fish | source\n');
+      console.log('    ox complete fish | source\n');
       console.log('  PowerShell:');
       console.log(
-        '    hermes complete powershell | Out-String | Invoke-Expression',
+        '    ox complete powershell | Out-String | Invoke-Expression',
       );
       return;
     }
@@ -71,12 +71,10 @@ export const completionCommand = new Command('completions')
     }
     console.log('# Add to your shell config:');
     if (shell === 'fish') {
-      console.log('hermes complete fish | source');
+      console.log('ox complete fish | source');
     } else if (shell === 'powershell') {
-      console.log(
-        'hermes complete powershell | Out-String | Invoke-Expression',
-      );
+      console.log('ox complete powershell | Out-String | Invoke-Expression');
     } else {
-      console.log(`source <(hermes complete ${shell})`);
+      console.log(`source <(ox complete ${shell})`);
     }
   });

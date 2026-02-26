@@ -63,27 +63,27 @@ export async function deleteSecret(
 }
 
 // ============================================================================
-// Hermes-specific convenience wrappers (service is always 'hermes')
+// Ox-specific convenience wrappers (service is always 'ox')
 // ============================================================================
 
-const HERMES_SERVICE = 'hermes';
+const OX_SERVICE = 'ox';
 
-/** Read a hermes-owned secret by account name. */
-export async function getHermesSecret(account: string): Promise<string | null> {
-  return getSecret(HERMES_SERVICE, account);
+/** Read a ox-owned secret by account name. */
+export async function getOxSecret(account: string): Promise<string | null> {
+  return getSecret(OX_SERVICE, account);
 }
 
-/** Write a hermes-owned secret by account name. */
-export async function setHermesSecret(
+/** Write a ox-owned secret by account name. */
+export async function setOxSecret(
   account: string,
   value: string,
 ): Promise<void> {
-  return setSecret(HERMES_SERVICE, account, value);
+  return setSecret(OX_SERVICE, account, value);
 }
 
-/** Delete a hermes-owned secret by account name. */
-export async function deleteHermesSecret(account: string): Promise<void> {
-  return deleteSecret(HERMES_SERVICE, account);
+/** Delete a ox-owned secret by account name. */
+export async function deleteOxSecret(account: string): Promise<void> {
+  return deleteSecret(OX_SERVICE, account);
 }
 
 // ============================================================================

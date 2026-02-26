@@ -1,4 +1,4 @@
-# Hermes Agent Guidelines
+# Ox Agent Guidelines
 
 This file provides guidance for AI coding agents working in this repository.
 
@@ -83,8 +83,8 @@ Use `type` keyword for type-only imports: `import type { X } from './module.ts'`
 - **Props interfaces**: suffix with `Props` (e.g., `SelectorProps`)
 
 ```typescript
-const CONFIG_DIR = '.hermes';                                    // Constants: SCREAMING_SNAKE_CASE
-export interface HermesConfig { agent: AgentType; }              // Interfaces: PascalCase
+const CONFIG_DIR = '.ox';                                    // Constants: SCREAMING_SNAKE_CASE
+export interface OxConfig { agent: AgentType; }              // Interfaces: PascalCase
 export type AgentType = 'claude' | 'opencode';                   // Types: PascalCase
 async function generateBranchName(prompt: string) { }            // Functions: camelCase
 function Selector({ title, onSelect }: SelectorProps) { }        // Components: PascalCase
@@ -167,7 +167,7 @@ describe('featureName', () => {
 ## Project Structure
 
 ```
-hermes/
+ox/
 ├── index.ts                 # CLI entry point
 ├── src/
 │   ├── index.ts            # CLI setup with commander
@@ -178,7 +178,7 @@ hermes/
 │   └── types/              # Type declarations
 ├── sandbox/
 │   └── Dockerfile          # Agent container image
-└── .hermes/                # Local config (gitignored)
+└── .ox/                # Local config (gitignored)
 ```
 
 ## TUI Components
@@ -250,22 +250,22 @@ Pilotty is a terminal automation tool for testing TUI applications. Use it to sp
 ### Basic Commands
 
 ```bash
-# Spawn hermes in a pilotty session
-./bun run pilotty spawn --name hermes bash -c "cd $PWD && ./bun index.ts"
+# Spawn ox in a pilotty session
+./bun run pilotty spawn --name ox bash -c "cd $PWD && ./bun index.ts"
 
 # Get a text snapshot of the screen
-./bun run pilotty snapshot -s hermes
+./bun run pilotty snapshot -s ox
 
 # Type text at current cursor position
-./bun run pilotty type -s hermes "some text"
+./bun run pilotty type -s ox "some text"
 
 # Send keyboard keys (enter, escape, up, down, tab, etc.)
-./bun run pilotty key -s hermes enter
-./bun run pilotty key -s hermes escape
-./bun run pilotty key -s hermes down
+./bun run pilotty key -s ox enter
+./bun run pilotty key -s ox escape
+./bun run pilotty key -s ox down
 
 # Kill the session when done
-./bun run pilotty kill -s hermes
+./bun run pilotty kill -s ox
 ```
 
 ### Testing Workflow
@@ -280,22 +280,22 @@ Pilotty is a terminal automation tool for testing TUI applications. Use it to sp
 
 ```bash
 # Start the app
-./bun run pilotty spawn --name hermes bash -c "cd $PWD && ./bun index.ts"
+./bun run pilotty spawn --name ox bash -c "cd $PWD && ./bun index.ts"
 
 # Wait for startup, type "/", wait, then snapshot
-sleep 2 && ./bun run pilotty type -s hermes "/" && sleep 0.5 && ./bun run pilotty snapshot -s hermes
+sleep 2 && ./bun run pilotty type -s ox "/" && sleep 0.5 && ./bun run pilotty snapshot -s ox
 
 # Navigate with arrow keys
-./bun run pilotty key -s hermes down
+./bun run pilotty key -s ox down
 
 # Select with enter
-./bun run pilotty key -s hermes enter
+./bun run pilotty key -s ox enter
 
 # Close modal with escape
-./bun run pilotty key -s hermes escape
+./bun run pilotty key -s ox escape
 
 # Cleanup
-./bun run pilotty kill -s hermes
+./bun run pilotty kill -s ox
 ```
 
 ### Snapshot Output

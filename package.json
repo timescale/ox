@@ -1,10 +1,10 @@
 {
-  "name": "hermes",
+  "name": "ox",
   "version": "0.12.1",
   "license": "Apache-2.0",
   "module": "index.ts",
   "scripts": {
-    "build": "./bun build ./index.ts --compile --outfile ./bin/hermes",
+    "build": "./bun build ./index.ts --compile --outfile ./bin/ox",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "test": "./bun test",
@@ -25,7 +25,7 @@
     "typescript": "^5"
   },
   "bin": {
-    "hermes": "./index.ts"
+    "ox": "./index.ts"
   },
   "type": "module",
   "dependencies": {

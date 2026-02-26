@@ -158,49 +158,49 @@ describe('ensureGitignore', () => {
     originalContent = null;
   });
 
-  test('adds .hermes/ to empty gitignore', async () => {
+  test('adds .ox/ to empty gitignore', async () => {
     await Bun.write(testGitignorePath, '');
 
     await ensureGitignore();
 
     const content = await Bun.file(testGitignorePath).text();
-    expect(content).toBe('.hermes/\n');
+    expect(content).toBe('.ox/\n');
   });
 
-  test('adds .hermes/ to existing gitignore without it', async () => {
+  test('adds .ox/ to existing gitignore without it', async () => {
     await Bun.write(testGitignorePath, 'node_modules/\n.env\n');
 
     await ensureGitignore();
 
     const content = await Bun.file(testGitignorePath).text();
-    expect(content).toBe('node_modules/\n.env\n.hermes/\n');
+    expect(content).toBe('node_modules/\n.env\n.ox/\n');
   });
 
-  test('does not add .hermes/ if already present with trailing slash', async () => {
-    await Bun.write(testGitignorePath, 'node_modules/\n.hermes/\n.env\n');
+  test('does not add .ox/ if already present with trailing slash', async () => {
+    await Bun.write(testGitignorePath, 'node_modules/\n.ox/\n.env\n');
 
     await ensureGitignore();
 
     const content = await Bun.file(testGitignorePath).text();
-    expect(content).toBe('node_modules/\n.hermes/\n.env\n');
+    expect(content).toBe('node_modules/\n.ox/\n.env\n');
   });
 
-  test('does not add .hermes/ if already present without trailing slash', async () => {
-    await Bun.write(testGitignorePath, 'node_modules/\n.hermes\n.env\n');
+  test('does not add .ox/ if already present without trailing slash', async () => {
+    await Bun.write(testGitignorePath, 'node_modules/\n.ox\n.env\n');
 
     await ensureGitignore();
 
     const content = await Bun.file(testGitignorePath).text();
-    expect(content).toBe('node_modules/\n.hermes\n.env\n');
+    expect(content).toBe('node_modules/\n.ox\n.env\n');
   });
 
-  test('adds newline before .hermes/ when file does not end with newline', async () => {
+  test('adds newline before .ox/ when file does not end with newline', async () => {
     await Bun.write(testGitignorePath, 'node_modules/');
 
     await ensureGitignore();
 
     const content = await Bun.file(testGitignorePath).text();
-    expect(content).toBe('node_modules/\n.hermes/\n');
+    expect(content).toBe('node_modules/\n.ox/\n');
   });
 
   test('creates gitignore if it does not exist', async () => {
@@ -214,6 +214,6 @@ describe('ensureGitignore', () => {
     await ensureGitignore();
 
     const content = await Bun.file(testGitignorePath).text();
-    expect(content).toBe('.hermes/\n');
+    expect(content).toBe('.ox/\n');
   });
 });

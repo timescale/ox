@@ -2,7 +2,7 @@ import { $, spawn } from 'bun';
 import { extract } from 'tar-stream';
 import { log } from './logger';
 
-export const CONTAINER_HOME = '/home/hermes';
+export const CONTAINER_HOME = '/home/ox';
 
 export async function writeFileToContainer(
   containerId: string,

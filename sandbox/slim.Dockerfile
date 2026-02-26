@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 
 LABEL maintainer="Tiger Data"
 LABEL description="Minimal sandbox environment for AI agents"
-LABEL org.opencontainers.image.source=https://github.com/timescale/hermes
+LABEL org.opencontainers.image.source=https://github.com/timescale/ox
 
 # Pinned tool versions — override at build time with --build-arg
 # Canonical values live in sandbox/versions.json
@@ -27,11 +27,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
   && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /.hermes/signal && chmod 777 /.hermes/signal \
-  && cat <<'ENTRY' > /.hermes/signalEntrypoint.sh && chmod +x /.hermes/signalEntrypoint.sh
+RUN mkdir -p /.ox/signal && chmod 777 /.ox/signal \
+  && cat <<'ENTRY' > /.ox/signalEntrypoint.sh && chmod +x /.ox/signalEntrypoint.sh
 #!/bin/sh
 # wait for ready signal, then start
-while [ ! -f /.hermes/signal/.ready ]; do
+while [ ! -f /.ox/signal/.ready ]; do
   sleep 0.1
 done
 exec "$@"
@@ -42,7 +42,7 @@ ENTRY
 # ============================================================================
 
 # Create non-root user (required for claude --dangerously-skip-permissions)
-ARG USER_NAME=hermes
+ARG USER_NAME=ox
 ARG USER_UID=10000
 ARG USER_GID=10000
 
@@ -72,8 +72,8 @@ ENV PATH="/home/${USER_NAME}/.local/bin:$PATH"
 # Prevent Claude Code from auto-updating past the pinned version
 ENV DISABLE_AUTOUPDATER=1
 
-RUN  git config --global user.email "hermes@tigerdata.com" \
-  && git config --global user.name "Hermes Agent"
+RUN  git config --global user.email "ox@tigerdata.com" \
+  && git config --global user.name "Ox Agent"
 
 # Create working directory
 WORKDIR /work

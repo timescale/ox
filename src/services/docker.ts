@@ -28,7 +28,7 @@ import { buildAgentCommand } from './agentCommand';
 import { getClaudeConfigFiles } from './claude';
 import {
   type AgentType,
-  type HermesConfig,
+  type OxConfig,
   projectConfigDir,
   readConfig,
   userConfigDir,
@@ -77,7 +77,7 @@ export const getCredentialFiles = async (
 
 export type ExecType = 'agent' | 'shell';
 
-export interface HermesContainerLabels {
+export interface OxContainerLabels {
   /** Session display name */
   name: string;
   /** Branch name (often same as name) */
@@ -105,36 +105,36 @@ export interface HermesContainerLabels {
 }
 
 /**
- * Build Docker container labels for hermes-managed containers.
- * Automatically sets `hermes.managed=true` and `hermes.created` timestamp.
+ * Build Docker container labels for ox-managed containers.
+ * Automatically sets `ox.managed=true` and `ox.created` timestamp.
  * Returns a Record suitable for passing to `runInDocker({ labels })`.
  */
-export function buildHermesLabels(
-  input: HermesContainerLabels,
+export function buildOxLabels(
+  input: OxContainerLabels,
 ): Record<string, string> {
   const result: Record<string, string> = {
-    'hermes.managed': 'true',
-    'hermes.name': input.name,
-    'hermes.branch': input.branch,
-    'hermes.agent': input.agent,
-    'hermes.exec-type': input.execType ?? 'agent',
-    'hermes.repo': input.repo ?? 'local',
-    'hermes.created': new Date().toISOString(),
+    'ox.managed': 'true',
+    'ox.name': input.name,
+    'ox.branch': input.branch,
+    'ox.agent': input.agent,
+    'ox.exec-type': input.execType ?? 'agent',
+    'ox.repo': input.repo ?? 'local',
+    'ox.created': new Date().toISOString(),
   };
-  if (input.prompt != null) result['hermes.prompt'] = input.prompt;
+  if (input.prompt != null) result['ox.prompt'] = input.prompt;
   if (input.interactive != null)
-    result['hermes.interactive'] = String(input.interactive);
-  if (input.model) result['hermes.model'] = input.model;
-  if (input.mount) result['hermes.mount'] = input.mount;
-  if (input.noGit) result['hermes.no-git'] = 'true';
-  if (input.resumedFrom) result['hermes.resumed-from'] = input.resumedFrom;
-  if (input.resumeImage) result['hermes.resume-image'] = input.resumeImage;
+    result['ox.interactive'] = String(input.interactive);
+  if (input.model) result['ox.model'] = input.model;
+  if (input.mount) result['ox.mount'] = input.mount;
+  if (input.noGit) result['ox.no-git'] = 'true';
+  if (input.resumedFrom) result['ox.resumed-from'] = input.resumedFrom;
+  if (input.resumeImage) result['ox.resume-image'] = input.resumeImage;
   return result;
 }
 
 /**
  * Create local directories for overlay mounts and return volume mount strings.
- * Overlay mounts are stored in .hermes/overlayMounts/<containerName>/<path>
+ * Overlay mounts are stored in .ox/overlayMounts/<containerName>/<path>
  * and bind-mounted into the container at /work/app/<path>.
  */
 async function createOverlayDirs(
@@ -183,8 +183,8 @@ async function cleanupOverlayDirs(containerName: string): Promise<void> {
 const escapePrompt = (cmd: string, prompt?: string | null): string =>
   prompt
     ? `
-HERMES_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"
-exec ${cmd} "$HERMES_PROMPT"
+OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"
+exec ${cmd} "$OX_PROMPT"
 `.trim()
     : `exec ${cmd}`;
 
@@ -192,10 +192,10 @@ exec ${cmd} "$HERMES_PROMPT"
 // Sandbox Image Configuration
 // ============================================================================
 
-const DOCKER_IMAGE_NAME = 'hermes-sandbox';
+const DOCKER_IMAGE_NAME = 'ox-sandbox';
 
 // GHCR (GitHub Container Registry) base path
-const GHCR_BASE = 'ghcr.io/timescale/hermes';
+const GHCR_BASE = 'ghcr.io/timescale/ox';
 
 // ============================================================================
 // Pull TTL - avoid excessive pulls by tracking last pull time
@@ -328,7 +328,7 @@ export interface SandboxImageConfig {
  * @param configOverride - Optional config to use instead of reading from filesystem (useful for testing)
  */
 export async function resolveSandboxImage(
-  configOverride?: HermesConfig,
+  configOverride?: OxConfig,
 ): Promise<SandboxImageConfig> {
   const config = configOverride ?? (await readConfig());
 
@@ -402,14 +402,14 @@ export interface DockerImageInfo {
 }
 
 /**
- * List all Docker images matching hermes-related patterns.
+ * List all Docker images matching ox-related patterns.
  */
-export async function listHermesImages(): Promise<DockerImageInfo[]> {
+export async function listOxImages(): Promise<DockerImageInfo[]> {
   const patterns = [
-    'hermes-sandbox',
+    'ox-sandbox',
     `${GHCR_BASE}/sandbox-slim`,
     `${GHCR_BASE}/sandbox-full`,
-    'hermes-resume',
+    'ox-resume',
   ];
 
   const seen = new Set<string>();
@@ -736,7 +736,7 @@ export interface StartContainerOptions {
 // Container Listing and Status
 // ============================================================================
 
-export interface HermesSession {
+export interface OxSession {
   containerId: string;
   containerName: string;
   name: string;
@@ -777,13 +777,13 @@ interface DockerInspectResult {
 }
 
 /**
- * List all hermes-managed containers with their metadata
+ * List all ox-managed containers with their metadata
  */
-export async function listHermesSessions(): Promise<HermesSession[]> {
+export async function listOxSessions(): Promise<OxSession[]> {
   try {
-    // Get all containers (running and stopped) with hermes.managed=true label
+    // Get all containers (running and stopped) with ox.managed=true label
     const result =
-      await $`docker ps -a --filter label=hermes.managed=true --format {{.ID}}`.quiet();
+      await $`docker ps -a --filter label=ox.managed=true --format {{.ID}}`.quiet();
     const containerIds = result.stdout
       .toString()
       .trim()
@@ -804,7 +804,7 @@ export async function listHermesSessions(): Promise<HermesSession[]> {
       const labels = container.Config.Labels;
       const state = container.State;
 
-      let status: HermesSession['status'];
+      let status: OxSession['status'];
       if (state.Running) {
         status = 'running';
       } else if (state.Paused) {
@@ -822,17 +822,17 @@ export async function listHermesSessions(): Promise<HermesSession[]> {
       return {
         containerId: container.Id.slice(0, 12),
         containerName: container.Name.replace(/^\//, ''),
-        name: labels['hermes.name'] || labels['hermes.branch'] || 'unknown',
-        branch: labels['hermes.branch'] || 'unknown',
-        agent: (labels['hermes.agent'] as AgentType) || 'opencode',
-        execType: (labels['hermes.exec-type'] as ExecType) || undefined,
-        model: labels['hermes.model'],
-        repo: labels['hermes.repo'] || 'unknown',
-        prompt: labels['hermes.prompt'] || '',
-        created: labels['hermes.created'] || '',
-        resumedFrom: labels['hermes.resumed-from'],
-        interactive: labels['hermes.interactive'] === 'true',
-        mountDir: labels['hermes.mount'],
+        name: labels['ox.name'] || labels['ox.branch'] || 'unknown',
+        branch: labels['ox.branch'] || 'unknown',
+        agent: (labels['ox.agent'] as AgentType) || 'opencode',
+        execType: (labels['ox.exec-type'] as ExecType) || undefined,
+        model: labels['ox.model'],
+        repo: labels['ox.repo'] || 'unknown',
+        prompt: labels['ox.prompt'] || '',
+        created: labels['ox.created'] || '',
+        resumedFrom: labels['ox.resumed-from'],
+        interactive: labels['ox.interactive'] === 'true',
+        mountDir: labels['ox.mount'],
         status,
         exitCode: status === 'exited' ? state.ExitCode : undefined,
         startedAt: state.StartedAt,
@@ -840,14 +840,14 @@ export async function listHermesSessions(): Promise<HermesSession[]> {
       };
     });
   } catch (error) {
-    log.error({ error }, 'Failed to list hermes sessions');
+    log.error({ error }, 'Failed to list ox sessions');
     // If docker command fails, return empty array
     return [];
   }
 }
 
 /**
- * Remove a hermes container by name or ID
+ * Remove a ox container by name or ID
  */
 export async function removeContainer(nameOrId: string): Promise<void> {
   let resumeImage: string | null = null;
@@ -859,7 +859,7 @@ export async function removeContainer(nameOrId: string): Promise<void> {
     );
     const container = containers[0];
     if (container) {
-      resumeImage = container.Config.Labels?.['hermes.resume-image'] ?? null;
+      resumeImage = container.Config.Labels?.['ox.resume-image'] ?? null;
       containerName = container.Name.replace(/^\//, '') ?? null;
     }
   } catch {
@@ -1203,9 +1203,9 @@ export async function resumeSession(
   }
 
   const containerLabels = container.Config.Labels ?? {};
-  if (containerLabels['hermes.managed'] !== 'true') {
-    log.error(`Container ${nameOrId} is not managed by hermes`);
-    throw new Error('Container is not managed by hermes');
+  if (containerLabels['ox.managed'] !== 'true') {
+    log.error(`Container ${nameOrId} is not managed by ox`);
+    throw new Error('Container is not managed by ox');
   }
 
   if (container.State?.Running) {
@@ -1213,10 +1213,10 @@ export async function resumeSession(
     throw new Error('Container is already running');
   }
 
-  const agent = (containerLabels['hermes.agent'] as AgentType) || 'opencode';
-  const model = options.model ?? containerLabels['hermes.model'];
+  const agent = (containerLabels['ox.agent'] as AgentType) || 'opencode';
+  const model = options.model ?? containerLabels['ox.model'];
   const resumeSuffix = nanoid(6).toLowerCase();
-  const resumeImage = `hermes-resume:${container.Id.slice(0, 12)}-${resumeSuffix}`;
+  const resumeImage = `ox-resume:${container.Id.slice(0, 12)}-${resumeSuffix}`;
 
   try {
     await $`docker commit ${container.Id} ${resumeImage}`.quiet();
@@ -1260,11 +1260,9 @@ export async function resumeSession(
   const resumePrompt =
     mode === 'detached'
       ? prompt?.trim() || ''
-      : containerLabels['hermes.prompt'] || '';
+      : containerLabels['ox.prompt'] || '';
   const baseSessionName =
-    containerLabels['hermes.name'] ||
-    containerLabels['hermes.branch'] ||
-    'session';
+    containerLabels['ox.name'] || containerLabels['ox.branch'] || 'session';
   const resumeName = `${baseSessionName}-resumed-${resumeSuffix}`;
 
   // For shell mode, just run bash; otherwise run the agent
@@ -1283,11 +1281,11 @@ ${config.initScript || ''}
 ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached' : 'interactive', model, agentArgs: options.agentArgs, continue: true }), prompt)}
 `.trim();
 
-  const hermesLabels = buildHermesLabels({
+  const oxLabels = buildOxLabels({
     name: resumeName,
-    branch: containerLabels['hermes.branch'] ?? 'unknown',
+    branch: containerLabels['ox.branch'] ?? 'unknown',
     agent,
-    repo: containerLabels['hermes.repo'] ?? 'unknown',
+    repo: containerLabels['ox.repo'] ?? 'unknown',
     prompt: resumePrompt,
     interactive: mode === 'interactive' || mode === 'shell',
     model,
@@ -1310,7 +1308,7 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
       detached: true,
       allocateTty: mode !== 'detached',
       files,
-      labels: hermesLabels,
+      labels: oxLabels,
     });
     await result.exited;
     return containerName;
@@ -1323,9 +1321,7 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
 /**
  * Get a single session by container ID or name
  */
-export async function getSession(
-  nameOrId: string,
-): Promise<HermesSession | null> {
+export async function getSession(nameOrId: string): Promise<OxSession | null> {
   try {
     const result = await $`docker inspect ${nameOrId}`.quiet();
     const containers: DockerInspectResult[] = JSON.parse(
@@ -1339,14 +1335,14 @@ export async function getSession(
 
     const labels = container.Config.Labels;
 
-    // Check if this is a hermes-managed container
-    if (labels['hermes.managed'] !== 'true') {
+    // Check if this is a ox-managed container
+    if (labels['ox.managed'] !== 'true') {
       return null;
     }
 
     const state = container.State;
 
-    let status: HermesSession['status'];
+    let status: OxSession['status'];
     if (state.Running) {
       status = 'running';
     } else if (state.Paused) {
@@ -1364,17 +1360,17 @@ export async function getSession(
     return {
       containerId: container.Id.slice(0, 12),
       containerName: container.Name.replace(/^\//, ''),
-      name: labels['hermes.name'] || labels['hermes.branch'] || 'unknown',
-      branch: labels['hermes.branch'] || 'unknown',
-      agent: (labels['hermes.agent'] as AgentType) || 'opencode',
-      execType: (labels['hermes.exec-type'] as ExecType) || undefined,
-      model: labels['hermes.model'],
-      repo: labels['hermes.repo'] || 'unknown',
-      prompt: labels['hermes.prompt'] || '',
-      created: labels['hermes.created'] || '',
-      resumedFrom: labels['hermes.resumed-from'],
-      interactive: labels['hermes.interactive'] === 'true',
-      mountDir: labels['hermes.mount'],
+      name: labels['ox.name'] || labels['ox.branch'] || 'unknown',
+      branch: labels['ox.branch'] || 'unknown',
+      agent: (labels['ox.agent'] as AgentType) || 'opencode',
+      execType: (labels['ox.exec-type'] as ExecType) || undefined,
+      model: labels['ox.model'],
+      repo: labels['ox.repo'] || 'unknown',
+      prompt: labels['ox.prompt'] || '',
+      created: labels['ox.created'] || '',
+      resumedFrom: labels['ox.resumed-from'],
+      interactive: labels['ox.interactive'] === 'true',
+      mountDir: labels['ox.mount'],
       status,
       exitCode: status === 'exited' ? state.ExitCode : undefined,
       startedAt: state.StartedAt,
@@ -1410,15 +1406,15 @@ export async function startContainer(
     agentArgs,
   } = options;
 
-  const hermesEnvPath = '.hermes/.env';
-  const hermesEnvFile = Bun.file(hermesEnvPath);
+  const oxEnvPath = '.ox/.env';
+  const oxEnvFile = Bun.file(oxEnvPath);
 
-  // Create empty .hermes/.env if it doesn't exist
-  if (!(await hermesEnvFile.exists())) {
-    await Bun.write(hermesEnvPath, '');
+  // Create empty .ox/.env if it doesn't exist
+  if (!(await oxEnvFile.exists())) {
+    await Bun.write(oxEnvPath, '');
   }
 
-  const containerName = `hermes-${branchName}`;
+  const containerName = `ox-${branchName}`;
 
   // Build env var arguments for docker run
   // Order matters for precedence: later values override earlier ones
@@ -1466,7 +1462,7 @@ export async function startContainer(
 
   // Build the agent command based on the selected agent type, model, and mode.
   // Prompt is NOT passed to the builder — Docker injects it via escapePrompt()
-  // which appends it as a positional arg (exec <cmd> "$HERMES_PROMPT").
+  // which appends it as a positional arg (exec <cmd> "$OX_PROMPT").
   const hasPrompt = prompt.trim().length > 0;
   let agentCommand = buildAgentCommand({
     agent,
@@ -1475,7 +1471,7 @@ export async function startContainer(
     agentArgs,
   });
   // For interactive opencode with a prompt, append --prompt so that
-  // escapePrompt() produces: exec opencode --prompt "$HERMES_PROMPT"
+  // escapePrompt() produces: exec opencode --prompt "$OX_PROMPT"
   if (agent === 'opencode' && interactive && hasPrompt) {
     agentCommand += ' --prompt';
   }
@@ -1503,7 +1499,7 @@ gh auth setup-git
 # Only create branch if on main/master
 current_branch=$(git rev-parse --abbrev-ref HEAD)
 if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
-  git switch -c "hermes/${branchName}"
+  git switch -c "ox/${branchName}"
 fi
 ${config.initScript || ''}
 ${escapePrompt(agentCommand, fullPrompt)}
@@ -1528,13 +1524,13 @@ cd /work
 gh auth setup-git
 gh repo clone ${repoInfo.fullName} app
 cd app
-git switch -c "hermes/${branchName}"
+git switch -c "ox/${branchName}"
 ${config.initScript || ''}
 ${escapePrompt(agentCommand, fullPrompt)}
 `.trim();
   }
 
-  const hermesLabels = buildHermesLabels({
+  const oxLabels = buildOxLabels({
     name: branchName,
     branch: branchName,
     agent,
@@ -1552,7 +1548,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
       dockerArgs: [
         ...hostEnvArgs,
         '--env-file',
-        hermesEnvPath,
+        oxEnvPath,
         ...envArgs,
         ...volumeArgs,
       ],
@@ -1565,7 +1561,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
       detached: true,
       allocateTty: interactive,
       files,
-      labels: hermesLabels,
+      labels: oxLabels,
     });
     await result.exited;
     return containerName;
@@ -1592,16 +1588,16 @@ export async function startShellContainer(
 ): Promise<void> {
   const { repoInfo, mountDir, isGitRepo = true } = options;
 
-  const hermesEnvPath = '.hermes/.env';
-  const hermesEnvFile = Bun.file(hermesEnvPath);
+  const oxEnvPath = '.ox/.env';
+  const oxEnvFile = Bun.file(oxEnvPath);
 
-  // Create empty .hermes/.env if it doesn't exist
-  if (!(await hermesEnvFile.exists())) {
-    await Bun.write(hermesEnvPath, '');
+  // Create empty .ox/.env if it doesn't exist
+  if (!(await oxEnvFile.exists())) {
+    await Bun.write(oxEnvPath, '');
   }
 
   const shellSuffix = nanoid(6).toLowerCase();
-  const containerName = `hermes-shell-${shellSuffix}`;
+  const containerName = `ox-shell-${shellSuffix}`;
 
   // Pass through API keys from host environment
   const hostEnvArgs: string[] = [];
@@ -1671,7 +1667,7 @@ exec bash
 `.trim();
   }
 
-  const hermesLabels = buildHermesLabels({
+  const oxLabels = buildOxLabels({
     name: `shell-${shellSuffix}`,
     branch: `shell-${shellSuffix}`,
     agent: 'opencode',
@@ -1686,10 +1682,10 @@ exec bash
   await runInDocker({
     containerName,
     interactive: true,
-    dockerArgs: [...hostEnvArgs, '--env-file', hermesEnvPath, ...volumeArgs],
+    dockerArgs: [...hostEnvArgs, '--env-file', oxEnvPath, ...volumeArgs],
     cmdName: 'bash',
     cmdArgs: ['-c', startupScript],
     files,
-    labels: hermesLabels,
+    labels: oxLabels,
   });
 }

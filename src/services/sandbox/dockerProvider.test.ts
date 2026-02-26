@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HermesSession as DockerSession } from '../docker.ts';
+import type { OxSession as DockerSession } from '../docker.ts';
 import { mapDockerSession, mapDockerStats } from './dockerProvider.ts';
 
 // Helper to create a minimal DockerSession for testing
@@ -8,7 +8,7 @@ function makeDockerSession(
 ): DockerSession {
   return {
     containerId: 'abc123',
-    containerName: 'hermes-test-container',
+    containerName: 'ox-test-container',
     name: 'test-session',
     branch: 'main',
     agent: 'claude',
@@ -69,7 +69,7 @@ describe('mapDockerSession', () => {
   test('preserves all metadata fields', () => {
     const docker = makeDockerSession({
       containerId: 'cid-1',
-      containerName: 'hermes-my-container',
+      containerName: 'ox-my-container',
       name: 'my-session',
       branch: 'feature/test',
       agent: 'claude',
@@ -89,7 +89,7 @@ describe('mapDockerSession', () => {
     const session = mapDockerSession(docker);
 
     expect(session.id).toBe('cid-1');
-    expect(session.containerName).toBe('hermes-my-container');
+    expect(session.containerName).toBe('ox-my-container');
     expect(session.name).toBe('my-session');
     expect(session.branch).toBe('feature/test');
     expect(session.agent).toBe('claude');

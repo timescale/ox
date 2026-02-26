@@ -1,4 +1,4 @@
-# hermes
+# ox
 
 A CLI tool to run AI coding agents in isolated sandboxes per task.
 
@@ -7,7 +7,7 @@ A CLI tool to run AI coding agents in isolated sandboxes per task.
 ### Quick Install (Recommended)
 
 ```bash
-curl -fsSL https://install.hermetic.ly | sh
+curl -fsSL https://get.ox.build | sh
 ```
 
 After installation, restart your shell or run `source ~/.zshrc` (or `source ~/.bashrc`) to update your PATH.
@@ -27,8 +27,8 @@ brew install --cask ghostty
 If you prefer to clone the repo and run from source:
 
 ```bash
-git clone https://github.com/timescale/hermes.git
-cd hermes
+git clone https://github.com/timescale/ox.git
+cd ox
 ./bun i && ./bun link
 source ~/.zshrc # or restart your shell
 ```
@@ -38,8 +38,8 @@ source ~/.zshrc # or restart your shell
 ```bash
 cd myproject
 # Full TUI experience
-hermes
+ox
 
 # Or just run a single task:
-hermes "Build a new feature that ..."
+ox "Build a new feature that ..."
 ```

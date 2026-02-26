@@ -7,7 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { userConfigDir } from '../config.ts';
 import { log } from '../logger.ts';
-import type { HermesSession, SandboxProviderType } from './types.ts';
+import type { OxSession, SandboxProviderType } from './types.ts';
 
 // ============================================================================
 // Schema
@@ -77,7 +77,7 @@ export function openSessionDb(): Database {
 }
 
 // ============================================================================
-// Row <-> HermesSession Mapping
+// Row <-> OxSession Mapping
 // ============================================================================
 
 interface SessionRow {
@@ -106,7 +106,7 @@ interface SessionRow {
   extra: string | null;
 }
 
-function rowToSession(row: SessionRow): HermesSession {
+function rowToSession(row: SessionRow): OxSession {
   return {
     id: row.id,
     provider: row.provider as SandboxProviderType,
@@ -118,15 +118,15 @@ function rowToSession(row: SessionRow): HermesSession {
         return 'claude';
       }
       return row.agent;
-    })() as HermesSession['agent'],
+    })() as OxSession['agent'],
     model: row.model ?? undefined,
     prompt: row.prompt ?? '',
     repo: row.repo ?? '',
     created: row.created,
-    status: row.status as HermesSession['status'],
+    status: row.status as OxSession['status'],
     exitCode: row.exit_code ?? undefined,
     interactive: row.interactive === 1,
-    execType: (row.exec_type as HermesSession['execType']) ?? undefined,
+    execType: (row.exec_type as OxSession['execType']) ?? undefined,
     resumedFrom: row.resumed_from ?? undefined,
     region: row.region ?? undefined,
     mountDir: row.mount_dir ?? undefined,
@@ -142,9 +142,9 @@ function rowToSession(row: SessionRow): HermesSession {
 // CRUD Operations
 // ============================================================================
 
-/** Insert or update a session record from a HermesSession object.
+/** Insert or update a session record from a OxSession object.
  *  Uses ON CONFLICT to preserve the deleted_at column on updates. */
-export function upsertSession(db: Database, session: HermesSession): void {
+export function upsertSession(db: Database, session: OxSession): void {
   const stmt = db.prepare(`
     INSERT INTO sessions (
       id, provider, name, branch, agent, model, prompt, repo,
@@ -207,8 +207,8 @@ export function upsertSession(db: Database, session: HermesSession): void {
   });
 }
 
-/** Get a session by ID, returns HermesSession or null */
-export function getSession(db: Database, id: string): HermesSession | null {
+/** Get a session by ID, returns OxSession or null */
+export function getSession(db: Database, id: string): OxSession | null {
   const stmt = db.prepare('SELECT * FROM sessions WHERE id = $id');
   const row = stmt.get({ $id: id }) as SessionRow | null;
   return row ? rowToSession(row) : null;
@@ -218,7 +218,7 @@ export function getSession(db: Database, id: string): HermesSession | null {
 export function listSessions(
   db: Database,
   filter?: { provider?: SandboxProviderType; status?: string },
-): HermesSession[] {
+): OxSession[] {
   const conditions: string[] = [];
   const params: Record<string, string> = {};
 
@@ -244,7 +244,7 @@ export function listSessions(
 }
 
 /** List ALL sessions including soft-deleted ones (for resource cleanup classification) */
-export function listAllSessionsIncludingDeleted(db: Database): HermesSession[] {
+export function listAllSessionsIncludingDeleted(db: Database): OxSession[] {
   const stmt = db.prepare('SELECT * FROM sessions ORDER BY created DESC');
   const rows = stmt.all() as SessionRow[];
   return rows.map(rowToSession);

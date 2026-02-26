@@ -8,7 +8,7 @@ import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import { formatCpuPercent, formatMemUsage } from '../services/docker';
 import { getPrForBranch, type PrInfo } from '../services/github';
 import { log } from '../services/logger';
-import { getSandboxProvider, type HermesSession } from '../services/sandbox';
+import { getSandboxProvider, type OxSession } from '../services/sandbox';
 import {
   fetchDockerStats,
   formatRelativeTime,
@@ -29,11 +29,11 @@ import { LogViewer } from './LogViewer';
 const PR_CACHE_TTL = 60_000;
 
 export interface SessionDetailProps {
-  session: HermesSession;
+  session: OxSession;
   onBack: () => void;
   onAttach: (sessionId: string) => void;
   onShell: (sessionId: string) => void;
-  onResume: (session: HermesSession) => void;
+  onResume: (session: OxSession) => void;
   onSessionDeleted: () => void;
   onNewPrompt?: () => void;
 }
@@ -206,7 +206,7 @@ export function SessionDetail({
   }, [prInfo]);
 
   const handleGitSwitch = useCallback(async () => {
-    const branchName = `hermes/${session.branch}`;
+    const branchName = `ox/${session.branch}`;
     setActionInProgress(true);
     try {
       await Bun.$`git fetch && git switch ${branchName}`.quiet();
@@ -244,7 +244,7 @@ export function SessionDetail({
       {
         id: 'task.new',
         title: 'New task',
-        description: 'Start a new hermes session',
+        description: 'Start a new ox session',
         category: 'Navigation',
         keybind: { key: 'n', ctrl: true },
         enabled: !!onNewPrompt,

@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { YAML } from 'bun';
 import { Deferred } from '../types/deferred';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
-import { getHermesSecret, setHermesSecret } from './keyring';
+import { getOxSecret, setOxSecret } from './keyring';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
@@ -66,23 +66,23 @@ const readHostCredentials = async (): Promise<GhHostsYml | null> => {
   }
 };
 
-const HERMES_GH_ACCOUNT = 'gh/hosts.yml';
+const OX_GH_ACCOUNT = 'gh/hosts.yml';
 
-const readHermesCredentialCache = async (): Promise<GhHostsYml | null> => {
+const readOxCredentialCache = async (): Promise<GhHostsYml | null> => {
   try {
-    const raw = await getHermesSecret(HERMES_GH_ACCOUNT);
+    const raw = await getOxSecret(OX_GH_ACCOUNT);
     if (!raw) {
-      log.debug('No gh/hosts.yml found in hermes keyring');
+      log.debug('No gh/hosts.yml found in ox keyring');
       return null;
     }
     const creds = YAML.parse(raw) as GhHostsYml;
     if (ghCredsValid(creds)) {
-      log.debug('Found valid gh credentials in hermes keyring');
+      log.debug('Found valid gh credentials in ox keyring');
       return creds;
     }
-    log.debug('gh credentials present in hermes keyring, but invalid.');
+    log.debug('gh credentials present in ox keyring, but invalid.');
   } catch {
-    log.debug('No gh/hosts.yml found in hermes keyring');
+    log.debug('No gh/hosts.yml found in ox keyring');
   }
   return null;
 };
@@ -90,7 +90,7 @@ const readHermesCredentialCache = async (): Promise<GhHostsYml | null> => {
 export const writeGhCredentialCache = async (
   creds: GhHostsYml,
 ): Promise<void> => {
-  await setHermesSecret(HERMES_GH_ACCOUNT, YAML.stringify(creds));
+  await setOxSecret(OX_GH_ACCOUNT, YAML.stringify(creds));
 };
 
 /**
@@ -127,7 +127,7 @@ const resolveCredentials = async (): Promise<GhHostsYml> => {
     return hostCreds;
   }
 
-  const cachedCreds = await readHermesCredentialCache();
+  const cachedCreds = await readOxCredentialCache();
   if (cachedCreds && ghCredsValid(cachedCreds)) {
     return cachedCreds;
   }
@@ -147,7 +147,7 @@ const resolveAndCacheCredentials = async (): Promise<GhHostsYml> => {
     return hostCreds;
   }
 
-  const cachedCreds = await readHermesCredentialCache();
+  const cachedCreds = await readOxCredentialCache();
   if (cachedCreds && ghCredsValid(cachedCreds)) {
     return cachedCreds;
   }
@@ -183,7 +183,7 @@ interface RunGhInDockerOptions extends RunInDockerOptionsBase {
    * When true, credentials are written to the OS keyring on resolution and
    * captured back from the container after it exits. Defaults to false.
    * Only enable for interactive flows where the user may have modified
-   * credentials (e.g. `hermes gh auth login`).
+   * credentials (e.g. `ox gh auth login`).
    */
   saveCredentials?: boolean;
 }
@@ -260,7 +260,7 @@ export const checkGhCredentials = async (): Promise<boolean> => {
 };
 
 /**
- * Try to apply host gh credentials to the hermes keyring cache.
+ * Try to apply host gh credentials to the ox keyring cache.
  * Returns true if valid credentials were found and cached.
  */
 export async function applyHostGhCreds(): Promise<boolean> {

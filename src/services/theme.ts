@@ -61,7 +61,7 @@ export interface ThemeJson {
   theme: Record<string, ColorValue>;
 }
 
-/** Resolved theme colors - the subset we actually use in hermes */
+/** Resolved theme colors - the subset we actually use in ox */
 export interface ThemeColors {
   // Primary colors
   primary: string;
@@ -261,7 +261,7 @@ function resolveColor(
 
 /**
  * Resolve a theme JSON to a ThemeColors object.
- * Only extracts the colors we actually use in hermes.
+ * Only extracts the colors we actually use in ox.
  */
 export function resolveTheme(
   themeJson: ThemeJson,

@@ -14,8 +14,8 @@ import {
   computeDockerfileHash,
   type DockerImageInfo,
   getGhcrImageTags,
-  listHermesSessions as listDockerContainers,
-  listHermesImages,
+  listOxSessions as listDockerContainers,
+  listOxImages,
 } from '../docker.ts';
 import { log } from '../logger.ts';
 import { getBaseSnapshotSlug } from './cloudSnapshot.ts';
@@ -29,7 +29,7 @@ import {
   listSessions,
   openSessionDb,
 } from './sessionDb.ts';
-import type { HermesSession } from './types.ts';
+import type { OxSession } from './types.ts';
 
 // ============================================================================
 // Types
@@ -59,15 +59,15 @@ export interface SandboxResource {
 
 interface SnapshotClassificationContext {
   currentBaseSlug: string;
-  sessionsBySnapshotSlug: Map<string, HermesSession>;
-  deletedSessionsBySnapshotSlug: Map<string, HermesSession>;
+  sessionsBySnapshotSlug: Map<string, OxSession>;
+  deletedSessionsBySnapshotSlug: Map<string, OxSession>;
 }
 
 interface VolumeClassificationContext {
   /** Slug of the volume that is the source of the current base snapshot (if known) */
   currentBaseVolumeSlug: string | null;
-  sessionsByVolumeSlug: Map<string, HermesSession>;
-  deletedSessionsByVolumeSlug: Map<string, HermesSession>;
+  sessionsByVolumeSlug: Map<string, OxSession>;
+  deletedSessionsByVolumeSlug: Map<string, OxSession>;
 }
 
 interface ImageClassificationContext {
@@ -81,28 +81,28 @@ interface ImageClassificationContext {
 // Classification Functions (pure — no API calls)
 // ============================================================================
 
-/** Known Hermes snapshot slug prefixes. */
-const HERMES_SNAPSHOT_PREFIXES = ['hermes-base-', 'hsnap-'];
+/** Known Ox snapshot slug prefixes. */
+const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'hsnap-'];
 
-/** Known Hermes volume slug prefixes. */
-const HERMES_VOLUME_PREFIXES = ['hbb-', 'hsh-', 'hs-', 'hr-'];
+/** Known Ox volume slug prefixes. */
+const OX_VOLUME_PREFIXES = ['hbb-', 'hsh-', 'hs-', 'hr-'];
 
 /**
  * Classify a cloud snapshot as current/active/old/orphaned.
- * Returns null for non-Hermes snapshots (unrecognized slug prefix).
+ * Returns null for non-Ox snapshots (unrecognized slug prefix).
  *
  * Rules:
- * - `hermes-base-*` → "Base Snapshot": `current` if matches getBaseSnapshotSlug(), else `old`
+ * - `ox-base-*` → "Base Snapshot": `current` if matches getBaseSnapshotSlug(), else `old`
  * - `hsnap-*` → "Session Snapshot": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
- * - Other prefixes → null (not a Hermes resource, skip)
+ * - Other prefixes → null (not a Ox resource, skip)
  */
 export function classifyCloudSnapshot(
   snapshot: DenoSnapshot,
   ctx: SnapshotClassificationContext,
 ): SandboxResource | null {
-  // Skip non-Hermes snapshots entirely to avoid accidental cleanup
-  if (!HERMES_SNAPSHOT_PREFIXES.some((p) => snapshot.slug.startsWith(p))) {
+  // Skip non-Ox snapshots entirely to avoid accidental cleanup
+  if (!OX_SNAPSHOT_PREFIXES.some((p) => snapshot.slug.startsWith(p))) {
     return null;
   }
 
@@ -117,7 +117,7 @@ export function classifyCloudSnapshot(
   };
 
   // Base snapshots
-  if (snapshot.slug.startsWith('hermes-base-')) {
+  if (snapshot.slug.startsWith('ox-base-')) {
     return {
       ...base,
       category: 'Base Snapshot',
@@ -155,7 +155,7 @@ export function classifyCloudSnapshot(
 
 /**
  * Classify a cloud volume as current/active/old/orphaned.
- * Returns null for non-Hermes volumes (unrecognized slug prefix).
+ * Returns null for non-Ox volumes (unrecognized slug prefix).
  *
  * Rules:
  * - `hbb-*` → "Build Volume": `current` if it is the source volume of the
@@ -163,14 +163,14 @@ export function classifyCloudSnapshot(
  * - `hs-*` / `hr-*` → "Session Volume": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
  * - `hsh-*` → "Shell Volume": always `orphaned` (ephemeral, shouldn't persist)
- * - Other prefixes → null (not a Hermes resource, skip)
+ * - Other prefixes → null (not a Ox resource, skip)
  */
 export function classifyCloudVolume(
   volume: DenoVolume,
   ctx: VolumeClassificationContext,
 ): SandboxResource | null {
-  // Skip non-Hermes volumes entirely to avoid accidental cleanup
-  if (!HERMES_VOLUME_PREFIXES.some((p) => volume.slug.startsWith(p))) {
+  // Skip non-Ox volumes entirely to avoid accidental cleanup
+  if (!OX_VOLUME_PREFIXES.some((p) => volume.slug.startsWith(p))) {
     return null;
   }
 
@@ -237,9 +237,9 @@ export function classifyCloudVolume(
  * Classify a Docker image as current/active/old/orphaned.
  *
  * Rules:
- * - `hermes-sandbox:md5-*` → "Local Build": `current` if hash matches, else `old`
- * - `ghcr.io/timescale/hermes/sandbox-*` → "GHCR Image": `current` if tag is current, else `old`
- * - `hermes-resume:*` → "Resume Image": `active` if container exists with matching image, else `orphaned`
+ * - `ox-sandbox:md5-*` → "Local Build": `current` if hash matches, else `old`
+ * - `ghcr.io/timescale/ox/sandbox-*` → "GHCR Image": `current` if tag is current, else `old`
+ * - `ox-resume:*` → "Resume Image": `active` if container exists with matching image, else `orphaned`
  */
 export function classifyDockerImage(
   image: DockerImageInfo,
@@ -257,8 +257,8 @@ export function classifyDockerImage(
     createdAt: image.created,
   };
 
-  // Local builds (hermes-sandbox:md5-*)
-  if (image.repository === 'hermes-sandbox' && image.tag.startsWith('md5-')) {
+  // Local builds (ox-sandbox:md5-*)
+  if (image.repository === 'ox-sandbox' && image.tag.startsWith('md5-')) {
     const hash = image.tag.slice(4); // strip 'md5-' prefix
     return {
       ...base,
@@ -267,8 +267,8 @@ export function classifyDockerImage(
     };
   }
 
-  // GHCR images (ghcr.io/timescale/hermes/sandbox-*)
-  if (image.repository.startsWith('ghcr.io/timescale/hermes/sandbox-')) {
+  // GHCR images (ghcr.io/timescale/ox/sandbox-*)
+  if (image.repository.startsWith('ghcr.io/timescale/ox/sandbox-')) {
     const fullTag = `${image.repository}:${image.tag}`;
     return {
       ...base,
@@ -277,8 +277,8 @@ export function classifyDockerImage(
     };
   }
 
-  // Resume images (hermes-resume:<containerId-12>-<nanoid-6>)
-  if (image.repository === 'hermes-resume') {
+  // Resume images (ox-resume:<containerId-12>-<nanoid-6>)
+  if (image.repository === 'ox-resume') {
     // The tag format is: <12-char-container-id>-<6-char-nanoid>
     // Check if any active container has a matching ID prefix
     const containerIdPrefix = image.tag.slice(0, 12);
@@ -290,7 +290,7 @@ export function classifyDockerImage(
     };
   }
 
-  // Unknown image — should be unreachable since listHermesImages queries
+  // Unknown image — should be unreachable since listOxImages queries
   // specific patterns. Classify as current to avoid accidental cleanup.
   return {
     ...base,
@@ -308,15 +308,15 @@ export function classifyDockerImage(
  * Separates active (non-deleted) sessions from deleted sessions.
  */
 function buildSessionLookups(
-  allSessions: HermesSession[],
-  activeSessions: HermesSession[],
+  allSessions: OxSession[],
+  activeSessions: OxSession[],
 ) {
   const activeIds = new Set(activeSessions.map((s) => s.id));
 
-  const sessionsByVolumeSlug = new Map<string, HermesSession>();
-  const sessionsBySnapshotSlug = new Map<string, HermesSession>();
-  const deletedSessionsByVolumeSlug = new Map<string, HermesSession>();
-  const deletedSessionsBySnapshotSlug = new Map<string, HermesSession>();
+  const sessionsByVolumeSlug = new Map<string, OxSession>();
+  const sessionsBySnapshotSlug = new Map<string, OxSession>();
+  const deletedSessionsByVolumeSlug = new Map<string, OxSession>();
+  const deletedSessionsBySnapshotSlug = new Map<string, OxSession>();
 
   for (const session of allSessions) {
     const isActive = activeIds.has(session.id);
@@ -408,7 +408,7 @@ async function discoverCloudResources(
  */
 async function discoverDockerResources(): Promise<SandboxResource[]> {
   log.debug('Discovering Docker resources...');
-  const images = await listHermesImages();
+  const images = await listOxImages();
   if (images.length === 0) {
     log.debug('No Docker images found');
     return [];

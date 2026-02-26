@@ -33,8 +33,8 @@ import {
 import type {
   CreateSandboxOptions,
   CreateShellSandboxOptions,
-  HermesSession,
   LogStream,
+  OxSession,
   ResumeSandboxOptions,
   SandboxBuildProgress,
   SandboxProvider,
@@ -46,7 +46,7 @@ import type {
 // ============================================================================
 
 /** Name of the tmux session used for agent processes inside cloud sandboxes. */
-const TMUX_SESSION = 'hermes';
+const TMUX_SESSION = 'ox';
 
 /** Check whether an error message indicates a concurrency/quota limit. */
 function isConcurrencyLimitError(message: string): boolean {
@@ -191,7 +191,7 @@ async function provisionSandbox(
       const fullName = options.repoInfo.fullName;
       onProgress?.('Cloning repository');
       await logToSandbox(sandbox, `Cloning repository ${fullName}...`);
-      const branchRef = `hermes/${options.branchName}`;
+      const branchRef = `ox/${options.branchName}`;
       await sandboxExec(
         sandbox,
         `cd /work && gh auth setup-git && gh repo clone ${shellEscape(fullName)} app && cd app && git switch -c ${shellEscape(branchRef)}`,
@@ -335,7 +335,7 @@ async function sshIntoSandbox(
     /**
      * Terminal screen options. Pass `TUI_SUBPROCESS_OPTS` when called
      * from the TUI (alternate screen isolation). Omit or pass `{}` when
-     * called from standalone CLI commands like `hermes shell`.
+     * called from standalone CLI commands like `ox shell`.
      */
     screen?: SubprocessScreenOptions;
   },
@@ -518,7 +518,7 @@ export class CloudSandboxProvider implements SandboxProvider {
   // Lifecycle
   // --------------------------------------------------------------------------
 
-  async create(options: CreateSandboxOptions): Promise<HermesSession> {
+  async create(options: CreateSandboxOptions): Promise<OxSession> {
     if (options.mountDir) {
       log.warn(
         'Mount mode is not supported for cloud sandboxes — ignoring mountDir',
@@ -553,10 +553,10 @@ export class CloudSandboxProvider implements SandboxProvider {
         timeout: '30m',
         memory: '2GiB',
         labels: {
-          'hermes.managed': 'true',
-          'hermes.name': options.branchName,
-          'hermes.agent': options.agent,
-          'hermes.repo': options.repoInfo?.fullName ?? 'local',
+          'ox.managed': 'true',
+          'ox.name': options.branchName,
+          'ox.agent': options.agent,
+          'ox.repo': options.repoInfo?.fullName ?? 'local',
         },
         env,
       });
@@ -594,7 +594,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       );
     }
 
-    const session: HermesSession = {
+    const session: OxSession = {
       id: sessionId,
       name: options.branchName,
       provider: 'cloud',
@@ -663,7 +663,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       root: shellVolume.slug,
       timeout: '30m',
       memory: '2GiB',
-      labels: { 'hermes.managed': 'true' },
+      labels: { 'ox.managed': 'true' },
     });
 
     // Inject credentials
@@ -709,7 +709,7 @@ export class CloudSandboxProvider implements SandboxProvider {
   async resume(
     sessionId: string,
     options: ResumeSandboxOptions,
-  ): Promise<HermesSession> {
+  ): Promise<OxSession> {
     const { onProgress } = options;
     const client = await this.getClient();
     const db = openSessionDb();
@@ -764,10 +764,10 @@ export class CloudSandboxProvider implements SandboxProvider {
         timeout: '30m',
         memory: '2GiB',
         labels: {
-          'hermes.managed': 'true',
-          'hermes.name': existing.name,
-          'hermes.agent': existing.agent,
-          'hermes.repo': existing.repo,
+          'ox.managed': 'true',
+          'ox.name': existing.name,
+          'ox.agent': existing.agent,
+          'ox.repo': existing.repo,
         },
       });
     } catch (err) {
@@ -807,7 +807,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const isInteractive =
       options.mode === 'interactive' || options.mode === 'shell';
 
-    const newSession: HermesSession = {
+    const newSession: OxSession = {
       id: resumeSessionId,
       name: existing.name,
       provider: 'cloud',
@@ -864,7 +864,7 @@ export class CloudSandboxProvider implements SandboxProvider {
   // Session Management
   // --------------------------------------------------------------------------
 
-  async list(): Promise<HermesSession[]> {
+  async list(): Promise<OxSession[]> {
     const db = openSessionDb();
 
     // Return sessions from SQLite immediately for fast startup.
@@ -886,11 +886,11 @@ export class CloudSandboxProvider implements SandboxProvider {
    */
   private async syncSessionStatuses(
     db: Database,
-    sessions: HermesSession[],
+    sessions: OxSession[],
   ): Promise<void> {
     const client = await this.getClient();
     const runningSandboxes = await client.listSandboxes({
-      'hermes.managed': 'true',
+      'ox.managed': 'true',
     });
 
     const runningIds = new Set(
@@ -905,7 +905,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
   }
 
-  async get(sessionId: string): Promise<HermesSession | null> {
+  async get(sessionId: string): Promise<OxSession | null> {
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
 
@@ -917,7 +917,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       try {
         const client = await this.getClient();
         const runningSandboxes = await client.listSandboxes({
-          'hermes.managed': 'true',
+          'ox.managed': 'true',
         });
         const runningIds = new Set(
           runningSandboxes

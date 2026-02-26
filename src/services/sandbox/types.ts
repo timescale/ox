@@ -11,7 +11,7 @@ export type SandboxProviderType = 'docker' | 'cloud';
 export type ExecType = 'agent' | 'shell';
 
 // Unified session metadata (provider-agnostic)
-export interface HermesSession {
+export interface OxSession {
   id: string; // containerId (Docker) or sandbox ID (cloud)
   name: string; // human-readable session name
   provider: SandboxProviderType;
@@ -120,16 +120,13 @@ export interface SandboxProvider {
 
   // Lifecycle — create/resume always return a session (never attach internally).
   // For interactive sessions, the caller should call attach() after create/resume.
-  create(options: CreateSandboxOptions): Promise<HermesSession>;
+  create(options: CreateSandboxOptions): Promise<OxSession>;
   createShell(options: CreateShellSandboxOptions): Promise<ShellSession>;
-  resume(
-    sessionId: string,
-    options: ResumeSandboxOptions,
-  ): Promise<HermesSession>;
+  resume(sessionId: string, options: ResumeSandboxOptions): Promise<OxSession>;
 
   // Session management
-  list(): Promise<HermesSession[]>;
-  get(sessionId: string): Promise<HermesSession | null>;
+  list(): Promise<OxSession[]>;
+  get(sessionId: string): Promise<OxSession | null>;
   remove(sessionId: string): Promise<void>;
   stop(sessionId: string): Promise<void>;
 

@@ -38,13 +38,13 @@ jobs:
         run: |
           ./bun build ./index.ts --compile --minify --sourcemap \
             --target=${{ matrix.target }} \
-            --outfile hermes-${{ matrix.os }}-${{ matrix.arch }}
+            --outfile ox-${{ matrix.os }}-${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hermes-${{ matrix.os }}-${{ matrix.arch }}
-          path: hermes-${{ matrix.os }}-${{ matrix.arch }}
+          name: ox-${{ matrix.os }}-${{ matrix.arch }}
+          path: ox-${{ matrix.os }}-${{ matrix.arch }}
 
   release:
     name: Create Release

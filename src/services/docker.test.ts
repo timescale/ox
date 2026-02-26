@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  buildHermesLabels,
+  buildOxLabels,
   formatCpuPercent,
   formatMemUsage,
   resolveSandboxImage,
@@ -75,24 +75,24 @@ describe('toVolumeArgs', () => {
   });
 });
 
-describe('buildHermesLabels', () => {
+describe('buildOxLabels', () => {
   test('sets required labels', () => {
-    const labels = buildHermesLabels({
+    const labels = buildOxLabels({
       name: 'my-session',
       branch: 'feature-x',
       agent: 'opencode',
     });
-    expect(labels['hermes.managed']).toBe('true');
-    expect(labels['hermes.name']).toBe('my-session');
-    expect(labels['hermes.branch']).toBe('feature-x');
-    expect(labels['hermes.agent']).toBe('opencode');
-    expect(labels['hermes.exec-type']).toBe('agent');
-    expect(labels['hermes.repo']).toBe('local');
-    expect(labels['hermes.created']).toBeDefined();
+    expect(labels['ox.managed']).toBe('true');
+    expect(labels['ox.name']).toBe('my-session');
+    expect(labels['ox.branch']).toBe('feature-x');
+    expect(labels['ox.agent']).toBe('opencode');
+    expect(labels['ox.exec-type']).toBe('agent');
+    expect(labels['ox.repo']).toBe('local');
+    expect(labels['ox.created']).toBeDefined();
   });
 
   test('includes optional labels when provided', () => {
-    const labels = buildHermesLabels({
+    const labels = buildOxLabels({
       name: 'test',
       branch: 'main',
       agent: 'claude',
@@ -101,56 +101,56 @@ describe('buildHermesLabels', () => {
       model: 'sonnet',
       mount: '/tmp/repo',
     });
-    expect(labels['hermes.prompt']).toBe('do something');
-    expect(labels['hermes.interactive']).toBe('true');
-    expect(labels['hermes.model']).toBe('sonnet');
-    expect(labels['hermes.mount']).toBe('/tmp/repo');
+    expect(labels['ox.prompt']).toBe('do something');
+    expect(labels['ox.interactive']).toBe('true');
+    expect(labels['ox.model']).toBe('sonnet');
+    expect(labels['ox.mount']).toBe('/tmp/repo');
   });
 
   test('omits optional labels when not provided', () => {
-    const labels = buildHermesLabels({
+    const labels = buildOxLabels({
       name: 'test',
       branch: 'main',
       agent: 'opencode',
     });
-    expect(labels['hermes.prompt']).toBeUndefined();
-    expect(labels['hermes.interactive']).toBeUndefined();
-    expect(labels['hermes.model']).toBeUndefined();
-    expect(labels['hermes.mount']).toBeUndefined();
-    expect(labels['hermes.resumed-from']).toBeUndefined();
-    expect(labels['hermes.resume-image']).toBeUndefined();
+    expect(labels['ox.prompt']).toBeUndefined();
+    expect(labels['ox.interactive']).toBeUndefined();
+    expect(labels['ox.model']).toBeUndefined();
+    expect(labels['ox.mount']).toBeUndefined();
+    expect(labels['ox.resumed-from']).toBeUndefined();
+    expect(labels['ox.resume-image']).toBeUndefined();
   });
 
   test('sets exec-type to shell when specified', () => {
-    const labels = buildHermesLabels({
+    const labels = buildOxLabels({
       name: 'test',
       branch: 'main',
       agent: 'opencode',
       execType: 'shell',
     });
-    expect(labels['hermes.exec-type']).toBe('shell');
+    expect(labels['ox.exec-type']).toBe('shell');
   });
 
   test('sets no-git label when noGit is true', () => {
-    const labels = buildHermesLabels({
+    const labels = buildOxLabels({
       name: 'test',
       branch: 'main',
       agent: 'opencode',
       noGit: true,
     });
-    expect(labels['hermes.no-git']).toBe('true');
+    expect(labels['ox.no-git']).toBe('true');
   });
 
   test('includes resume labels when provided', () => {
-    const labels = buildHermesLabels({
+    const labels = buildOxLabels({
       name: 'test',
       branch: 'main',
       agent: 'opencode',
-      resumedFrom: 'hermes-old-session',
-      resumeImage: 'hermes-resume:abc123',
+      resumedFrom: 'ox-old-session',
+      resumeImage: 'ox-resume:abc123',
     });
-    expect(labels['hermes.resumed-from']).toBe('hermes-old-session');
-    expect(labels['hermes.resume-image']).toBe('hermes-resume:abc123');
+    expect(labels['ox.resumed-from']).toBe('ox-old-session');
+    expect(labels['ox.resume-image']).toBe('ox-resume:abc123');
   });
 });
 
@@ -169,7 +169,7 @@ describe('docker service', () => {
       // With no config, should return GHCR sandbox-slim image
       const config = await resolveSandboxImage({});
       expect(config.needsBuild).toBe(false);
-      expect(config.image).toMatch(/ghcr\.io\/timescale\/hermes\/sandbox-slim/);
+      expect(config.image).toMatch(/ghcr\.io\/timescale\/ox\/sandbox-slim/);
     });
 
     test('returns consistent values for same config', async () => {

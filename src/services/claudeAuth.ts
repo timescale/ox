@@ -54,7 +54,7 @@ export const LOGIN_METHOD_OPTIONS = [
 // Container-based Interactive Auth using Bun's Terminal API
 // ============================================================================
 
-const MANUAL_LOGIN_HINT = 'Try running: hermes claude /login';
+const MANUAL_LOGIN_HINT = 'Try running: ox claude /login';
 
 /**
  * Start Claude login using Bun's PTY support.
@@ -76,14 +76,14 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
   // Track timeouts so we can clear them on cancel
   const timeouts: Timer[] = [];
 
-  const containerName = `hermes-claude-auth-${nanoid()}`;
+  const containerName = `ox-claude-auth-${nanoid()}`;
 
   // Phase 1: Start the container detached with the signal entrypoint so we
   // can inject the .claude.json config file before claude /login starts.
   // This pre-populates hasCompletedOnboarding (skips theme selection, etc.)
   log.debug('Creating detached auth container');
   const createResult =
-    await $`docker run -d -it --rm --entrypoint /.hermes/signalEntrypoint.sh --name ${containerName} ${sandbox.image} claude /login`
+    await $`docker run -d -it --rm --entrypoint /.ox/signalEntrypoint.sh --name ${containerName} ${sandbox.image} claude /login`
       .quiet()
       .nothrow();
   if (createResult.exitCode) {
@@ -122,7 +122,7 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
   }
 
   // Signal ready so the entrypoint starts `claude /login`
-  await writeFileToContainer(containerId, '/.hermes/signal/.ready', '1');
+  await writeFileToContainer(containerId, '/.ox/signal/.ready', '1');
 
   // Phase 2: Attach to the container with a PTY to interact with the login flow
   log.debug('Attaching to auth container');

@@ -46,7 +46,7 @@ export function printErr(msg: string): void {
  * `\r\n`).
  *
  * TUI libraries put the terminal into raw mode which disables `onlcr`.
- * If a previous hermes session crashed or didn't fully clean up, the
+ * If a previous ox session crashed or didn't fully clean up, the
  * terminal can be left in this state.  Call this before spawning any
  * interactive subprocess whose output assumes normal newline handling.
  */
@@ -185,7 +185,7 @@ export function shellEscape(value: string): string {
 
 export async function ensureGitignore(): Promise<void> {
   const gitignorePath = '.gitignore';
-  const entry = '.hermes/';
+  const entry = '.ox/';
 
   const file = Bun.file(gitignorePath);
   let content = '';
@@ -194,10 +194,10 @@ export async function ensureGitignore(): Promise<void> {
     content = await file.text();
   }
 
-  // Check if .hermes/ is already in gitignore
+  // Check if .ox/ is already in gitignore
   const lines = content.split('\n');
   const hasEntry = lines.some(
-    (line) => line.trim() === '.hermes/' || line.trim() === '.hermes',
+    (line) => line.trim() === '.ox/' || line.trim() === '.ox',
   );
 
   if (!hasEntry) {
@@ -208,6 +208,6 @@ export async function ensureGitignore(): Promise<void> {
         : `${content}\n${entry}\n`;
 
     await Bun.write(gitignorePath, newContent);
-    log.info('Added .hermes/ to .gitignore');
+    log.info('Added .ox/ to .gitignore');
   }
 }

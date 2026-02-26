@@ -31,7 +31,7 @@ interface GitHubRelease {
 // Constants
 // ============================================================================
 
-const REPO = 'timescale/hermes';
+const REPO = 'timescale/ox';
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -42,7 +42,7 @@ const FETCH_TIMEOUT_MS = 10_000;
 function getPlatformString(): string | null {
   const platform = process.platform === 'darwin' ? 'darwin' : 'linux';
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-  return `hermes-${platform}-${arch}`;
+  return `ox-${platform}-${arch}`;
 }
 
 // ============================================================================
@@ -50,11 +50,11 @@ function getPlatformString(): string | null {
 // ============================================================================
 
 /**
- * Returns true if hermes is running as a compiled binary (not from source via bun).
- * Also respects the HERMES_SKIP_UPDATE env var.
+ * Returns true if ox is running as a compiled binary (not from source via bun).
+ * Also respects the OX_SKIP_UPDATE env var.
  */
 export function isCompiledBinary(): boolean {
-  if (process.env.HERMES_SKIP_UPDATE) {
+  if (process.env.OX_SKIP_UPDATE) {
     return false;
   }
 
@@ -89,7 +89,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     const response = await fetch(API_URL, {
       headers: {
         Accept: 'application/vnd.github.v3+json',
-        'User-Agent': `hermes/${packageJson.version}`,
+        'User-Agent': `ox/${packageJson.version}`,
       },
       signal: controller.signal,
     });
@@ -152,7 +152,7 @@ export interface UpdateProgress {
 
 /**
  * Download and replace the current binary with the new version.
- * The update takes effect on the next launch of hermes.
+ * The update takes effect on the next launch of ox.
  *
  * @param info - Update info from checkForUpdate()
  * @param onProgress - Optional callback for progress updates
@@ -163,7 +163,7 @@ export async function performUpdate(
   onProgress?: (progress: UpdateProgress) => void,
 ): Promise<void> {
   const binaryPath = getBinaryPath();
-  const tempPath = join(dirname(binaryPath), `.hermes-update-${Date.now()}`);
+  const tempPath = join(dirname(binaryPath), `.ox-update-${Date.now()}`);
 
   try {
     // Download

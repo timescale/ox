@@ -3,16 +3,16 @@ import {
   accountToFilename,
   deleteSecret,
   deleteSecretFile,
-  getHermesSecret,
+  getOxSecret,
   getSecret,
   getSecretFile,
   keyringFallbackPath,
-  setHermesSecret,
+  setOxSecret,
   setSecret,
   setSecretFile,
 } from './keyring';
 
-const TEST_SERVICE = 'hermes-test';
+const TEST_SERVICE = 'ox-test';
 const TEST_ACCOUNT = 'keyring-test-account';
 const TEST_VALUE = `test-secret-${Date.now()}`;
 
@@ -21,7 +21,7 @@ const testAccounts = [
   `${TEST_ACCOUNT}-special`,
   `${TEST_ACCOUNT}-json`,
   `${TEST_ACCOUNT}-delete`,
-  `${TEST_ACCOUNT}-hermes`,
+  `${TEST_ACCOUNT}-ox`,
 ];
 
 const fileTestAccounts = [
@@ -37,7 +37,7 @@ const fileTestAccounts = [
 afterAll(async () => {
   await Promise.allSettled([
     ...testAccounts.map((a) => deleteSecret(TEST_SERVICE, a)),
-    ...testAccounts.map((a) => deleteSecret('hermes', a)),
+    ...testAccounts.map((a) => deleteSecret('ox', a)),
     ...fileTestAccounts.map((a) => deleteSecretFile(TEST_SERVICE, a)),
   ]);
 });
@@ -104,19 +104,19 @@ describe.skipIf(!!process.env.CI)('keyring', () => {
   });
 });
 
-describe.skipIf(!!process.env.CI)('hermes convenience wrappers', () => {
-  const account = `${TEST_ACCOUNT}-hermes`;
+describe.skipIf(!!process.env.CI)('ox convenience wrappers', () => {
+  const account = `${TEST_ACCOUNT}-ox`;
 
-  test('setHermesSecret and getHermesSecret round-trip', async () => {
-    await setHermesSecret(account, 'hermes-value');
-    const result = await getHermesSecret(account);
-    expect(result).toBe('hermes-value');
+  test('setOxSecret and getOxSecret round-trip', async () => {
+    await setOxSecret(account, 'ox-value');
+    const result = await getOxSecret(account);
+    expect(result).toBe('ox-value');
   });
 
-  test('hermes wrappers use the hermes service', async () => {
-    await setHermesSecret(account, 'via-wrapper');
-    // Reading with the raw function using 'hermes' service should return the same value
-    const result = await getSecret('hermes', account);
+  test('ox wrappers use the ox service', async () => {
+    await setOxSecret(account, 'via-wrapper');
+    // Reading with the raw function using 'ox' service should return the same value
+    const result = await getSecret('ox', account);
     expect(result).toBe('via-wrapper');
   });
 });
@@ -200,9 +200,9 @@ describe('file-based secret fallback', () => {
   });
 
   test('keyringFallbackPath encodes account name', () => {
-    const path = keyringFallbackPath('hermes', 'opencode/auth.json');
+    const path = keyringFallbackPath('ox', 'opencode/auth.json');
     expect(path).toContain('keyring');
-    expect(path).toContain('hermes');
+    expect(path).toContain('ox');
     expect(path).toContain('opencode_auth.json');
     // Should not contain a raw slash in the account portion
     expect(path.endsWith('opencode_auth.json')).toBe(true);

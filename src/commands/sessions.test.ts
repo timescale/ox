@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HermesSession } from '../services/sandbox';
+import type { OxSession } from '../services/sandbox';
 import { formatRelativeTime } from '../services/sessionDisplay';
 import { getStatusDisplay, truncate } from './sessions';
 
@@ -62,9 +62,9 @@ describe('formatRelativeTime', () => {
 
 describe('getStatusDisplay', () => {
   const makeSession = (
-    status: HermesSession['status'],
+    status: OxSession['status'],
     exitCode?: number,
-  ): HermesSession => ({
+  ): OxSession => ({
     id: 'abc123',
     name: 'test',
     provider: 'docker',

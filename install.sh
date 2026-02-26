@@ -1,6 +1,6 @@
 #!/bin/bash
-# hermes installer - Install script for macOS/Linux
-# Usage: curl -fsSL https://install.hermetic.ly | sh
+# ox installer - Install script for macOS/Linux
+# Usage: curl -fsSL https://get.ox.build | sh
 
 set -e
 
@@ -12,9 +12,9 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-REPO="timescale/hermes"
+REPO="timescale/ox"
 INSTALL_DIR="$HOME/.local/bin"
-BINARY_NAME="hermes"
+BINARY_NAME="ox"
 
 # Detect OS and architecture early (needed by functions)
 OS="$(uname -s)"
@@ -79,7 +79,7 @@ ensure_path_configured() {
       if prompt_yn "Add $INSTALL_DIR to PATH in $SHELL_RC?"; then
         {
           echo ""
-          echo '# Added by hermes installer'
+          echo '# Added by ox installer'
           # shellcheck disable=SC2016
           echo 'export PATH="$HOME/.local/bin:$PATH"'
         } >> "$SHELL_RC"
@@ -114,12 +114,12 @@ configure_shell_completions() {
 
   if [ -z "$shell_type" ]; then
     echo -e "${YELLOW}!${NC} Could not detect shell type, skipping completion setup"
-    echo "  Run 'hermes completions' for manual setup instructions"
+    echo "  Run 'ox completions' for manual setup instructions"
     return
   fi
 
   # Check if completion is already configured
-  if grep -q 'hermes complete' "$SHELL_RC" 2>/dev/null; then
+  if grep -q 'ox complete' "$SHELL_RC" 2>/dev/null; then
     echo -e "${GREEN}✓${NC} Shell completions already configured in $SHELL_RC"
     return
   fi
@@ -141,8 +141,8 @@ configure_shell_completions() {
           echo "autoload -Uz compinit && compinit -i"
         fi
         echo ""
-        echo "# Hermes shell completions"
-        echo "command -v hermes &>/dev/null && source <(hermes complete $shell_type)"
+        echo "# Ox shell completions"
+        echo "command -v ox &>/dev/null && source <(ox complete $shell_type)"
       } >> "$SHELL_RC"
       echo -e "${GREEN}✓${NC} Added shell completions to $SHELL_RC"
       if [ "$needs_compinit" = true ]; then
@@ -154,7 +154,7 @@ configure_shell_completions() {
       if [ "$needs_compinit" = true ]; then
         echo "  autoload -Uz compinit && compinit -i"
       fi
-      echo "  command -v hermes &>/dev/null && source <(hermes complete $shell_type)"
+      echo "  command -v ox &>/dev/null && source <(ox complete $shell_type)"
     fi
   else
     echo ""
@@ -162,7 +162,7 @@ configure_shell_completions() {
     if [ "$needs_compinit" = true ]; then
       echo "  autoload -Uz compinit && compinit -i"
     fi
-    echo "  command -v hermes &>/dev/null && source <(hermes complete $shell_type)"
+    echo "  command -v ox &>/dev/null && source <(ox complete $shell_type)"
   fi
 }
 
@@ -173,24 +173,24 @@ verify_installation() {
   # Give shell a moment to recognize new binary
   hash -r 2>/dev/null || true
 
-  if command -v hermes &> /dev/null; then
-    echo -e "${GREEN}✓${NC} hermes is installed!"
+  if command -v ox &> /dev/null; then
+    echo -e "${GREEN}✓${NC} ox is installed!"
     echo ""
-    hermes --help 2>/dev/null || "$INSTALL_DIR/$BINARY_NAME" --help 2>/dev/null || true
+    ox --help 2>/dev/null || "$INSTALL_DIR/$BINARY_NAME" --help 2>/dev/null || true
     echo ""
     echo -e "${GREEN}${BOLD}Installation complete!${NC}"
     echo ""
     echo "Get started:"
     echo "  cd your-project"
-    echo "  hermes"
+    echo "  ox"
   else
-    echo -e "${YELLOW}!${NC} hermes installed but not found in PATH yet"
+    echo -e "${YELLOW}!${NC} ox installed but not found in PATH yet"
     echo ""
     echo "Restart your shell or run:"
     echo "  source $SHELL_RC"
     echo ""
     echo "Then verify with:"
-    echo "  hermes --help"
+    echo "  ox --help"
   fi
 }
 
@@ -206,12 +206,12 @@ install_binary() {
     echo ""
     echo "For development from source, clone the repo and use bun:"
     echo "  git clone https://github.com/$REPO.git"
-    echo "  cd hermes && ./bun i && ./bun link"
+    echo "  cd ox && ./bun i && ./bun link"
     echo ""
     exit 1
   fi
 
-  BINARY_FILE="hermes-${OS_TYPE}-${ARCH_TYPE}"
+  BINARY_FILE="ox-${OS_TYPE}-${ARCH_TYPE}"
 
   # Create install directory if it doesn't exist
   mkdir -p "$INSTALL_DIR"
@@ -220,10 +220,10 @@ install_binary() {
   TEMP_DIR=$(mktemp -d)
   trap 'rm -rf "$TEMP_DIR"' EXIT
 
-  # Support pinning to a specific version via HERMES_VERSION env var
-  if [ -n "$HERMES_VERSION" ]; then
-    DOWNLOAD_URL="https://github.com/$REPO/releases/download/v${HERMES_VERSION}/$BINARY_FILE"
-    echo "Detected \$HERMES_VERSION in env. Fetching version ${HERMES_VERSION}..."
+  # Support pinning to a specific version via OX_VERSION env var
+  if [ -n "$OX_VERSION" ]; then
+    DOWNLOAD_URL="https://github.com/$REPO/releases/download/v${OX_VERSION}/$BINARY_FILE"
+    echo "Detected \$OX_VERSION in env. Fetching version ${OX_VERSION}..."
   else
     DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$BINARY_FILE"
     echo "Fetching latest release..."
@@ -234,8 +234,8 @@ install_binary() {
     echo ""
     echo "This could mean:"
     echo "  - No releases have been published yet"
-    if [ -n "$HERMES_VERSION" ]; then
-      echo "  - Version ${HERMES_VERSION} does not exist"
+    if [ -n "$OX_VERSION" ]; then
+      echo "  - Version ${OX_VERSION} does not exist"
     fi
     echo "  - The release doesn't have a binary for $OS_TYPE-$ARCH_TYPE"
     echo ""
@@ -265,7 +265,7 @@ echo " | '_ \\ / _ \\ '__| '_ \` _ \\ / _ \\/ __|"
 echo " | | | |  __/ |  | | | | | |  __/\\__ \\"
 echo " |_| |_|\\___|_|  |_| |_| |_|\\___||___/"
 echo -e "${NC}"
-echo -e "${BLUE}Hermes Installer${NC}"
+echo -e "${BLUE}Ox Installer${NC}"
 echo ""
 
 # Check for curl
@@ -278,7 +278,7 @@ fi
 # Validate OS detection
 if [ "$OS_TYPE" = "unknown" ]; then
   echo -e "${RED}Error: Unsupported OS: $OS${NC}"
-  echo "Hermes currently supports macOS and Linux."
+  echo "Ox currently supports macOS and Linux."
   exit 1
 fi
 
@@ -290,9 +290,9 @@ fi
 echo -e "${GREEN}✓${NC} Detected: $OS_TYPE-$ARCH_TYPE"
 
 # Check for existing installation
-EXISTING_HERMES=$(command -v hermes 2>/dev/null || true)
-if [ -n "$EXISTING_HERMES" ]; then
-  echo -e "${YELLOW}!${NC} Existing hermes found at: $EXISTING_HERMES"
+EXISTING_OX=$(command -v ox 2>/dev/null || true)
+if [ -n "$EXISTING_OX" ]; then
+  echo -e "${YELLOW}!${NC} Existing ox found at: $EXISTING_OX"
 fi
 
 install_binary

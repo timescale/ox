@@ -113,7 +113,7 @@ export class DenoApiClient {
     const idLabel = slugId();
     const labels = {
       ...options.labels,
-      'hermes.create-id': idLabel,
+      'ox.create-id': idLabel,
     };
 
     log.debug(
@@ -157,7 +157,7 @@ export class DenoApiClient {
     if (!resolvedId) {
       // Bun workaround: look up via Console API using our unique label
       const found = await this.client.sandboxes.list({
-        labels: { 'hermes.create-id': idLabel },
+        labels: { 'ox.create-id': idLabel },
       });
       if (found.length > 0 && found[0]) {
         resolvedId = found[0].id;
@@ -169,7 +169,7 @@ export class DenoApiClient {
       throw new Error(
         'Could not resolve sandbox ID after creation — the sandbox was created but its ID is unavailable. ' +
           'Kill/cleanup and session tracking will not work. ' +
-          `Label used for lookup: hermes.create-id=${idLabel}`,
+          `Label used for lookup: ox.create-id=${idLabel}`,
       );
     }
 

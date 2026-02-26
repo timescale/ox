@@ -24,7 +24,7 @@ async function warnIfNoTrueColor(): Promise<void> {
 
   console.warn(
     '\n\x1b[33mWarning: Your terminal does not appear to support truecolor (24-bit color).\x1b[0m\n' +
-      'The hermes TUI requires truecolor support and may not render correctly.\n' +
+      'The ox TUI requires truecolor support and may not render correctly.\n' +
       'For best results, use Ghostty, iTerm2, Kitty, or another truecolor terminal.\n',
   );
 

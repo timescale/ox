@@ -1,5 +1,5 @@
 // ============================================================================
-// Logs Command - Display hermes logs with pino-pretty formatting
+// Logs Command - Display ox logs with pino-pretty formatting
 // ============================================================================
 
 import { createReadStream } from 'node:fs';
@@ -61,6 +61,6 @@ export async function logsAction(options: LogsOptions): Promise<void> {
 }
 
 export const logsCommand = new Command('logs')
-  .description('Display hermes logs with pretty formatting')
+  .description('Display ox logs with pretty formatting')
   .option('-f, --follow', 'Follow log output (like tail -f)')
   .action(logsAction);

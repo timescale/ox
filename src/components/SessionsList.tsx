@@ -10,8 +10,8 @@ import { getPrForBranch } from '../services/github';
 import { log } from '../services/logger';
 import {
   getProviderForSession,
-  type HermesSession,
   listAllSessions,
+  type OxSession,
 } from '../services/sandbox';
 import {
   fetchDockerStats,
@@ -35,12 +35,12 @@ export type FilterMode = 'all' | 'running' | 'completed';
 export type ScopeMode = 'local' | 'global';
 
 export interface SessionsListProps {
-  onSelect: (session: HermesSession) => void;
+  onSelect: (session: OxSession) => void;
   onQuit: () => void;
   onNewTask?: () => void;
-  onAttach?: (session: HermesSession) => void;
-  onShell?: (session: HermesSession) => void;
-  onResume?: (session: HermesSession) => void;
+  onAttach?: (session: OxSession) => void;
+  onShell?: (session: OxSession) => void;
+  onResume?: (session: OxSession) => void;
   onResources?: () => void;
   /** Current repo fullName (e.g., "owner/repo") if in a git repo, undefined otherwise */
   currentRepo?: string;
@@ -81,7 +81,7 @@ export function SessionsList({
     addPendingDelete,
     removePendingDelete,
   } = useSessionStore();
-  const [sessions, setSessions] = useState<HermesSession[]>([]);
+  const [sessions, setSessions] = useState<OxSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterText, setFilterText] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -89,8 +89,8 @@ export function SessionsList({
   const [scopeMode, setScopeMode] = useState<ScopeMode>(
     currentRepo ? 'local' : 'global',
   );
-  const [deleteModal, setDeleteModal] = useState<HermesSession | null>(null);
-  const [stopModal, setStopModal] = useState<HermesSession | null>(null);
+  const [deleteModal, setDeleteModal] = useState<OxSession | null>(null);
+  const [stopModal, setStopModal] = useState<OxSession | null>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
@@ -183,7 +183,7 @@ export function SessionsList({
 
   // Mouse handlers for session rows
   const handleRowClick = useCallback(
-    (session: HermesSession) => {
+    (session: OxSession) => {
       onSelect(session);
     },
     [onSelect],
@@ -258,7 +258,7 @@ export function SessionsList({
   const handleGitSwitch = useCallback(async () => {
     const session = filteredSessions[selectedIndex];
     if (!session) return;
-    const branchName = `hermes/${session.branch}`;
+    const branchName = `ox/${session.branch}`;
     setActionInProgress(true);
     try {
       await Bun.$`git fetch && git switch ${branchName}`.quiet();
@@ -361,7 +361,7 @@ export function SessionsList({
       {
         id: 'task.new',
         title: 'New task',
-        description: 'Start a new hermes session',
+        description: 'Start a new ox session',
         category: 'Navigation',
         keybind: { key: 'n', ctrl: true },
         enabled: !!onNewTask,
@@ -589,7 +589,7 @@ export function SessionsList({
 
   if (loading && sessions.length === 0) {
     return (
-      <Frame title="Hermes Sessions" centered>
+      <Frame title="Ox Sessions" centered>
         <text fg={theme.textMuted}>Loading sessions...</text>
       </Frame>
     );
@@ -600,7 +600,7 @@ export function SessionsList({
   const countText = `${filteredSessions.length} of ${sessions.length}`;
 
   return (
-    <Frame title="Hermes Sessions">
+    <Frame title="Ox Sessions">
       {/* Filter bar */}
       <box height={1} marginBottom={1} flexDirection="row">
         <text height={1}>

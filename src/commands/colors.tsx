@@ -140,7 +140,7 @@ function printColorsStdout(themeName: string, colors: ThemeColors): void {
 
   const swatch = ' '.repeat(swatchWidth);
 
-  w(`\n${BOLD}Hermes Theme Colors: ${themeName}${RESET}\n`);
+  w(`\n${BOLD}Ox Theme Colors: ${themeName}${RESET}\n`);
   w(
     `${DIM}Truecolor: ${supportsTrueColor ? 'yes' : 'no'}` +
       ` (COLORTERM=${process.env.COLORTERM ?? 'unset'})${RESET}\n\n`,
@@ -277,7 +277,7 @@ function ColorsScreen({ themeName, onExit }: ColorsScreenProps) {
     <box flexDirection="column" padding={1} flexGrow={1}>
       <text fg={theme.text}>
         <strong>
-          Hermes Theme Colors: {themeName}
+          Ox Theme Colors: {themeName}
           {supportsTrueColor ? '' : ' (no truecolor detected)'}
         </strong>
       </text>

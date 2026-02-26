@@ -52,7 +52,7 @@ async function drainStream(
  */
 export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
   const sandbox = await resolveSandboxImage();
-  const containerName = `hermes-gh-auth-${nanoid()}`;
+  const containerName = `ox-gh-auth-${nanoid()}`;
 
   const proc = Bun.spawn(
     [

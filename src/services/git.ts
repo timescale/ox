@@ -121,14 +121,14 @@ async function getExistingServices(): Promise<string[]> {
 
 async function getExistingContainers(): Promise<string[]> {
   try {
-    // Get all container names (running and stopped), strip "hermes-" prefix if present
+    // Get all container names (running and stopped), strip "ox-" prefix if present
     const result = await Bun.$`docker ps -a --format {{.Names}}`.quiet();
     return result.stdout
       .toString()
       .split('\n')
       .map((name) => name.trim())
       .filter(Boolean)
-      .map((name) => name.replace(/^hermes-/, '')); // Normalize to branch name format
+      .map((name) => name.replace(/^ox-/, '')); // Normalize to branch name format
   } catch (error) {
     log.error({ error }, 'Failed to get existing Docker containers');
     // Docker not available, return empty array
@@ -244,7 +244,7 @@ ${[...allExistingNames].join(', ')}`;
   let fallbackName: string;
   do {
     const randomSuffix = nanoid(12).toLowerCase();
-    fallbackName = `hermes-branch-${randomSuffix}`;
+    fallbackName = `ox-branch-${randomSuffix}`;
   } while (allExistingNames.has(fallbackName));
   return fallbackName;
 }

@@ -7,7 +7,7 @@ const TITLE_PADDING = 4;
 // Solid block characters get the main bright color
 const SOLID_CHARS = new Set(['█', '▀', '▄', '▌', '▐', '░', '▒', '▓']);
 
-const HERMES_TITLE_WIDE = [
+const OX_TITLE_WIDE = [
   '██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗███████╗',
   '██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██╔════╝',
   '███████║█████╗  ██████╔╝██╔████╔██║█████╗  ███████╗',
@@ -16,7 +16,7 @@ const HERMES_TITLE_WIDE = [
   '╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝',
 ];
 
-const HERMES_TITLE_NARROW = `
+const OX_TITLE_NARROW = `
 ▄  ▄ ▄▄▄▄ ▄▄▄  ▄   ▄ ▄▄▄▄ ▄▄▄▄
 █▄▄█ █▄▄  █▄▄▀ █▀▄▀█ █▄▄  ▀▄▄ 
 █  █ █▄▄▄ █ ▀▄ █   █ █▄▄▄ ▄▄▄▀
@@ -61,14 +61,14 @@ function linesToSegments(lines: string[]) {
   });
 }
 
-const HERMES_TITLE_WIDE_SEGMENTS = linesToSegments(HERMES_TITLE_WIDE);
-const HERMES_TITLE_WIDE_WIDTH = getMaxLineLength(HERMES_TITLE_WIDE);
+const OX_TITLE_WIDE_SEGMENTS = linesToSegments(OX_TITLE_WIDE);
+const OX_TITLE_WIDE_WIDTH = getMaxLineLength(OX_TITLE_WIDE);
 
 /**
- * Responsive ASCII art title for "hermes".
+ * Responsive ASCII art title for "ox".
  * Switches between wide and narrow versions based on terminal width.
  */
-export function HermesTitle() {
+export function OxTitle() {
   const { theme } = useTheme();
   const { columns } = useWindowSize();
 
@@ -76,13 +76,13 @@ export function HermesTitle() {
     Math.max(columns - TITLE_PADDING, 0),
     TITLE_MAX_WIDTH,
   );
-  const isWideTitle = containerWidth >= HERMES_TITLE_WIDE_WIDTH + 10;
+  const isWideTitle = containerWidth >= OX_TITLE_WIDE_WIDTH + 10;
 
   return (
     <box marginBottom={2} width="100%" alignItems="center">
       {isWideTitle ? (
         <box flexDirection="column" alignItems="center">
-          {HERMES_TITLE_WIDE_SEGMENTS.map((segments) => {
+          {OX_TITLE_WIDE_SEGMENTS.map((segments) => {
             const rowKey = segments
               .map((segment) => `${segment.type}:${segment.text}`)
               .join('|');
@@ -110,7 +110,7 @@ export function HermesTitle() {
           })}
         </box>
       ) : (
-        <text fg={theme.text}>{HERMES_TITLE_NARROW}</text>
+        <text fg={theme.text}>{OX_TITLE_NARROW}</text>
       )}
     </box>
   );

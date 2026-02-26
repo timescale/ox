@@ -4,11 +4,7 @@
 
 import { Client } from '@deno/sandbox';
 
-import {
-  deleteHermesSecret,
-  getHermesSecret,
-  setHermesSecret,
-} from './keyring';
+import { deleteOxSecret, getOxSecret, setOxSecret } from './keyring';
 import { log } from './logger';
 
 const DENO_TOKEN_KEY = 'deno-deploy-token';
@@ -18,14 +14,14 @@ const DENO_TOKEN_KEY = 'deno-deploy-token';
  * Returns null if no token is stored.
  */
 export async function getDenoToken(): Promise<string | null> {
-  return getHermesSecret(DENO_TOKEN_KEY);
+  return getOxSecret(DENO_TOKEN_KEY);
 }
 
 /**
  * Store a Deno Deploy token in the OS keyring.
  */
 export async function setDenoToken(token: string): Promise<void> {
-  await setHermesSecret(DENO_TOKEN_KEY, token);
+  await setOxSecret(DENO_TOKEN_KEY, token);
   log.debug('Stored Deno Deploy token in keyring');
 }
 
@@ -33,7 +29,7 @@ export async function setDenoToken(token: string): Promise<void> {
  * Remove the Deno Deploy token from the OS keyring.
  */
 export async function deleteDenoToken(): Promise<void> {
-  await deleteHermesSecret(DENO_TOKEN_KEY);
+  await deleteOxSecret(DENO_TOKEN_KEY);
   log.debug('Deleted Deno Deploy token from keyring');
 }
 

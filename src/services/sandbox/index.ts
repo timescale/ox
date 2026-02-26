@@ -8,8 +8,8 @@ export type {
   CreateSandboxOptions,
   CreateShellSandboxOptions,
   ExecType,
-  HermesSession,
   LogStream,
+  OxSession,
   ResumeSandboxOptions,
   SandboxBuildProgress,
   SandboxProvider,
@@ -23,7 +23,7 @@ import { log } from '../logger.ts';
 import { CloudSandboxProvider } from './cloudProvider.ts';
 import { DockerSandboxProvider } from './dockerProvider.ts';
 import type {
-  HermesSession,
+  OxSession,
   SandboxProvider,
   SandboxProviderType,
 } from './types.ts';
@@ -55,7 +55,7 @@ export async function getDefaultProvider(): Promise<SandboxProvider> {
  * Get the appropriate provider for an existing session.
  * Uses the session's `provider` field to select the correct implementation.
  */
-export function getProviderForSession(session: HermesSession): SandboxProvider {
+export function getProviderForSession(session: OxSession): SandboxProvider {
   return getSandboxProvider(session.provider);
 }
 
@@ -63,7 +63,7 @@ export function getProviderForSession(session: HermesSession): SandboxProvider {
  * List sessions across all providers.
  * Returns a single merged list, sorted by creation time descending.
  */
-export async function listAllSessions(): Promise<HermesSession[]> {
+export async function listAllSessions(): Promise<OxSession[]> {
   const providerTypes: SandboxProviderType[] = ['docker', 'cloud'];
 
   const providers = providerTypes.map((type) => ({
@@ -74,7 +74,7 @@ export async function listAllSessions(): Promise<HermesSession[]> {
   const results = await Promise.allSettled(
     providers.map((p) => p.provider.list()),
   );
-  const sessions: HermesSession[] = [];
+  const sessions: OxSession[] = [];
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i];

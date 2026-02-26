@@ -1,5 +1,5 @@
 import { getSandboxProvider } from './sandbox/index.ts';
-import type { HermesSession, SandboxStats } from './sandbox/types.ts';
+import type { OxSession, SandboxStats } from './sandbox/types.ts';
 
 export function formatRelativeTime(isoDate: string): string {
   const date = new Date(isoDate);
@@ -22,7 +22,7 @@ export function formatRelativeTime(isoDate: string): string {
   return 'just now';
 }
 
-export function getStatusIcon(session: HermesSession): string {
+export function getStatusIcon(session: OxSession): string {
   switch (session.status) {
     case 'running':
       return '●';
@@ -37,7 +37,7 @@ export function getStatusIcon(session: HermesSession): string {
   }
 }
 
-export function getStatusText(session: HermesSession): string {
+export function getStatusText(session: OxSession): string {
   if (session.status === 'exited') {
     if (session.exitCode === 0) return 'complete';
     if (session.exitCode == null) return 'exited';
@@ -46,7 +46,7 @@ export function getStatusText(session: HermesSession): string {
   return session.status;
 }
 
-export function getStatusColor(session: HermesSession): string {
+export function getStatusColor(session: OxSession): string {
   switch (session.status) {
     case 'running':
       return 'green';
@@ -71,7 +71,7 @@ export function getStatusColor(session: HermesSession): string {
  */
 export async function fetchDockerStats(
   ids: string[],
-  sessions?: HermesSession[],
+  sessions?: OxSession[],
 ): Promise<Map<string, SandboxStats>> {
   const dockerIds = sessions
     ? ids.filter((id) =>

@@ -49,7 +49,7 @@ export interface RunInDockerResult {
 }
 
 export const runInDocker = async ({
-  containerName = `hermes-anon-${nanoid(12)}`,
+  containerName = `ox-anon-${nanoid(12)}`,
   dockerArgs = ['--rm'],
   cmdName,
   cmdArgs = [],
@@ -71,7 +71,7 @@ export const runInDocker = async ({
     // Always start detached, so we can get the containerId and potentially write files before starting the main process
     '-d',
     '--entrypoint',
-    '/.hermes/signalEntrypoint.sh',
+    '/.ox/signalEntrypoint.sh',
     '--name',
     containerName,
     // Allocate a TTY when interactive or when explicitly requested for later attachment
@@ -189,7 +189,7 @@ export const runInDocker = async ({
   }
 
   // signal ready
-  await writeFileToContainer(containerId, '/.hermes/signal/.ready', '1');
+  await writeFileToContainer(containerId, '/.ox/signal/.ready', '1');
 
   if (dockerArgs.includes('--rm')) {
     deferredResult.promise.then((proc) => {

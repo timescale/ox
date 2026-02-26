@@ -1,15 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import {
-  type HermesConfig,
-  projectConfig,
-  readConfig,
-  userConfig,
-} from './config';
+import { type OxConfig, projectConfig, readConfig, userConfig } from './config';
 
 describe('projectConfig', () => {
-  const testConfigDir = '.hermes-test';
+  const testConfigDir = '.ox-test';
   const originalCwd = process.cwd();
   let testDir: string;
 
@@ -37,8 +32,8 @@ describe('projectConfig', () => {
     });
 
     test('returns true when config file exists', async () => {
-      await mkdir('.hermes', { recursive: true });
-      await Bun.write('.hermes/config.yml', 'agent: claude\n');
+      await mkdir('.ox', { recursive: true });
+      await Bun.write('.ox/config.yml', 'agent: claude\n');
 
       const exists = await projectConfig.exists();
       expect(exists).toBe(true);
@@ -52,9 +47,9 @@ describe('projectConfig', () => {
     });
 
     test('reads valid config with all fields', async () => {
-      await mkdir('.hermes', { recursive: true });
+      await mkdir('.ox', { recursive: true });
       await Bun.write(
-        '.hermes/config.yml',
+        '.ox/config.yml',
         `
 tigerServiceId: svc-123
 agent: claude
@@ -71,9 +66,9 @@ model: sonnet
     });
 
     test('reads config with only agent field', async () => {
-      await mkdir('.hermes', { recursive: true });
+      await mkdir('.ox', { recursive: true });
       await Bun.write(
-        '.hermes/config.yml',
+        '.ox/config.yml',
         `
 agent: opencode
 `,
@@ -86,9 +81,9 @@ agent: opencode
     });
 
     test('reads config with null tigerServiceId', async () => {
-      await mkdir('.hermes', { recursive: true });
+      await mkdir('.ox', { recursive: true });
       await Bun.write(
-        '.hermes/config.yml',
+        '.ox/config.yml',
         `
 tigerServiceId: null
 agent: claude
@@ -103,17 +98,17 @@ agent: claude
     });
 
     test('returns empty object for empty config file', async () => {
-      await mkdir('.hermes', { recursive: true });
-      await Bun.write('.hermes/config.yml', '');
+      await mkdir('.ox', { recursive: true });
+      await Bun.write('.ox/config.yml', '');
 
       const config = await projectConfig.read();
       expect(config).toEqual({});
     });
 
     test('returns empty object for config with only comments', async () => {
-      await mkdir('.hermes', { recursive: true });
+      await mkdir('.ox', { recursive: true });
       await Bun.write(
-        '.hermes/config.yml',
+        '.ox/config.yml',
         `
 # This is a comment
 # Another comment
@@ -127,7 +122,7 @@ agent: claude
 
   describe('write', () => {
     test('writes config with all fields', async () => {
-      const config: HermesConfig = {
+      const config: OxConfig = {
         tigerServiceId: 'svc-456',
         agent: 'opencode',
         model: 'gpt-4',
@@ -135,38 +130,38 @@ agent: claude
 
       await projectConfig.write(config);
 
-      const content = await Bun.file('.hermes/config.yml').text();
+      const content = await Bun.file('.ox/config.yml').text();
       expect(content).toContain('tigerServiceId: svc-456');
       expect(content).toContain('agent: opencode');
       expect(content).toContain('model: gpt-4');
     });
 
-    test('writes config and creates .hermes directory', async () => {
-      const config: HermesConfig = {
+    test('writes config and creates .ox directory', async () => {
+      const config: OxConfig = {
         agent: 'claude',
       };
 
       await projectConfig.write(config);
 
-      const fileExists = await Bun.file('.hermes/config.yml').exists();
+      const fileExists = await Bun.file('.ox/config.yml').exists();
       expect(fileExists).toBe(true);
     });
 
     test('writes config with null tigerServiceId', async () => {
-      const config: HermesConfig = {
+      const config: OxConfig = {
         tigerServiceId: null,
         agent: 'claude',
       };
 
       await projectConfig.write(config);
 
-      const content = await Bun.file('.hermes/config.yml').text();
+      const content = await Bun.file('.ox/config.yml').text();
       expect(content).toContain('tigerServiceId: null');
     });
 
     test('overwrites existing config', async () => {
-      await mkdir('.hermes', { recursive: true });
-      await Bun.write('.hermes/config.yml', 'agent: opencode\n');
+      await mkdir('.ox', { recursive: true });
+      await Bun.write('.ox/config.yml', 'agent: opencode\n');
 
       await projectConfig.write({ agent: 'claude', model: 'sonnet' });
 
@@ -178,24 +173,24 @@ agent: claude
     test('includes header comments', async () => {
       await projectConfig.write({ agent: 'claude' });
 
-      const content = await Bun.file('.hermes/config.yml').text();
-      expect(content).toContain('# Hermes project configuration');
+      const content = await Bun.file('.ox/config.yml').text();
+      expect(content).toContain('# Ox project configuration');
       expect(content).toContain('# Generated by');
     });
   });
 
   describe('readValue', () => {
     test('reads a single value', async () => {
-      await mkdir('.hermes', { recursive: true });
-      await Bun.write('.hermes/config.yml', 'agent: claude\nmodel: sonnet\n');
+      await mkdir('.ox', { recursive: true });
+      await Bun.write('.ox/config.yml', 'agent: claude\nmodel: sonnet\n');
 
       const agent = await projectConfig.readValue('agent');
       expect(agent).toBe('claude');
     });
 
     test('returns undefined for missing key', async () => {
-      await mkdir('.hermes', { recursive: true });
-      await Bun.write('.hermes/config.yml', 'agent: claude\n');
+      await mkdir('.ox', { recursive: true });
+      await Bun.write('.ox/config.yml', 'agent: claude\n');
 
       const model = await projectConfig.readValue('model');
       expect(model).toBeUndefined();
@@ -204,8 +199,8 @@ agent: claude
 
   describe('writeValue', () => {
     test('writes a single value to existing config', async () => {
-      await mkdir('.hermes', { recursive: true });
-      await Bun.write('.hermes/config.yml', 'agent: claude\n');
+      await mkdir('.ox', { recursive: true });
+      await Bun.write('.ox/config.yml', 'agent: claude\n');
 
       await projectConfig.writeValue('model', 'sonnet');
 
@@ -224,7 +219,7 @@ agent: claude
 
   describe('roundtrip', () => {
     test('config can be written and read back', async () => {
-      const original: HermesConfig = {
+      const original: OxConfig = {
         tigerServiceId: 'svc-roundtrip',
         agent: 'claude',
         model: 'opus',
@@ -237,7 +232,7 @@ agent: claude
     });
 
     test('config with undefined fields can be written and read back', async () => {
-      const original: HermesConfig = {
+      const original: OxConfig = {
         agent: 'opencode',
       };
 
@@ -250,7 +245,7 @@ agent: claude
     });
 
     test('config with overlayMounts array can be written and read back', async () => {
-      const original: HermesConfig = {
+      const original: OxConfig = {
         agent: 'claude',
         overlayMounts: ['node_modules', 'download'],
       };
@@ -263,7 +258,7 @@ agent: claude
     });
 
     test('config with initScript can be written and read back', async () => {
-      const original: HermesConfig = {
+      const original: OxConfig = {
         agent: 'claude',
         initScript: './bun i',
       };
@@ -276,7 +271,7 @@ agent: claude
     });
 
     test('config with overlayMounts and initScript together', async () => {
-      const original: HermesConfig = {
+      const original: OxConfig = {
         agent: 'opencode',
         overlayMounts: ['node_modules', '.cache', 'vendor/bundle'],
         initScript: 'npm install && npm run build',
@@ -289,7 +284,7 @@ agent: claude
     });
 
     test('config with empty overlayMounts array', async () => {
-      const original: HermesConfig = {
+      const original: OxConfig = {
         agent: 'claude',
         overlayMounts: [],
       };
@@ -303,23 +298,23 @@ agent: claude
 });
 
 describe('userConfig', () => {
-  const originalEnv = process.env.HERMES_USER_CONFIG_DIR;
+  const originalEnv = process.env.OX_USER_CONFIG_DIR;
   let testDir: string;
 
   beforeEach(async () => {
     // Create a temporary test directory for user config
     testDir = join(process.cwd(), '.user-config-test');
     await mkdir(testDir, { recursive: true });
-    // Override HERMES_USER_CONFIG_DIR to use test directory
-    process.env.HERMES_USER_CONFIG_DIR = testDir;
+    // Override OX_USER_CONFIG_DIR to use test directory
+    process.env.OX_USER_CONFIG_DIR = testDir;
   });
 
   afterEach(async () => {
     // Restore original env
     if (originalEnv !== undefined) {
-      process.env.HERMES_USER_CONFIG_DIR = originalEnv;
+      process.env.OX_USER_CONFIG_DIR = originalEnv;
     } else {
-      delete process.env.HERMES_USER_CONFIG_DIR;
+      delete process.env.OX_USER_CONFIG_DIR;
     }
     // Clean up test directory
     try {
@@ -349,7 +344,7 @@ describe('userConfig', () => {
 
   describe('write', () => {
     test('writes user config with theme', async () => {
-      const config: HermesConfig = {
+      const config: OxConfig = {
         themeName: 'nord',
       };
 
@@ -358,11 +353,11 @@ describe('userConfig', () => {
       const configDir = userConfig.getConfigDir();
       const content = await Bun.file(join(configDir, 'config.yml')).text();
       expect(content).toContain('themeName: nord');
-      expect(content).toContain('# Hermes user preferences');
+      expect(content).toContain('# Ox user preferences');
     });
 
     test('creates config directory if it does not exist', async () => {
-      const config: HermesConfig = {
+      const config: OxConfig = {
         themeName: 'gruvbox',
       };
 
@@ -385,7 +380,7 @@ describe('userConfig', () => {
 
   describe('roundtrip', () => {
     test('user config can be written and read back', async () => {
-      const original: HermesConfig = {
+      const original: OxConfig = {
         themeName: 'rosepine',
       };
 
@@ -398,9 +393,9 @@ describe('userConfig', () => {
 });
 
 describe('readConfig (merged config)', () => {
-  const testProjectDir = '.hermes-merged-test';
+  const testProjectDir = '.ox-merged-test';
   const originalCwd = process.cwd();
-  const originalEnv = process.env.HERMES_USER_CONFIG_DIR;
+  const originalEnv = process.env.OX_USER_CONFIG_DIR;
   let projectTestDir: string;
   let userTestDir: string;
 
@@ -413,15 +408,15 @@ describe('readConfig (merged config)', () => {
     // Set up user config test directory
     userTestDir = join(originalCwd, '.user-config-merged-test');
     await mkdir(userTestDir, { recursive: true });
-    process.env.HERMES_USER_CONFIG_DIR = userTestDir;
+    process.env.OX_USER_CONFIG_DIR = userTestDir;
   });
 
   afterEach(async () => {
     process.chdir(originalCwd);
     if (originalEnv !== undefined) {
-      process.env.HERMES_USER_CONFIG_DIR = originalEnv;
+      process.env.OX_USER_CONFIG_DIR = originalEnv;
     } else {
-      delete process.env.HERMES_USER_CONFIG_DIR;
+      delete process.env.OX_USER_CONFIG_DIR;
     }
     try {
       await rm(projectTestDir, { recursive: true, force: true });
@@ -561,9 +556,9 @@ describe('readConfig (merged config)', () => {
 });
 
 describe('config stores are independent', () => {
-  const testProjectDir = '.hermes-project-test';
+  const testProjectDir = '.ox-project-test';
   const originalCwd = process.cwd();
-  const originalEnv = process.env.HERMES_USER_CONFIG_DIR;
+  const originalEnv = process.env.OX_USER_CONFIG_DIR;
   let projectTestDir: string;
   let userTestDir: string;
 
@@ -576,15 +571,15 @@ describe('config stores are independent', () => {
     // Set up user config test directory
     userTestDir = join(originalCwd, '.user-config-independence-test');
     await mkdir(userTestDir, { recursive: true });
-    process.env.HERMES_USER_CONFIG_DIR = userTestDir;
+    process.env.OX_USER_CONFIG_DIR = userTestDir;
   });
 
   afterEach(async () => {
     process.chdir(originalCwd);
     if (originalEnv !== undefined) {
-      process.env.HERMES_USER_CONFIG_DIR = originalEnv;
+      process.env.OX_USER_CONFIG_DIR = originalEnv;
     } else {
-      delete process.env.HERMES_USER_CONFIG_DIR;
+      delete process.env.OX_USER_CONFIG_DIR;
     }
     try {
       await rm(projectTestDir, { recursive: true, force: true });

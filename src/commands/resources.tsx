@@ -50,7 +50,7 @@ const listCommand = new Command('list')
     const targets = getCleanupTargets(resources);
     if (targets.length > 0) {
       console.log(
-        `\n${targets.length} resource(s) can be cleaned up. Run 'hermes resources clean' to remove them.`,
+        `\n${targets.length} resource(s) can be cleaned up. Run 'ox resources clean' to remove them.`,
       );
     }
   });

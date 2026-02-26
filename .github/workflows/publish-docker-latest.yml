@@ -50,7 +50,7 @@ jobs:
           file: ./sandbox/${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/timescale/hermes/${{ matrix.image }}:latest
+          tags: ghcr.io/timescale/ox/${{ matrix.image }}:latest
           build-args: |
             CLAUDE_CODE_VERSION=${{ steps.versions.outputs.claude_code }}
             OPENCODE_VERSION=${{ steps.versions.outputs.opencode }}

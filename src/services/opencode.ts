@@ -7,7 +7,7 @@ import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
 import { readConfig } from './config';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
-import { getHermesSecret, setHermesSecret } from './keyring';
+import { getOxSecret, setOxSecret } from './keyring';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
@@ -65,28 +65,27 @@ const readHostCredentials = async (): Promise<OpencodeAuthJson | null> => {
   return null;
 };
 
-const HERMES_OPENCODE_ACCOUNT = 'opencode/auth.json';
+const OX_OPENCODE_ACCOUNT = 'opencode/auth.json';
 
-const readHermesCredentialCache =
-  async (): Promise<OpencodeAuthJson | null> => {
-    try {
-      const raw = await getHermesSecret(HERMES_OPENCODE_ACCOUNT);
-      const creds = JSON.parse(raw || '{}') as OpencodeAuthJson;
-      if (authCredsValid(creds)) {
-        log.debug('Found valid opencode credentials in hermes keyring');
-        return creds;
-      }
-      log.debug('Opencode credentials present in hermes keyring, but invalid.');
-    } catch {
-      log.debug('No opencode/auth.json found in hermes keyring');
+const readOxCredentialCache = async (): Promise<OpencodeAuthJson | null> => {
+  try {
+    const raw = await getOxSecret(OX_OPENCODE_ACCOUNT);
+    const creds = JSON.parse(raw || '{}') as OpencodeAuthJson;
+    if (authCredsValid(creds)) {
+      log.debug('Found valid opencode credentials in ox keyring');
+      return creds;
     }
-    return null;
-  };
+    log.debug('Opencode credentials present in ox keyring, but invalid.');
+  } catch {
+    log.debug('No opencode/auth.json found in ox keyring');
+  }
+  return null;
+};
 
-const writeHermesCredentialCache = async (
+const writeOxCredentialCache = async (
   creds: OpencodeAuthJson,
 ): Promise<void> => {
-  await setHermesSecret(HERMES_OPENCODE_ACCOUNT, JSON.stringify(creds));
+  await setOxSecret(OX_OPENCODE_ACCOUNT, JSON.stringify(creds));
 };
 
 /**
@@ -96,7 +95,7 @@ const writeHermesCredentialCache = async (
  */
 const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
   const host = (await readHostCredentials()) || {};
-  const cached = (await readHermesCredentialCache()) || {};
+  const cached = (await readOxCredentialCache()) || {};
 
   const keys = new Set([...Object.keys(cached), ...Object.keys(host)]);
   let changed = false;
@@ -131,7 +130,7 @@ const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
     }
   }
   if (changed) {
-    await writeHermesCredentialCache(cached);
+    await writeOxCredentialCache(cached);
   }
   return cached;
 };
@@ -161,7 +160,7 @@ const captureOpencodeCredentialsFromContainer = async (
     const creds = JSON.parse(content) as OpencodeAuthJson;
     if (authCredsValid(creds)) {
       log.debug('Valid opencode credentials found in container');
-      await writeHermesCredentialCache(creds);
+      await writeOxCredentialCache(creds);
       writeCache('opencodeAuthJson', creds);
       return true;
     }

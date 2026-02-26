@@ -13,7 +13,7 @@ import {
   groupResourcesByKind,
   type SandboxResource,
 } from './resources.ts';
-import type { HermesSession } from './types.ts';
+import type { OxSession } from './types.ts';
 
 // ============================================================================
 // Helpers
@@ -57,7 +57,7 @@ function makeVolume(overrides?: Partial<DenoVolume>): DenoVolume {
 function makeImage(overrides?: Partial<DockerImageInfo>): DockerImageInfo {
   return {
     id: 'sha256:abc123',
-    repository: 'hermes-sandbox',
+    repository: 'ox-sandbox',
     tag: 'md5-abcdef123456',
     size: 1024 * 1024 * 500,
     created: '2025-01-15T10:00:00Z',
@@ -65,7 +65,7 @@ function makeImage(overrides?: Partial<DockerImageInfo>): DockerImageInfo {
   };
 }
 
-function makeSession(overrides?: Partial<HermesSession>): HermesSession {
+function makeSession(overrides?: Partial<OxSession>): OxSession {
   return {
     id: 'test-session-1',
     provider: 'cloud',
@@ -73,7 +73,7 @@ function makeSession(overrides?: Partial<HermesSession>): HermesSession {
     branch: 'main',
     agent: 'claude',
     prompt: 'fix the bug',
-    repo: 'timescale/hermes',
+    repo: 'timescale/ox',
     created: '2025-01-15T10:00:00Z',
     status: 'running',
     interactive: true,
@@ -88,12 +88,12 @@ function makeSession(overrides?: Partial<HermesSession>): HermesSession {
 describe('classifyCloudSnapshot', () => {
   test('current base snapshot matches getBaseSnapshotSlug()', () => {
     const snapshot = makeSnapshot({
-      slug: 'hermes-base-0-12-0-a1b2c3',
+      slug: 'ox-base-0-12-0-a1b2c3',
     });
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -104,17 +104,17 @@ describe('classifyCloudSnapshot', () => {
     expect(result.provider).toBe('cloud');
     expect(result.kind).toBe('snapshot');
     expect(result.id).toBe('snp_ord_abc123');
-    expect(result.name).toBe('hermes-base-0-12-0-a1b2c3');
+    expect(result.name).toBe('ox-base-0-12-0-a1b2c3');
   });
 
   test('old base snapshot does not match current slug', () => {
     const snapshot = makeSnapshot({
-      slug: 'hermes-base-0-11-0-oldold',
+      slug: 'ox-base-0-11-0-oldold',
     });
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -135,7 +135,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
         sessionsBySnapshotSlug: new Map([['hsnap-my-session-abc123', session]]),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -157,7 +157,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map([
           ['hsnap-old-session-abc123', deletedSession],
@@ -177,7 +177,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -197,7 +197,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -208,13 +208,13 @@ describe('classifyCloudSnapshot', () => {
     expect(result.bootable).toBe(true);
   });
 
-  test('non-Hermes snapshot returns null', () => {
+  test('non-Ox snapshot returns null', () => {
     const snapshot = makeSnapshot({
       slug: 'my-custom-snapshot',
     });
 
     const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
       sessionsBySnapshotSlug: new Map(),
       deletedSessionsBySnapshotSlug: new Map(),
     });
@@ -228,7 +228,7 @@ describe('classifyCloudSnapshot', () => {
     });
 
     const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'hermes-base-0-12-0-a1b2c3',
+      currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
       sessionsBySnapshotSlug: new Map(),
       deletedSessionsBySnapshotSlug: new Map(),
     });
@@ -418,7 +418,7 @@ describe('classifyCloudVolume', () => {
     expect(result.bootable).toBe(false);
   });
 
-  test('non-Hermes volume returns null', () => {
+  test('non-Ox volume returns null', () => {
     const volume = makeVolume({
       slug: 'my-custom-volume',
     });
@@ -440,15 +440,15 @@ describe('classifyCloudVolume', () => {
 describe('classifyDockerImage', () => {
   test('current local build matches computeDockerfileHash', () => {
     const image = makeImage({
-      repository: 'hermes-sandbox',
+      repository: 'ox-sandbox',
       tag: 'md5-abcdef123456',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set([
-        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
-        'ghcr.io/timescale/hermes/sandbox-slim:latest',
+        'ghcr.io/timescale/ox/sandbox-slim:0.12.0',
+        'ghcr.io/timescale/ox/sandbox-slim:latest',
       ]),
       activeContainerIdPrefixes: new Set(),
     });
@@ -461,7 +461,7 @@ describe('classifyDockerImage', () => {
 
   test('old local build does not match current hash', () => {
     const image = makeImage({
-      repository: 'hermes-sandbox',
+      repository: 'ox-sandbox',
       tag: 'md5-oldoldhash999',
     });
 
@@ -477,15 +477,15 @@ describe('classifyDockerImage', () => {
 
   test('current GHCR image matches version tag', () => {
     const image = makeImage({
-      repository: 'ghcr.io/timescale/hermes/sandbox-slim',
+      repository: 'ghcr.io/timescale/ox/sandbox-slim',
       tag: '0.12.0',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set([
-        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
-        'ghcr.io/timescale/hermes/sandbox-slim:latest',
+        'ghcr.io/timescale/ox/sandbox-slim:0.12.0',
+        'ghcr.io/timescale/ox/sandbox-slim:latest',
       ]),
       activeContainerIdPrefixes: new Set(),
     });
@@ -496,15 +496,15 @@ describe('classifyDockerImage', () => {
 
   test('current GHCR image matches latest tag', () => {
     const image = makeImage({
-      repository: 'ghcr.io/timescale/hermes/sandbox-slim',
+      repository: 'ghcr.io/timescale/ox/sandbox-slim',
       tag: 'latest',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set([
-        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
-        'ghcr.io/timescale/hermes/sandbox-slim:latest',
+        'ghcr.io/timescale/ox/sandbox-slim:0.12.0',
+        'ghcr.io/timescale/ox/sandbox-slim:latest',
       ]),
       activeContainerIdPrefixes: new Set(),
     });
@@ -515,15 +515,15 @@ describe('classifyDockerImage', () => {
 
   test('old GHCR image does not match current tags', () => {
     const image = makeImage({
-      repository: 'ghcr.io/timescale/hermes/sandbox-slim',
+      repository: 'ghcr.io/timescale/ox/sandbox-slim',
       tag: '0.10.0',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set([
-        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
-        'ghcr.io/timescale/hermes/sandbox-slim:latest',
+        'ghcr.io/timescale/ox/sandbox-slim:0.12.0',
+        'ghcr.io/timescale/ox/sandbox-slim:latest',
       ]),
       activeContainerIdPrefixes: new Set(),
     });
@@ -534,15 +534,15 @@ describe('classifyDockerImage', () => {
 
   test('GHCR full variant is also classified', () => {
     const image = makeImage({
-      repository: 'ghcr.io/timescale/hermes/sandbox-full',
+      repository: 'ghcr.io/timescale/ox/sandbox-full',
       tag: '0.12.0',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set([
-        'ghcr.io/timescale/hermes/sandbox-full:0.12.0',
-        'ghcr.io/timescale/hermes/sandbox-full:latest',
+        'ghcr.io/timescale/ox/sandbox-full:0.12.0',
+        'ghcr.io/timescale/ox/sandbox-full:latest',
       ]),
       activeContainerIdPrefixes: new Set(),
     });
@@ -553,7 +553,7 @@ describe('classifyDockerImage', () => {
 
   test('active resume image has matching container', () => {
     const image = makeImage({
-      repository: 'hermes-resume',
+      repository: 'ox-resume',
       tag: 'abc123def456-x9y8z7',
       id: 'sha256:resumeimg001',
     });
@@ -570,7 +570,7 @@ describe('classifyDockerImage', () => {
 
   test('orphaned resume image has no matching container', () => {
     const image = makeImage({
-      repository: 'hermes-resume',
+      repository: 'ox-resume',
       tag: 'abc123def456-x9y8z7',
       id: 'sha256:resumeimg001',
     });
@@ -587,7 +587,7 @@ describe('classifyDockerImage', () => {
 
   test('image size and created time are included', () => {
     const image = makeImage({
-      repository: 'hermes-sandbox',
+      repository: 'ox-sandbox',
       tag: 'md5-abcdef123456',
       size: 123456789,
       created: '2025-02-01T12:00:00Z',
@@ -607,20 +607,18 @@ describe('classifyDockerImage', () => {
     // Two different repo:tag combos can share the same Docker image ID
     const image1 = makeImage({
       id: 'sha256:sameid',
-      repository: 'hermes-sandbox',
+      repository: 'ox-sandbox',
       tag: 'md5-abcdef123456',
     });
     const image2 = makeImage({
       id: 'sha256:sameid',
-      repository: 'ghcr.io/timescale/hermes/sandbox-slim',
+      repository: 'ghcr.io/timescale/ox/sandbox-slim',
       tag: '0.12.0',
     });
 
     const ctx = {
       currentDockerfileHash: 'abcdef123456',
-      currentGhcrTags: new Set([
-        'ghcr.io/timescale/hermes/sandbox-slim:0.12.0',
-      ]),
+      currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox-slim:0.12.0']),
       activeContainerIdPrefixes: new Set<string>(),
     };
 
@@ -629,8 +627,8 @@ describe('classifyDockerImage', () => {
 
     // IDs must be unique even when Docker image IDs are the same
     expect(r1.id).not.toBe(r2.id);
-    expect(r1.id).toBe('hermes-sandbox:md5-abcdef123456');
-    expect(r2.id).toBe('ghcr.io/timescale/hermes/sandbox-slim:0.12.0');
+    expect(r1.id).toBe('ox-sandbox:md5-abcdef123456');
+    expect(r2.id).toBe('ghcr.io/timescale/ox/sandbox-slim:0.12.0');
   });
 });
 

@@ -42,18 +42,18 @@ function printSummary(
       branchName,
       repo: repoInfo?.fullName ?? 'local',
       database: forkResult?.name,
-      container: `hermes-${branchName}`,
+      container: `ox-${branchName}`,
     },
     'Branch session created',
   );
   console.log(`
-${repoInfo ? `Repository: ${repoInfo.fullName}\nBranch: hermes/${branchName}` : 'Mode: Local directory (no git repo)'}${
+${repoInfo ? `Repository: ${repoInfo.fullName}\nBranch: ox/${branchName}` : 'Mode: Local directory (no git repo)'}${
   forkResult
     ? `
 Database: ${forkResult.name} (service ID: ${forkResult.service_id})`
     : ''
 }
-Container: hermes-${branchName}
+Container: ox-${branchName}
 `);
 }
 
@@ -95,7 +95,7 @@ export async function branchAction(
     await ensureGhAuth();
   }
 
-  // Step 2: Ensure .gitignore has .hermes/ entry (only if in a git repo)
+  // Step 2: Ensure .gitignore has .ox/ entry (only if in a git repo)
   if (isGitRepo) {
     await ensureGitignore();
   }
@@ -229,7 +229,7 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
   return cmd
     .option(
       '-s, --service-id <id>',
-      'Database service ID to fork (defaults to .hermes config or tiger default)',
+      'Database service ID to fork (defaults to .ox config or tiger default)',
     )
     .option('--no-db-fork', 'Skip the database fork step')
     .option(

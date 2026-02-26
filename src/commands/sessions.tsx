@@ -1,5 +1,5 @@
 // ============================================================================
-// Sessions Command - Unified TUI for hermes
+// Sessions Command - Unified TUI for ox
 // ============================================================================
 
 import { useKeyboard } from '@opentui/react';
@@ -24,13 +24,13 @@ import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
 import { CommandPaletteHost } from '../services/commands.tsx';
 import {
   type AgentType,
-  type HermesConfig,
+  type OxConfig,
   projectConfig,
   readConfig,
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { getDenoToken } from '../services/deno';
-import { ensureDockerImage } from '../services/docker';
+import { ensureDockerImage, ensureDockerSandbox } from '../services/docker';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -47,8 +47,8 @@ import {
   getDefaultProvider,
   getProviderForSession,
   getSandboxProvider,
-  type HermesSession,
   listAllSessions,
+  type OxSession,
   type SandboxProvider,
   type SandboxProviderType,
   type ShellSession,
@@ -88,14 +88,14 @@ type SessionsView =
         mountDir?: string;
       };
       pendingResume?: {
-        session: HermesSession;
+        session: OxSession;
         prompt: string;
         model: string;
         mode: SubmitMode;
         mountDir?: string;
       };
     }
-  | { type: 'prompt'; resumeSession?: HermesSession }
+  | { type: 'prompt'; resumeSession?: OxSession }
   | {
       type: 'starting';
       prompt: string;
@@ -106,13 +106,13 @@ type SessionsView =
     }
   | {
       type: 'resuming';
-      session: HermesSession;
+      session: OxSession;
       model: string;
       step: string;
       mode: SubmitMode;
     }
   | { type: 'starting-shell'; step: string }
-  | { type: 'detail'; session: HermesSession }
+  | { type: 'detail'; session: OxSession }
   | { type: 'list' }
   | { type: 'resources' };
 
@@ -127,7 +127,7 @@ interface SessionsResult {
     | 'needs-agent-auth';
   sessionId?: string;
   // For attach/exec-shell: the session to return to after detaching
-  session?: HermesSession;
+  session?: OxSession;
   // For attach-session: the provider type to use
   attachProvider?: SandboxProviderType;
   // For shell: session ID if resuming, undefined if fresh shell
@@ -158,7 +158,7 @@ export interface RunSessionsTuiOptions {
   initialAgent?: AgentType;
   initialModel?: string;
   /** Session to display when initialView is 'detail' */
-  initialSession?: HermesSession;
+  initialSession?: OxSession;
   // Options for starting flow
   serviceId?: string;
   dbFork?: boolean;
@@ -180,7 +180,7 @@ interface SessionsAppProps {
   initialAgent?: AgentType;
   initialModel?: string;
   /** Session to display when initialView is 'detail' */
-  initialSession?: HermesSession;
+  initialSession?: OxSession;
   provider: SandboxProvider;
   serviceId?: string;
   dbFork?: boolean;
@@ -208,13 +208,13 @@ function SessionsApp({
   onComplete,
 }: SessionsAppProps) {
   const [view, setView] = useState<SessionsView>({ type: 'init' });
-  const [config, setConfig] = useState<HermesConfig | null>(null);
+  const [config, setConfig] = useState<OxConfig | null>(null);
   // Counter to force PromptScreen remount (resets all state to defaults)
   const [promptKey, setPromptKey] = useState(0);
 
   // Use refs to store props/config that we need in async functions
   // This avoids dependency issues with useCallback/useEffect
-  const configRef = useRef<HermesConfig | null>(null);
+  const configRef = useRef<OxConfig | null>(null);
   const propsRef = useRef({
     initialView,
     initialPrompt,
@@ -485,7 +485,7 @@ function SessionsApp({
         // Only check GitHub credentials if in a git repo
         if (inGitRepo && !(await checkGhCredentials())) {
           throw new Error(
-            'GitHub authentication not configured. Run `hermes config` to set up.',
+            'GitHub authentication not configured. Run `ox config` to set up.',
           );
         }
 
@@ -552,7 +552,7 @@ function SessionsApp({
   // Resume session function - handles the full flow of resuming an agent
   const resumeSessionFlow = useCallback(
     async (
-      session: HermesSession,
+      session: OxSession,
       prompt: string,
       model: string,
       mode: SubmitMode = 'async',
@@ -817,7 +817,7 @@ function SessionsApp({
   );
 
   // Handle resume from session detail - navigate to PromptScreen with resume context
-  const handleResume = useCallback((session: HermesSession) => {
+  const handleResume = useCallback((session: OxSession) => {
     setView({ type: 'prompt', resumeSession: session });
   }, []);
 
@@ -1120,8 +1120,11 @@ export async function runSessionsTui({
   // Use passed isGitRepo if provided, otherwise detect from currentRepoInfo
   const effectiveIsGitRepo = isGitRepo ?? currentRepoInfo !== null;
 
-  // Only require GitHub auth if in a git repo
+  // Only require GitHub auth if in a git repo.
+  // ensureGhAuth validates credentials by running `gh` inside Docker,
+  // so Docker must be ready first.
   if (effectiveIsGitRepo) {
+    await ensureDockerSandbox();
     await ensureGhAuth();
   }
 
@@ -1131,7 +1134,7 @@ export async function runSessionsTui({
   let nextPrompt = initialPrompt;
   let nextAgent = initialAgent;
   let nextModel = initialModel;
-  let nextSession: HermesSession | undefined;
+  let nextSession: OxSession | undefined;
   let nextMountDir = mountDir;
   let nextIsGitRepo = isGitRepo;
 
@@ -1344,7 +1347,7 @@ interface SessionsOptions {
   all: boolean;
 }
 
-export function getStatusDisplay(session: HermesSession): string {
+export function getStatusDisplay(session: OxSession): string {
   switch (session.status) {
     case 'running':
       return '\x1b[32mrunning\x1b[0m'; // green
@@ -1370,7 +1373,7 @@ export function truncate(str: string, maxLen: number): string {
   return `${str.slice(0, maxLen - 3)}...`;
 }
 
-function printTable(sessions: HermesSession[]): void {
+function printTable(sessions: OxSession[]): void {
   const headers = ['NAME', 'STATUS', 'AGENT', 'REPO', 'CREATED', 'PROMPT'];
   const rows = sessions.map((s) => [
     s.name,
@@ -1453,9 +1456,9 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
   // Table output
   if (filteredSessions.length === 0) {
     if (options.all) {
-      console.log('No hermes sessions found.');
+      console.log('No ox sessions found.');
     } else {
-      console.log('No running hermes sessions. Use --all to see all sessions.');
+      console.log('No running ox sessions. Use --all to see all sessions.');
     }
     return;
   }
@@ -1482,7 +1485,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
 
 export const sessionsCommand = new Command('sessions')
   .aliases(['list', 'session', 'status', 's'])
-  .description('Show all hermes sessions and their status')
+  .description('Show all ox sessions and their status')
   .option(
     '-o, --output <format>',
     'Output format: tui, table, json, yaml',
@@ -1496,7 +1499,7 @@ export const sessionsCommand = new Command('sessions')
 
 // Subcommand to remove/clean up sessions
 const cleanCommand = new Command('clean')
-  .description('Remove stopped hermes containers')
+  .description('Remove stopped ox containers')
   .option('-a, --all', 'Remove all containers (including running)')
   .option('-f, --force', 'Skip confirmation')
   .action(async (options: { all: boolean; force: boolean }) => {
@@ -1511,7 +1514,7 @@ const cleanCommand = new Command('clean')
       return;
     }
 
-    const displayName = (s: HermesSession) => s.containerName ?? s.id;
+    const displayName = (s: OxSession) => s.containerName ?? s.id;
 
     console.log(`Found ${toRemove.length} container(s) to remove:`);
     for (const session of toRemove) {

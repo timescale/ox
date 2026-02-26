@@ -1,6 +1,6 @@
 # Deno Sandbox Integration
 
-Reference for working with Deno Deploy sandboxes in Hermes. Covers the SDK, platform behavior, workarounds, and lessons learned.
+Reference for working with Deno Deploy sandboxes in Ox. Covers the SDK, platform behavior, workarounds, and lessons learned.
 
 ## SDK: `@deno/sandbox` (v0.12.0)
 
@@ -54,7 +54,7 @@ mv ~/.gitattributes.bak ~/.gitattributes
 
 ### Sandbox ID Resolution
 
-Because the patched transport extracts `x-deno-sandbox-id` from the raw HTTP headers, `sandbox.id` is populated. However, as a safety fallback, `DenoApiClient.createSandbox()` also injects a unique `hermes.create-id` label and looks up the sandbox via the Console API if `sandbox.id` is null.
+Because the patched transport extracts `x-deno-sandbox-id` from the raw HTTP headers, `sandbox.id` is populated. However, as a safety fallback, `DenoApiClient.createSandbox()` also injects a unique `ox.create-id` label and looks up the sandbox via the Console API if `sandbox.id` is null.
 
 ### Killing Sandboxes
 
@@ -103,7 +103,7 @@ We use `nanoid` with a custom alphabet (`a-z0-9`) for random suffixes, with pref
 | `hr-` | Resume volume (created from snapshot) |
 | `hsh-` | Ephemeral shell volume |
 | `hsnap-` | Session resume snapshot |
-| `hermes-base-{version}` | Base snapshot (deterministic, no nanoid) |
+| `ox-base-{version}` | Base snapshot (deterministic, no nanoid) |
 
 ### Volume Lifecycle
 
@@ -176,7 +176,7 @@ await run(sandbox, 'sudo chown $(id -u):$(id -g) /work', 'chown');
 
 ### Piping stdout/stderr
 
-Always pipe stdout and stderr when running commands from the TUI. Otherwise, sandbox command output leaks into the hermes terminal UI:
+Always pipe stdout and stderr when running commands from the TUI. Otherwise, sandbox command output leaks into the ox terminal UI:
 
 ```typescript
 await sandbox.spawn('bash', {
@@ -211,10 +211,10 @@ Interactive agent sessions run inside tmux so they survive SSH disconnects. Key 
 
 ```bash
 # Force UTF-8 mode (required for Unicode rendering in Deno sandboxes)
-tmux -u new-session -A -s hermes '<command>'
+tmux -u new-session -A -s ox '<command>'
 
 # Reattach
-tmux -u attach -t hermes
+tmux -u attach -t ox
 ```
 
 The `-u` flag is critical — without it, block/box-drawing characters render incorrectly because the sandbox environment doesn't have locale data configured.
@@ -232,7 +232,7 @@ set -ga terminal-overrides ",xterm-256color:Tc"   # true-color passthrough
 
 The Deno platform auto-generates `/etc/profile.d/app-env.sh` on each sandbox boot, which **resets PATH to system directories only**. User-installed binaries (claude, opencode, etc.) in `~/.local/bin` and `~/.opencode/bin` won't be found.
 
-Fix: Create `/etc/profile.d/hermes-path.sh` which sorts alphabetically after `app-env.sh` (`h` > `a`):
+Fix: Create `/etc/profile.d/ox-path.sh` which sorts alphabetically after `app-env.sh` (`h` > `a`):
 
 ```bash
 export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"
@@ -242,7 +242,7 @@ Also add the same line to `~/.bashrc` for non-login shells that use `BASH_ENV`.
 
 ## Default User
 
-Deno sandboxes run as the `app` user with `$HOME=/home/app`. Do NOT create a separate `hermes` user. All credential files, tool installations, and config should target the `app` user's home directory.
+Deno sandboxes run as the `app` user with `$HOME=/home/app`. Do NOT create a separate `ox` user. All credential files, tool installations, and config should target the `app` user's home directory.
 
 `sudo` is available without a password.
 

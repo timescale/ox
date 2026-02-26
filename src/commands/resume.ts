@@ -1,5 +1,5 @@
 // ============================================================================
-// Resume Command - Resume a stopped hermes agent
+// Resume Command - Resume a stopped ox agent
 // ============================================================================
 
 import { Command } from 'commander';
@@ -92,7 +92,7 @@ export async function resumeAction(
 }
 
 export const resumeCommand = new Command('resume')
-  .description('Resume a stopped hermes session')
+  .description('Resume a stopped ox session')
   .argument('<session>', 'Session name to resume')
   .argument('[prompt]', 'Prompt for the resumed agent')
   .option('-d, --detach', 'Resume in detached mode (runs agent in background)')

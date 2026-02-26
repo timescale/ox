@@ -4,13 +4,13 @@
 
 import {
   attachToContainer,
-  type HermesSession as DockerSession,
+  type OxSession as DockerSession,
   getSession as dockerGetSession,
   ensureDockerImage,
   ensureDockerSandbox,
   getContainerLogs,
   getContainerStats,
-  listHermesSessions,
+  listOxSessions,
   removeContainer,
   resumeSession,
   shellInContainer,
@@ -23,8 +23,8 @@ import { log } from '../logger.ts';
 import type {
   CreateSandboxOptions,
   CreateShellSandboxOptions,
-  HermesSession,
   LogStream,
+  OxSession,
   ResumeSandboxOptions,
   SandboxBuildProgress,
   SandboxProvider,
@@ -37,13 +37,13 @@ import type {
 // ============================================================================
 
 /**
- * Map a Docker HermesSession to the unified HermesSession type.
+ * Map a Docker OxSession to the unified OxSession type.
  * Status mapping: 'running' -> 'running', 'exited' -> 'exited',
  * 'created' -> 'unknown' (never started),
  * all others ('paused', 'restarting', 'dead') -> 'stopped'.
  */
-export function mapDockerSession(docker: DockerSession): HermesSession {
-  let status: HermesSession['status'];
+export function mapDockerSession(docker: DockerSession): OxSession {
+  let status: OxSession['status'];
   switch (docker.status) {
     case 'running':
       status = 'running';
@@ -124,7 +124,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     return ensureDockerImage({ onProgress: options?.onProgress });
   }
 
-  async create(options: CreateSandboxOptions): Promise<HermesSession> {
+  async create(options: CreateSandboxOptions): Promise<OxSession> {
     log.debug(
       {
         branchName: options.branchName,
@@ -179,7 +179,7 @@ export class DockerSandboxProvider implements SandboxProvider {
   async resume(
     sessionId: string,
     options: ResumeSandboxOptions,
-  ): Promise<HermesSession> {
+  ): Promise<OxSession> {
     log.debug({ sessionId }, 'Resuming Docker sandbox');
     const { onProgress } = options;
     onProgress?.('Resuming container');
@@ -198,13 +198,13 @@ export class DockerSandboxProvider implements SandboxProvider {
     return mapDockerSession(session);
   }
 
-  async list(): Promise<HermesSession[]> {
-    const sessions = await listHermesSessions();
+  async list(): Promise<OxSession[]> {
+    const sessions = await listOxSessions();
     log.debug({ count: sessions.length }, 'Listed Docker sessions');
     return sessions.map(mapDockerSession);
   }
 
-  async get(sessionId: string): Promise<HermesSession | null> {
+  async get(sessionId: string): Promise<OxSession | null> {
     const session = await dockerGetSession(sessionId);
     return session ? mapDockerSession(session) : null;
   }

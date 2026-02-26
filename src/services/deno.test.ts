@@ -5,11 +5,11 @@ import { deleteDenoToken, getDenoToken, setDenoToken } from './deno';
 // This prevents `./bun test` from wiping out the user's actual Deno token.
 const mockStore = new Map<string, string>();
 mock.module('./keyring', () => ({
-  getHermesSecret: async (key: string) => mockStore.get(key) ?? null,
-  setHermesSecret: async (key: string, value: string) => {
+  getOxSecret: async (key: string) => mockStore.get(key) ?? null,
+  setOxSecret: async (key: string, value: string) => {
     mockStore.set(key, value);
   },
-  deleteHermesSecret: async (key: string) => {
+  deleteOxSecret: async (key: string) => {
     mockStore.delete(key);
   },
   // Keep other exports available in case they're needed

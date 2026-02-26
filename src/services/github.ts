@@ -30,7 +30,7 @@ interface GhPrListItem {
  * Returns the most relevant PR (open first, then most recent).
  * Returns null if no PR exists or on any error.
  *
- * Note: Session branch names are stored without the 'hermes/' prefix,
+ * Note: Session branch names are stored without the 'ox/' prefix,
  * so this function prepends it when querying GitHub.
  */
 export async function getPrForBranch(
@@ -39,11 +39,11 @@ export async function getPrForBranch(
 ): Promise<PrInfo | null> {
   if (repo === 'local') return null;
 
-  // Session branch names don't include the 'hermes/' prefix, but the actual
-  // git branches are created with it (e.g., 'hermes/feature-xyz')
-  const branch = sessionName.startsWith('hermes/')
+  // Session branch names don't include the 'ox/' prefix, but the actual
+  // git branches are created with it (e.g., 'ox/feature-xyz')
+  const branch = sessionName.startsWith('ox/')
     ? sessionName
-    : `hermes/${sessionName}`;
+    : `ox/${sessionName}`;
 
   try {
     const result = await runGhInDocker({

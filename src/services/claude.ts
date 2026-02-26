@@ -9,7 +9,7 @@ import type {
 import { Deferred } from '../types/deferred';
 import { readCache, writeCache } from './cache';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
-import { getHermesSecret, getSecret, setHermesSecret } from './keyring';
+import { getOxSecret, getSecret, setOxSecret } from './keyring';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
@@ -87,20 +87,20 @@ const readHostCredentials = async (): Promise<ClaudeCredentialsJson | null> => {
   return null;
 };
 
-const HERMES_CREDS_ACCOUNT = 'claude/.credentials.json';
+const OX_CREDS_ACCOUNT = 'claude/.credentials.json';
 
-const readHermesCredentialCache =
+const readOxCredentialCache =
   async (): Promise<ClaudeCredentialsJson | null> => {
     try {
-      const raw = await getHermesSecret(HERMES_CREDS_ACCOUNT);
+      const raw = await getOxSecret(OX_CREDS_ACCOUNT);
       const creds = JSON.parse(raw || '{}') as ClaudeCredentialsJson;
       if (claudeCredsValid(creds)) {
-        log.debug('Found valid claude credentials in hermes keyring');
+        log.debug('Found valid claude credentials in ox keyring');
         return creds;
       }
-      log.debug('Claude credentials present in hermes keyring, but invalid.');
+      log.debug('Claude credentials present in ox keyring, but invalid.');
     } catch {
-      log.debug('No claude/.credentials.json found in hermes keyring');
+      log.debug('No claude/.credentials.json found in ox keyring');
     }
     return null;
   };
@@ -132,7 +132,7 @@ const captureClaudeCredentialsJsonFromContainer = async (
         log.debug('No .claude.json found in container for oauthAccount');
       }
 
-      await setHermesSecret(HERMES_CREDS_ACCOUNT, JSON.stringify(creds));
+      await setOxSecret(OX_CREDS_ACCOUNT, JSON.stringify(creds));
       writeCache('claudeCredentialsJson', creds);
       return true;
     }
@@ -200,18 +200,18 @@ const readHostConfigApiKey = async (): Promise<string | null> => {
   return null;
 };
 
-const HERMES_APIKEY_ACCOUNT = '.claude.json/primaryApiKey';
+const OX_APIKEY_ACCOUNT = '.claude.json/primaryApiKey';
 
-const readHermesApiKeyCache = async (): Promise<string | null> => {
+const readOxApiKeyCache = async (): Promise<string | null> => {
   try {
-    const key = await getHermesSecret(HERMES_APIKEY_ACCOUNT);
+    const key = await getOxSecret(OX_APIKEY_ACCOUNT);
     if (key) {
-      log.debug('Found claude API key in hermes keyring');
+      log.debug('Found claude API key in ox keyring');
       return key;
     }
-    log.debug('Claude credentials present in hermes keyring, but invalid.');
+    log.debug('Claude credentials present in ox keyring, but invalid.');
   } catch {
-    log.debug('No .claude.json/primaryApiKey found in hermes keyring');
+    log.debug('No .claude.json/primaryApiKey found in ox keyring');
   }
   return null;
 };
@@ -227,7 +227,7 @@ export const captureClaudeApiKeyFromContainer = async (
     const config = JSON.parse(content) as ClaudeConfigJson;
     if (config.primaryApiKey) {
       log.debug('Claude API key found in container');
-      await setHermesSecret(HERMES_APIKEY_ACCOUNT, config.primaryApiKey);
+      await setOxSecret(OX_APIKEY_ACCOUNT, config.primaryApiKey);
       writeCache('claudeApiKey', config.primaryApiKey);
       return true;
     }
@@ -257,13 +257,13 @@ export const getClaudeCredentialsJson = async (
     }
   }
   const hostCreds = await readHostCredentials();
-  const hermesCreds = await readHermesCredentialCache();
+  const oxCreds = await readOxCredentialCache();
   const creds =
     hostCreds?.claudeAiOauth?.expiresAt &&
-    hermesCreds?.claudeAiOauth?.expiresAt &&
-    hermesCreds.claudeAiOauth?.expiresAt > hostCreds.claudeAiOauth?.expiresAt
-      ? hermesCreds
-      : hostCreds || hermesCreds;
+    oxCreds?.claudeAiOauth?.expiresAt &&
+    oxCreds.claudeAiOauth?.expiresAt > hostCreds.claudeAiOauth?.expiresAt
+      ? oxCreds
+      : hostCreds || oxCreds;
   writeCache('claudeCredentialsJson', creds);
   return creds;
 };
@@ -278,7 +278,7 @@ export const getClaudeApiKey = async (
       return cached.value;
     }
   }
-  const key = (await readHostConfigApiKey()) || (await readHermesApiKeyCache());
+  const key = (await readHostConfigApiKey()) || (await readOxApiKeyCache());
   writeCache('claudeApiKey', key);
   return key;
 };

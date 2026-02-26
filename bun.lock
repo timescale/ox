@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "hermes",
+      "name": "ox",
       "dependencies": {
         "@bomb.sh/tab": "^0.0.14",
         "@deno/sandbox": "^0.12.0",

@@ -1,5 +1,5 @@
 // ============================================================================
-// Hermes CLI - Main Entry Point
+// Ox CLI - Main Entry Point
 // ============================================================================
 
 import { program } from 'commander';
@@ -30,7 +30,7 @@ import { checkForUpdate, isCompiledBinary } from './services/updater';
 import { printErr } from './utils';
 
 program
-  .name('hermes')
+  .name('ox')
   .description('Automates branch + database fork + agent sandbox creation')
   .version(packageJson.version, '-v, --version')
   .enablePositionalOptions();
@@ -40,7 +40,7 @@ program
 withBranchOptions(program)
   .argument('[prompt]', 'Natural language description of the task')
   .action(async (prompt, options) => {
-    log.debug({ options, prompt }, 'Root hermes command invoked');
+    log.debug({ options, prompt }, 'Root ox command invoked');
     if (prompt) {
       // Guard against accidentally running with an invalid command as prompt
       // Prompt must contain at least one space (more than one word)
@@ -103,9 +103,9 @@ if (isCompiledBinary()) {
         updateCheck.then((update) => {
           if (update) {
             printErr(
-              `\nA new version of hermes is available: v${update.latestVersion} (current: v${update.currentVersion})`,
+              `\nA new version of ox is available: v${update.latestVersion} (current: v${update.currentVersion})`,
             );
-            printErr("Run 'hermes upgrade' to update.");
+            printErr("Run 'ox upgrade' to update.");
           }
         });
       });
@@ -113,7 +113,7 @@ if (isCompiledBinary()) {
   }
 }
 
-// Handle `hermes complete <shell>` before parseAsync for tab library
+// Handle `ox complete <shell>` before parseAsync for tab library
 // This must happen after all commands are added so tab can introspect them
 if (!handleCompletionRequest(program)) {
   program.parse();

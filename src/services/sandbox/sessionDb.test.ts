@@ -14,7 +14,7 @@ import {
   updateSessionStatus,
   upsertSession,
 } from './sessionDb.ts';
-import type { HermesSession } from './types.ts';
+import type { OxSession } from './types.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');
@@ -22,7 +22,7 @@ function createTestDb(): Database {
   return db;
 }
 
-function makeSession(overrides?: Partial<HermesSession>): HermesSession {
+function makeSession(overrides?: Partial<OxSession>): OxSession {
   return {
     id: 'test-id-1',
     provider: 'docker',
@@ -31,7 +31,7 @@ function makeSession(overrides?: Partial<HermesSession>): HermesSession {
     agent: 'claude',
     model: 'sonnet',
     prompt: 'fix the bug',
-    repo: 'timescale/hermes',
+    repo: 'timescale/ox',
     created: '2025-01-15T10:00:00Z',
     status: 'running',
     interactive: true,
@@ -307,7 +307,7 @@ describe('sessionDb', () => {
       id: 'docker-1',
       provider: 'docker',
       mountDir: '/home/user/project',
-      containerName: 'hermes-docker-1',
+      containerName: 'ox-docker-1',
     });
 
     upsertSession(db, session);
@@ -315,7 +315,7 @@ describe('sessionDb', () => {
 
     expect(result?.provider).toBe('docker');
     expect(result?.mountDir).toBe('/home/user/project');
-    expect(result?.containerName).toBe('hermes-docker-1');
+    expect(result?.containerName).toBe('ox-docker-1');
   });
 
   // ==========================================================================

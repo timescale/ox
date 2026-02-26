@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HermesSession } from './sandbox/types.ts';
+import type { OxSession } from './sandbox/types.ts';
 import {
   formatRelativeTime,
   getStatusColor,
@@ -8,9 +8,9 @@ import {
 } from './sessionDisplay.ts';
 
 const makeSession = (
-  status: HermesSession['status'],
+  status: OxSession['status'],
   exitCode?: number,
-): HermesSession => ({
+): OxSession => ({
   id: 'abc123',
   name: 'test',
   provider: 'docker',

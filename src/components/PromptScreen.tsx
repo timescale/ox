@@ -19,14 +19,14 @@ import {
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import type { AgentType } from '../services/config';
 import { log } from '../services/logger';
-import type { HermesSession, SandboxProviderType } from '../services/sandbox';
+import type { OxSession, SandboxProviderType } from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
 import { FilterableSelector } from './FilterableSelector';
-import { HermesTitle } from './HermesTitle';
 import { HotkeysBar } from './HotkeysBar';
 import { Modal } from './Modal';
+import { OxTitle } from './OxTitle';
 import { Selector } from './Selector';
 import { SlashCommandPopover } from './SlashCommandPopover.tsx';
 import { ThemePicker } from './ThemePicker.tsx';
@@ -38,7 +38,7 @@ export interface PromptScreenProps {
   defaultAgent: AgentType;
   defaultModel?: string | null;
   defaultSandboxProvider?: SandboxProviderType;
-  resumeSession?: HermesSession; // If set, we're resuming this session
+  resumeSession?: OxSession; // If set, we're resuming this session
   /** Initial mount directory from CLI flag (enables mount mode if set) */
   initialMountDir?: string | null;
   /** If true, mount mode is forced (no GitHub remote available) */
@@ -708,7 +708,7 @@ export function PromptScreen({
       >
         <box width="100%" maxWidth={76} flexDirection="column">
           {/* ASCII Art Title */}
-          <HermesTitle />
+          <OxTitle />
           {/* Resume indicator */}
           {resumeSession && (
             <box marginBottom={1}>

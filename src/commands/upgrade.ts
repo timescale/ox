@@ -1,5 +1,5 @@
 // ============================================================================
-// Upgrade Command - Check for and install hermes updates
+// Upgrade Command - Check for and install ox updates
 // ============================================================================
 
 import { Command } from 'commander';
@@ -51,5 +51,5 @@ async function upgradeAction(): Promise<void> {
 
 export const upgradeCommand = new Command('upgrade')
   .aliases(['update', 'u'])
-  .description('Check for and install hermes updates')
+  .description('Check for and install ox updates')
   .action(upgradeAction);

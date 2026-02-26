@@ -2,8 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import pino, { type Logger } from 'pino';
 
-export const LOGS_DIR = '.hermes/logs';
-export const LOG_FILE = join(LOGS_DIR, 'hermes.log');
+export const LOGS_DIR = '.ox/logs';
+export const LOG_FILE = join(LOGS_DIR, 'ox.log');
 
 // Lazy-initialized logger to avoid sonic-boom errors when CLI exits early (e.g., --help)
 let _log: Logger | null = null;
@@ -18,7 +18,7 @@ function isTruthyEnv(value: string | undefined): boolean {
 }
 
 function shouldDisableFileLogging(): boolean {
-  if (isTruthyEnv(process.env.HERMES_DISABLE_FILE_LOGGING)) {
+  if (isTruthyEnv(process.env.OX_DISABLE_FILE_LOGGING)) {
     return true;
   }
 
@@ -35,7 +35,7 @@ function shouldDisableFileLogging(): boolean {
 
 export function getLogger(): Logger {
   if (!_log) {
-    const logLevel = process.env.HERMES_LOG_LEVEL || 'info';
+    const logLevel = process.env.OX_LOG_LEVEL || 'info';
 
     if (shouldDisableFileLogging()) {
       _log = pino({

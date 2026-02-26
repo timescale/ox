@@ -28,7 +28,7 @@ export const shellCommand = new Command('shell')
   )
   .action(async (options: ShellOptions) => {
     try {
-      // Recover terminal line discipline in case a previous hermes
+      // Recover terminal line discipline in case a previous ox
       // session left it in raw mode (e.g. onlcr disabled).
       ensureSaneTerminal();
 
