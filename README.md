@@ -14,6 +14,12 @@ After installation, restart your shell or run `source ~/.zshrc` (or `source ~/.b
 
 Re-run the above command at any time to update to the latest version.
 
+#### Install via npm
+
+```bash
+npm i -g @ox.build/cli
+```
+
 ### Recommended Terminal
 
 While any terminal should be usable, we recommend [Ghostty](https://ghostty.org/) for the best TUI experience:
