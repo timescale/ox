@@ -1,7 +1,8 @@
 #!/bin/bash
 
 version="bun-v1.3.9"
-downloadDir=$(pwd)/download/bun/${version}
+scriptDir="$(cd "$(dirname "$0")" && pwd)"
+downloadDir="$scriptDir/download/bun/${version}"
 bunCmd="$downloadDir/bin/bun"
 
 if [ ! -f "$bunCmd" ]; then
