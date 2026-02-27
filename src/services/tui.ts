@@ -1,4 +1,3 @@
-import { createInterface } from 'node:readline';
 import { type CliRenderer, createCliRenderer } from '@opentui/core';
 import type { Root } from '@opentui/react';
 import { createRoot } from '@opentui/react';
@@ -19,25 +18,16 @@ interface TuiResult {
  * The TUI renderer (@opentui) only outputs 24-bit color escape sequences,
  * which non-truecolor terminals will ignore, resulting in a blank or garbled screen.
  */
+let warned = false;
 async function warnIfNoTrueColor(): Promise<void> {
-  if (supportsTrueColor) return;
+  if (supportsTrueColor || warned) return;
 
   console.warn(
     '\n\x1b[33mWarning: Your terminal does not appear to support truecolor (24-bit color).\x1b[0m\n' +
       'The ox TUI requires truecolor support and may not render correctly.\n' +
       'For best results, use Ghostty, iTerm2, Kitty, or another truecolor terminal.\n',
   );
-
-  await new Promise<void>((resolve) => {
-    const rl = createInterface({
-      input: process.stdin,
-      output: process.stderr,
-    });
-    rl.question('Press Enter to continue anyway, or Ctrl+C to quit... ', () => {
-      rl.close();
-      resolve();
-    });
-  });
+  warned = true;
 }
 
 export const createTui = async (): Promise<TuiResult> => {
