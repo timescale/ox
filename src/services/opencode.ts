@@ -24,7 +24,7 @@ const containerPaths = {
   authJson: join(CONTAINER_HOME, '.local', 'share', 'opencode', 'auth.json'),
 };
 
-const authEntryValid = (entry?: AuthEntry | null): boolean => {
+const authEntryValid = (entry?: AuthEntry | null): entry is AuthEntry => {
   if (!entry) return false;
   if (entry.type === 'api') return !!entry.key;
   if (entry.type === 'oauth') {
@@ -38,6 +38,14 @@ const authEntryValid = (entry?: AuthEntry | null): boolean => {
 const authCredsValid = (creds?: OpencodeAuthJson | null): boolean => {
   if (!creds) return false;
   return Object.values(creds).some(authEntryValid);
+};
+
+const authEntryExpiresAt = (entry?: AuthEntry | null): number => {
+  if (!authEntryValid(entry)) return 0;
+  if (entry.type === 'oauth' && entry.expires) {
+    return entry.expires;
+  }
+  return Infinity;
 };
 
 /**
@@ -96,43 +104,41 @@ const writeOxCredentialCache = async (
 const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
   const host = (await readHostCredentials()) || {};
   const cached = (await readOxCredentialCache()) || {};
+  const merged: OpencodeAuthJson = {};
 
   const keys = new Set([...Object.keys(cached), ...Object.keys(host)]);
-  let changed = false;
   for (const key of keys) {
-    if (authEntryValid(host[key]) && !authEntryValid(cached[key])) {
-      log.debug(
-        `Adding missing or outdated key "${key}" to opencode credential cache from host`,
-      );
-      cached[key] = host[key];
-      changed = true;
+    if (
+      authEntryValid(cached[key]) &&
+      (!authEntryValid(host[key]) ||
+        authEntryExpiresAt(cached[key]) > authEntryExpiresAt(host[key]))
+    ) {
+      log.debug(`opencode cached "${key}" creds newer than host`);
+      merged[key] = cached[key];
+    } else {
+      merged[key] = host[key];
     }
   }
-  if (!authEntryValid(cached.anthropic)) {
+  if (!authEntryValid(merged.anthropic)) {
     const credsJson = await getClaudeCredentialsJson();
     if (credsJson?.claudeAiOauth?.accessToken) {
-      cached.anthropic = {
+      merged.anthropic = {
         type: 'oauth',
         refresh: credsJson.claudeAiOauth.refreshToken,
         access: credsJson.claudeAiOauth.accessToken,
         expires: credsJson.claudeAiOauth.expiresAt,
       };
-      changed = true;
     } else {
       const apiKey = await getClaudeApiKey();
       if (apiKey) {
-        cached.anthropic = {
+        merged.anthropic = {
           type: 'api',
           key: apiKey,
         };
-        changed = true;
       }
     }
   }
-  if (changed) {
-    await writeOxCredentialCache(cached);
-  }
-  return cached;
+  return merged;
 };
 
 export const getOpencodeAuthJson = async (
