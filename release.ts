@@ -99,7 +99,27 @@ if (tagCheck.stdout.trim() === tagName) {
   fail(`Tag ${tagName} already exists.`);
 }
 
-await run(['git', 'switch', 'main']);
+const branchResult = await run(['git', 'rev-parse', '--abbrev-ref', 'HEAD']);
+const currentBranch = branchResult.stdout.trim();
+if (currentBranch !== 'main') {
+  fail(
+    `Must be on the 'main' branch to release. Currently on '${currentBranch}'.`,
+  );
+}
+
+await run(['git', 'fetch', 'origin', 'main']);
+const behindResult = await run([
+  'git',
+  'rev-list',
+  '--count',
+  'main..origin/main',
+]);
+const behindCount = Number.parseInt(behindResult.stdout.trim(), 10);
+if (behindCount > 0) {
+  fail(
+    `Local 'main' is ${behindCount} commit(s) behind 'origin/main'. Pull before releasing.`,
+  );
+}
 
 packageJson.version = nextVersion;
 await Bun.write('package.json', `${JSON.stringify(packageJson, null, 2)}\n`);
