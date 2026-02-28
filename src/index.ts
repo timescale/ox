@@ -180,8 +180,8 @@ process.on('exit', () => {
 let crashHandlerFired = false;
 
 /**
- * Track an unhandled error and exit. Only the error type (constructor name) is
- * recorded — never the message or stack trace, which may contain sensitive data.
+ * Track an unhandled error and exit. Sends the error type, message, and stack
+ * trace to analytics so we can diagnose crashes in our own code.
  */
 async function handleCrash(source: string, err: unknown): Promise<void> {
   if (crashHandlerFired) return;
@@ -196,13 +196,17 @@ async function handleCrash(source: string, err: unknown): Promise<void> {
       : 'Unhandled promise rejection';
   console.error(`${label}:`, err);
 
-  const errorType =
-    err instanceof Error ? err.name || err.constructor.name : typeof err;
+  const isError = err instanceof Error;
+  const errorType = isError ? err.name || err.constructor.name : typeof err;
+  const errorMessage = isError ? err.message : String(err);
+  const errorStack = isError ? err.stack : undefined;
 
   try {
     await Promise.race([
       trackImmediate('error_occurred', {
         error_type: errorType,
+        error_message: errorMessage,
+        error_stack: errorStack,
         error_source: source,
         command_path: currentCommandPath,
       }),
