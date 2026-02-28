@@ -25,7 +25,11 @@ import { resumeCommand } from './commands/resume';
 import { runSessionsTui, sessionsCommand } from './commands/sessions';
 import { shellCommand } from './commands/shell';
 import { upgradeCommand } from './commands/upgrade';
-import { shutdown as shutdownAnalytics, track } from './services/analytics';
+import {
+  shutdown as shutdownAnalytics,
+  track,
+  trackImmediate,
+} from './services/analytics';
 import { log } from './services/logger';
 import { checkForUpdate, isCompiledBinary } from './services/updater';
 import { printErr } from './utils';
@@ -118,6 +122,10 @@ if (isCompiledBinary()) {
 // Analytics - wrap all commands with usage tracking
 // ============================================================================
 
+// Tracks the currently-executing command path for use in crash handlers.
+// Set in the preAction hook below, read by uncaughtException/unhandledRejection handlers.
+let currentCommandPath: string | undefined;
+
 /**
  * Recursively wrap all commands with analytics tracking.
  *
@@ -140,9 +148,12 @@ function wrapCommandsWithAnalytics(cmd: CommandType): void {
       current = current.parent as CommandType | null;
     }
 
+    const commandPath = parts.join(' ');
+    currentCommandPath = commandPath;
+
     track('command_executed', {
       command_name: thisCommand.name(),
-      command_path: parts.join(' '),
+      command_path: commandPath,
     });
   });
 
@@ -159,6 +170,62 @@ wrapCommandsWithAnalytics(program);
 // sends each event immediately on capture, so this is just a safety net.
 process.on('exit', () => {
   shutdownAnalytics().catch(() => {});
+});
+
+// ============================================================================
+// Unhandled error tracking
+// ============================================================================
+
+// Guard against re-entrance (e.g., if trackImmediate itself throws)
+let crashHandlerFired = false;
+
+/**
+ * Track an unhandled error and exit. Sends the error type, message, and stack
+ * trace to analytics so we can diagnose crashes in our own code.
+ */
+async function handleCrash(source: string, err: unknown): Promise<void> {
+  if (crashHandlerFired) return;
+  crashHandlerFired = true;
+
+  // Print the error to stderr so the user sees what happened.
+  // Registering an uncaughtException handler suppresses the default output,
+  // so we need to restore it explicitly.
+  const label =
+    source === 'uncaughtException'
+      ? 'Uncaught exception'
+      : 'Unhandled promise rejection';
+  console.error(`${label}:`, err);
+
+  const isError = err instanceof Error;
+  const errorType = isError ? err.name || err.constructor.name : typeof err;
+  const errorMessage = isError ? err.message : String(err);
+  const errorStack = isError ? err.stack : undefined;
+
+  try {
+    await Promise.race([
+      trackImmediate('error_occurred', {
+        error_type: errorType,
+        error_message: errorMessage,
+        error_stack: errorStack,
+        error_source: source,
+        command_path: currentCommandPath,
+      }),
+      // Timeout fallback: don't hang forever if flush stalls
+      new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  } catch {
+    // Swallow — must not prevent exit
+  }
+
+  process.exit(1);
+}
+
+process.on('uncaughtException', (err) => {
+  handleCrash('uncaughtException', err);
+});
+
+process.on('unhandledRejection', (err) => {
+  handleCrash('unhandledRejection', err);
 });
 
 // Handle `ox complete <shell>` before parseAsync for tab library

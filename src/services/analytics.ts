@@ -293,6 +293,42 @@ export async function shutdown(): Promise<void> {
 }
 
 /**
+ * Track an analytics event and wait for it to be sent.
+ *
+ * Unlike `track()`, this returns a Promise that resolves once the event has
+ * been dispatched to PostHog. Use this in crash handlers where you need to
+ * ensure delivery before calling `process.exit()`.
+ *
+ * Still safe: swallows errors internally so it never throws.
+ *
+ * @param event - Event name (e.g., 'error_occurred')
+ * @param properties - Additional event properties (sensitive keys are filtered)
+ */
+export async function trackImmediate(
+  event: string,
+  properties: Record<string, unknown> = {},
+): Promise<void> {
+  try {
+    const enabled = await isEnabled();
+    if (!enabled) return;
+
+    const id = await getOrCreateDistinctId();
+    const ph = getClient();
+
+    await ph.captureImmediate({
+      distinctId: id,
+      event,
+      properties: {
+        ...filterProperties(properties),
+        ...commonProperties(),
+      },
+    });
+  } catch {
+    // Swallow — analytics must never prevent process exit
+  }
+}
+
+/**
  * Reset the enabled state cache. Useful after config changes
  * (e.g., user disables analytics via config wizard).
  */
