@@ -69,6 +69,88 @@ export interface OxConfig {
 
   /** Default region for cloud sandboxes */
   cloudRegion?: 'ams' | 'ord';
+
+  /**
+   * Enable anonymous usage analytics (default: true).
+   * Set to false to disable all telemetry.
+   * Can also be disabled via environment variables:
+   *   DO_NOT_TRACK=1, NO_TELEMETRY=1, OX_ANALYTICS=false
+   */
+  analytics?: boolean;
+}
+
+// ============================================================================
+// Config Key Metadata
+// ============================================================================
+
+export type ConfigValueType =
+  | 'string'
+  | 'boolean'
+  | 'string|null'
+  | 'string[]'
+  | 'boolean|string';
+
+/** Type metadata for each config key, used for validation and parsing in CLI */
+export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
+  tigerServiceId: 'string|null',
+  agent: 'string',
+  model: 'string',
+  themeName: 'string',
+  sandboxBaseImage: 'string',
+  buildSandboxFromDockerfile: 'boolean|string',
+  overlayMounts: 'string[]',
+  initScript: 'string',
+  sandboxProvider: 'string',
+  cloudRegion: 'string',
+  analytics: 'boolean',
+};
+
+/**
+ * Parse a CLI string value into the appropriate type for a config key.
+ * Returns { value } on success, { error } on failure.
+ */
+export function parseConfigValue(
+  key: keyof OxConfig,
+  raw: string,
+): { value: OxConfig[keyof OxConfig] } | { error: string } {
+  const type = CONFIG_KEYS[key];
+  if (!type) {
+    return { error: `Unknown config key: ${key}` };
+  }
+
+  switch (type) {
+    case 'boolean':
+      if (raw === 'true') return { value: true };
+      if (raw === 'false') return { value: false };
+      return { error: `Expected 'true' or 'false' for ${key}, got '${raw}'` };
+
+    case 'boolean|string':
+      if (raw === 'true') return { value: true };
+      if (raw === 'false') return { value: false };
+      return { value: raw };
+
+    case 'string|null':
+      if (raw === 'null' || raw === 'none') return { value: null };
+      return { value: raw };
+
+    case 'string[]':
+      // Accept comma-separated values or JSON array syntax
+      if (raw.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return { value: parsed as string[] };
+        } catch {
+          // Fall through to comma-split
+        }
+      }
+      return { value: raw.split(',').map((s) => s.trim()) };
+
+    case 'string':
+      return { value: raw };
+
+    default:
+      return { value: raw };
+  }
 }
 
 // ============================================================================
@@ -85,6 +167,8 @@ interface ConfigStoreOptions {
 interface ConfigStore<T extends object> {
   /** Get the config directory path */
   getConfigDir: () => string;
+  /** Get the full path to the config file */
+  getConfigPath: () => string;
   /** Check if the config file exists */
   exists: () => Promise<boolean>;
   /** Read the entire config file */
@@ -95,6 +179,10 @@ interface ConfigStore<T extends object> {
   write: (config: T) => Promise<void>;
   /** Write a single config value */
   writeValue: <K extends keyof T>(key: K, value: T[K]) => Promise<void>;
+  /** Remove a single config value */
+  deleteValue: <K extends keyof T>(key: K) => Promise<void>;
+  /** Delete the entire config file */
+  deleteFile: () => Promise<void>;
 }
 
 const CONFIG_FILENAME = 'config.yml';
@@ -147,13 +235,32 @@ function createConfigStore<T extends object>(
       [key]: value,
     });
 
+  const deleteValue = async <K extends keyof T>(key: K): Promise<void> => {
+    const current = await read();
+    if (!current) return;
+    const { [key]: _, ...rest } = current;
+    await write(rest as T);
+  };
+
+  const deleteFile = async (): Promise<void> => {
+    const { unlink } = await import('node:fs/promises');
+    try {
+      await unlink(configPath());
+    } catch {
+      // Ignore if file doesn't exist
+    }
+  };
+
   return {
     getConfigDir,
+    getConfigPath: configPath,
     exists,
     read,
     readValue,
     write,
     writeValue,
+    deleteValue,
+    deleteFile,
   };
 }
 

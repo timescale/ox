@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { SelectOption } from '@opentui/core';
+import { YAML } from 'bun';
 import { Command } from 'commander';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CloudSetup } from '../components/CloudSetup';
@@ -13,11 +14,17 @@ import { GhAuth } from '../components/GhAuth';
 import { Loading } from '../components/Loading';
 import { Selector } from '../components/Selector';
 import { AGENT_SELECT_OPTIONS, useAgentModels } from '../services/agents';
+import { resetAnalyticsState } from '../services/analytics';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
 import {
   type AgentType,
+  CONFIG_KEYS,
+  type ConfigValueType,
   type OxConfig,
+  parseConfigValue,
   projectConfig,
+  readConfig,
+  userConfig,
 } from '../services/config';
 import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
 import { type GhAuthProcess, startContainerGhAuth } from '../services/ghAuth';
@@ -724,6 +731,259 @@ export async function configAction(): Promise<void> {
   }
 }
 
+// ============================================================================
+// Config Subcommands (show, set, unset, enable, disable, reset)
+// ============================================================================
+
+/** Resolve which config store to operate on based on --global flag */
+function getTargetStore(opts: { global?: boolean }) {
+  return opts.global ? userConfig : projectConfig;
+}
+
+function formatValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return '(not set)';
+  if (Array.isArray(value)) return value.join(', ');
+  return String(value);
+}
+
+async function showAction(opts: { global?: boolean; project?: boolean }) {
+  if (opts.global && opts.project) {
+    console.error('Error: --global and --project are mutually exclusive');
+    process.exit(1);
+  }
+
+  if (opts.global) {
+    const config = await userConfig.read();
+    if (!config || Object.keys(config).length === 0) {
+      console.log('No user config set.');
+      console.log(`  Path: ${userConfig.getConfigPath()}`);
+      return;
+    }
+    console.log(`# User config (${userConfig.getConfigPath()})\n`);
+    console.log(YAML.stringify(config, null, 2).trimEnd());
+    return;
+  }
+
+  if (opts.project) {
+    const config = await projectConfig.read();
+    if (!config || Object.keys(config).length === 0) {
+      console.log('No project config set.');
+      console.log(`  Path: ${projectConfig.getConfigPath()}`);
+      return;
+    }
+    console.log(`# Project config (${projectConfig.getConfigPath()})\n`);
+    console.log(YAML.stringify(config, null, 2).trimEnd());
+    return;
+  }
+
+  // Default: show merged config with source annotations
+  const [user, project] = await Promise.all([
+    userConfig.read(),
+    projectConfig.read(),
+  ]);
+  const merged = await readConfig();
+  const keys = Object.keys(CONFIG_KEYS) as (keyof OxConfig)[];
+
+  let hasAny = false;
+  for (const key of keys) {
+    const value = merged[key];
+    if (value === undefined) continue;
+    hasAny = true;
+
+    const inProject = project?.[key] !== undefined;
+    const inUser = user?.[key] !== undefined;
+    const source = inProject ? 'project' : inUser ? 'user' : '';
+
+    console.log(`${key}: ${formatValue(value)}  (${source})`);
+  }
+
+  if (!hasAny) {
+    console.log('No config values set.');
+    console.log(`\n  Project: ${projectConfig.getConfigPath()}`);
+    console.log(`  User:    ${userConfig.getConfigPath()}`);
+  }
+}
+
+async function setAction(
+  key: string,
+  value: string,
+  opts: { global?: boolean },
+) {
+  if (!(key in CONFIG_KEYS)) {
+    console.error(
+      `Error: Unknown config key '${key}'. Valid keys: ${Object.keys(CONFIG_KEYS).join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  const configKey = key as keyof OxConfig;
+  const result = parseConfigValue(configKey, value);
+  if ('error' in result) {
+    console.error(`Error: ${result.error}`);
+    process.exit(1);
+  }
+
+  const store = getTargetStore(opts);
+  // biome-ignore lint/suspicious/noExplicitAny: dynamic config key
+  await store.writeValue(configKey, result.value as any);
+
+  if (configKey === 'analytics') resetAnalyticsState();
+
+  const scope = opts.global ? 'user' : 'project';
+  console.log(`Set ${key} = ${formatValue(result.value)} (${scope} config)`);
+}
+
+async function unsetAction(key: string, opts: { global?: boolean }) {
+  if (!(key in CONFIG_KEYS)) {
+    console.error(
+      `Error: Unknown config key '${key}'. Valid keys: ${Object.keys(CONFIG_KEYS).join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  const configKey = key as keyof OxConfig;
+  const store = getTargetStore(opts);
+  await store.deleteValue(configKey);
+
+  if (configKey === 'analytics') resetAnalyticsState();
+
+  const scope = opts.global ? 'user' : 'project';
+  console.log(`Unset ${key} (${scope} config)`);
+}
+
+function isBooleanKey(key: keyof OxConfig): boolean {
+  const type: ConfigValueType = CONFIG_KEYS[key];
+  return type === 'boolean' || type === 'boolean|string';
+}
+
+async function enableAction(key: string, opts: { global?: boolean }) {
+  if (!(key in CONFIG_KEYS)) {
+    console.error(
+      `Error: Unknown config key '${key}'. Valid keys: ${Object.keys(CONFIG_KEYS).join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  const configKey = key as keyof OxConfig;
+  if (!isBooleanKey(configKey)) {
+    console.error(
+      `Error: '${key}' is not a boolean config key. Use 'ox config set ${key} <value>' instead.`,
+    );
+    process.exit(1);
+  }
+
+  const store = getTargetStore(opts);
+  // biome-ignore lint/suspicious/noExplicitAny: dynamic config key
+  await store.writeValue(configKey, true as any);
+
+  if (configKey === 'analytics') resetAnalyticsState();
+
+  const scope = opts.global ? 'user' : 'project';
+  console.log(`Enabled ${key} (${scope} config)`);
+}
+
+async function disableAction(key: string, opts: { global?: boolean }) {
+  if (!(key in CONFIG_KEYS)) {
+    console.error(
+      `Error: Unknown config key '${key}'. Valid keys: ${Object.keys(CONFIG_KEYS).join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  const configKey = key as keyof OxConfig;
+  if (!isBooleanKey(configKey)) {
+    console.error(
+      `Error: '${key}' is not a boolean config key. Use 'ox config set ${key} <value>' instead.`,
+    );
+    process.exit(1);
+  }
+
+  const store = getTargetStore(opts);
+  // biome-ignore lint/suspicious/noExplicitAny: dynamic config key
+  await store.writeValue(configKey, false as any);
+
+  if (configKey === 'analytics') resetAnalyticsState();
+
+  const scope = opts.global ? 'user' : 'project';
+  console.log(`Disabled ${key} (${scope} config)`);
+}
+
+async function resetAction(opts: { global?: boolean }) {
+  const store = getTargetStore(opts);
+  if (!(await store.exists())) {
+    const scope = opts.global ? 'User' : 'Project';
+    console.log(`${scope} config does not exist. Nothing to reset.`);
+    return;
+  }
+
+  await store.deleteFile();
+
+  if (opts.global) {
+    resetAnalyticsState();
+  }
+
+  const scope = opts.global ? 'user' : 'project';
+  console.log(`Reset ${scope} config (file deleted).`);
+}
+
+const GLOBAL_OPT = [
+  '-g, --global',
+  'Operate on user config instead of project config',
+] as const;
+
 export const configCommand = new Command('config')
   .description('Configure ox for this project')
   .action(configAction);
+
+configCommand.addCommand(
+  new Command('show')
+    .description('Show current config values')
+    .option(GLOBAL_OPT[0], GLOBAL_OPT[1])
+    .option('-p, --project', 'Show only project config')
+    .action(showAction),
+);
+
+configCommand.addCommand(
+  new Command('set')
+    .description('Set a config value')
+    .argument('<key>', `Config key (${Object.keys(CONFIG_KEYS).join(', ')})`)
+    .argument('<value>', 'Value to set')
+    .option(GLOBAL_OPT[0], GLOBAL_OPT[1])
+    .action(setAction),
+);
+
+configCommand.addCommand(
+  new Command('unset')
+    .description('Remove a config value')
+    .argument('<key>', 'Config key to remove')
+    .option(GLOBAL_OPT[0], GLOBAL_OPT[1])
+    .action(unsetAction),
+);
+
+configCommand.addCommand(
+  new Command('enable')
+    .description(
+      'Enable a boolean config option (shorthand for set <key> true)',
+    )
+    .argument('<key>', 'Boolean config key to enable')
+    .option(GLOBAL_OPT[0], GLOBAL_OPT[1])
+    .action(enableAction),
+);
+
+configCommand.addCommand(
+  new Command('disable')
+    .description(
+      'Disable a boolean config option (shorthand for set <key> false)',
+    )
+    .argument('<key>', 'Boolean config key to disable')
+    .option(GLOBAL_OPT[0], GLOBAL_OPT[1])
+    .action(disableAction),
+);
+
+configCommand.addCommand(
+  new Command('reset')
+    .description('Delete the config file')
+    .option(GLOBAL_OPT[0], GLOBAL_OPT[1])
+    .action(resetAction),
+);

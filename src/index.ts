@@ -2,7 +2,7 @@
 // Ox CLI - Main Entry Point
 // ============================================================================
 
-import { program } from 'commander';
+import { type Command as CommandType, program } from 'commander';
 import packageJson from '../package.json' with { type: 'json' };
 import { authCommand } from './commands/auth';
 import {
@@ -25,6 +25,7 @@ import { resumeCommand } from './commands/resume';
 import { runSessionsTui, sessionsCommand } from './commands/sessions';
 import { shellCommand } from './commands/shell';
 import { upgradeCommand } from './commands/upgrade';
+import { shutdown as shutdownAnalytics, track } from './services/analytics';
 import { log } from './services/logger';
 import { checkForUpdate, isCompiledBinary } from './services/updater';
 import { printErr } from './utils';
@@ -112,6 +113,53 @@ if (isCompiledBinary()) {
     });
   }
 }
+
+// ============================================================================
+// Analytics - wrap all commands with usage tracking
+// ============================================================================
+
+/**
+ * Recursively wrap all commands with analytics tracking.
+ *
+ * Uses preAction instead of postAction because many commands call process.exit()
+ * directly, which prevents postAction hooks from firing.
+ *
+ * The hook checks thisCommand === actionCommand to ensure only the leaf command
+ * is tracked (commander fires preAction on every ancestor in the chain).
+ */
+function wrapCommandsWithAnalytics(cmd: CommandType): void {
+  cmd.hook('preAction', (thisCommand, actionCommand) => {
+    // Only track the leaf command that's actually executing, not ancestors
+    if (thisCommand !== actionCommand) return;
+
+    // Build the full command path from the chain of parents
+    const parts: string[] = [];
+    let current: CommandType | null = thisCommand;
+    while (current) {
+      parts.unshift(current.name());
+      current = current.parent as CommandType | null;
+    }
+
+    track('command_executed', {
+      command_name: thisCommand.name(),
+      command_path: parts.join(' '),
+    });
+  });
+
+  for (const child of cmd.commands) {
+    wrapCommandsWithAnalytics(child as CommandType);
+  }
+}
+
+wrapCommandsWithAnalytics(program);
+
+// Ensure analytics events are flushed before exit.
+// 'exit' fires even on process.exit(), unlike 'beforeExit'.
+// We can't do async work here, but posthog-node with flushAt:1
+// sends each event immediately on capture, so this is just a safety net.
+process.on('exit', () => {
+  shutdownAnalytics().catch(() => {});
+});
 
 // Handle `ox complete <shell>` before parseAsync for tab library
 // This must happen after all commands are added so tab can introspect them
