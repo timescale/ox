@@ -38,3 +38,4 @@ download/
 /opencode_reference
 
 .opencode/plans
+.claude/*.local.*
