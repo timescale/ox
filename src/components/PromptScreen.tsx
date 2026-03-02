@@ -123,9 +123,7 @@ export function PromptScreen({
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [slashQuery, setSlashQuery] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [submitMode, setSubmitMode] = useState<SubmitMode>(
-    resumeSession?.interactive ? 'interactive' : 'async',
-  );
+  const [submitMode, setSubmitMode] = useState<SubmitMode>('interactive');
   // Mount mode state - enabled when initialMountDir is set, forced, or toggled via Ctrl+D
   // When forceMountMode is true, mount mode cannot be toggled off
   const [mountMode, setMountMode] = useState<boolean>(
@@ -178,7 +176,7 @@ export function PromptScreen({
       {
         id: 'mode.cycle',
         title: 'Switch interaction mode',
-        description: 'Cycle between async, interactive, and plan modes',
+        description: 'Cycle between interactive, plan, and async modes',
         category: 'Prompt',
         keybind: { key: 'tab', shift: true, display: 'shift+tab' },
         onSelect: () =>
@@ -813,16 +811,16 @@ export function PromptScreen({
               {/* Agent and model display row */}
               <box flexDirection="row" marginTop={1} height={1} gap={1}>
                 <text fg={agentInfo?.color}>{agentInfo?.name || agent}</text>
-                {submitMode === 'interactive' ? (
-                  <text fg={theme.success}>[interactive]</text>
-                ) : null}
-                {submitMode === 'plan' ? (
+                {submitMode === 'async' ? (
+                  <text fg={theme.success}>[async]</text>
+                ) : submitMode === 'plan' ? (
                   <text fg={theme.info}>[plan]</text>
                 ) : null}
                 {sandboxProvider === 'cloud' ? (
                   <text fg={theme.accent}>[cloud]</text>
+                ) : mountMode ? (
+                  <text fg={theme.warning}>[mount]</text>
                 ) : null}
-                {mountMode ? <text fg={theme.warning}>[mount]</text> : null}
                 <text fg={model?.name ? theme.text : theme.textMuted}>
                   {model?.name || modelId || 'Loading...'}
                 </text>
