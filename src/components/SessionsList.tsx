@@ -822,6 +822,7 @@ export function SessionsList({ onResume, currentRepo }: SessionsListProps) {
               {
                 claude: 'cc',
                 opencode: 'oc',
+                codex: 'cx',
               }[session.agent] || session.agent;
             const modelParts = session.model?.split('/');
             const model = modelParts?.[1] || session.model;

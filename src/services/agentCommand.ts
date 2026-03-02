@@ -55,6 +55,32 @@ export function buildAgentCommand(options: AgentCommandOptions): string {
     return cmd;
   }
 
+  if (agent === 'codex') {
+    const dangerFlag = '--dangerously-bypass-approvals-and-sandbox';
+    const skipGitFlag = '--skip-git-repo-check';
+
+    if (mode === 'detached') {
+      // Non-interactive: codex exec [--model X] --yolo --skip-git-repo-check [prompt via stdin]
+      const cmd = `codex exec${modelArg}${extraArgs} ${dangerFlag} ${skipGitFlag}`;
+      if (hasPrompt) {
+        const b64 = Buffer.from(prompt).toString('base64');
+        return `echo '${b64}' | base64 -d | ${cmd} -`;
+      }
+      return cmd;
+    }
+    // Interactive
+    if (cont) {
+      // Resume last session: codex resume --last [--model X]
+      return `codex resume --last${modelArg}${extraArgs}`;
+    }
+    const cmd = `codex${modelArg}${extraArgs} ${dangerFlag} ${skipGitFlag}`;
+    if (hasPrompt) {
+      const b64 = Buffer.from(prompt).toString('base64');
+      return `echo '${b64}' | base64 -d | ${cmd}`;
+    }
+    return cmd;
+  }
+
   // OpenCode
   if (mode === 'detached') {
     const continueFlag = cont ? ' -c' : '';

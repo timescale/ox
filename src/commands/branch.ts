@@ -5,6 +5,7 @@
 import { Command, Option } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { ensureClaudeAuth } from '../services/claude';
+import { ensureCodexAuth } from '../services/codex';
 import { type AgentType, projectConfig, readConfig } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import {
@@ -161,10 +162,18 @@ export async function branchAction(
   // Step 8: Ensure agent credentials are valid
   log.debug({ agent: effectiveAgent }, 'Checking agent credentials');
   console.log(`Checking ${effectiveAgent} credentials...`);
-  const authValid =
-    effectiveAgent === 'claude'
-      ? await ensureClaudeAuth(effectiveModel)
-      : await ensureOpencodeAuth(effectiveModel);
+  let authValid: boolean;
+  switch (effectiveAgent) {
+    case 'claude':
+      authValid = await ensureClaudeAuth(effectiveModel);
+      break;
+    case 'codex':
+      authValid = await ensureCodexAuth(effectiveModel);
+      break;
+    default:
+      authValid = await ensureOpencodeAuth(effectiveModel);
+      break;
+  }
 
   if (!authValid) {
     log.error(

@@ -29,6 +29,25 @@ export const CLAUDE_MODELS: Model[] = [
   },
 ];
 
+// Codex models (hardcoded — available via OpenAI Responses API)
+export const CODEX_MODELS: Model[] = [
+  {
+    id: 'o4-mini',
+    name: 'o4-mini',
+    description: 'Default, fastest',
+  },
+  {
+    id: 'gpt-4.1',
+    name: 'GPT-4.1',
+    description: 'Best general-purpose',
+  },
+  {
+    id: 'o3',
+    name: 'o3',
+    description: 'Advanced reasoning',
+  },
+];
+
 export interface AgentInfo {
   id: AgentType;
   name: string;
@@ -48,6 +67,12 @@ export const AGENT_INFO = [
     name: 'Claude Code',
     color: '#D77757',
     description: 'Anthropic Claude Code CLI',
+  } satisfies AgentInfo,
+  {
+    id: 'codex',
+    name: 'Codex',
+    color: '#10A37F',
+    description: 'OpenAI Codex CLI',
   } satisfies AgentInfo,
 ] as const;
 
@@ -99,6 +124,15 @@ async function getOpencodeModels(): Promise<readonly Model[]> {
 }
 
 /**
+ * Get available models for codex by running the CLI inside the Docker container.
+ * Falls back to hardcoded models if the CLI is unavailable.
+ */
+async function getCodexModels(): Promise<readonly Model[]> {
+  // Codex doesn't have a `models` subcommand, so return hardcoded list
+  return CODEX_MODELS;
+}
+
+/**
  * Get models for a specific agent
  */
 export async function getModelsForAgent(
@@ -106,6 +140,9 @@ export async function getModelsForAgent(
 ): Promise<readonly Model[]> {
   if (agent === 'claude') {
     return CLAUDE_MODELS;
+  }
+  if (agent === 'codex') {
+    return getCodexModels();
   }
 
   // For opencode, fetch from CLI
@@ -120,6 +157,7 @@ export const useAgentModels = (
   const [map, setMap] = useState<Record<AgentType, null | readonly Model[]>>({
     claude: CLAUDE_MODELS,
     opencode: null,
+    codex: CODEX_MODELS,
   });
 
   useEffect(() => {

@@ -37,3 +37,12 @@ interface OAuthAuth {
 
 export type AuthEntry = ApiKeyAuth | OAuthAuth;
 export type OpencodeAuthJson = Partial<Record<string, AuthEntry>>;
+
+export interface CodexAuthJson {
+  auth_mode?: 'apikey' | 'chatgpt';
+  OPENAI_API_KEY?: string;
+  // OAuth/device-auth fields (populated by `codex login --device-auth`)
+  access_token?: string;
+  refresh_token?: string;
+  expires_at?: number;
+}

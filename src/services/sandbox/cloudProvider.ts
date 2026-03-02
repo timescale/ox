@@ -18,7 +18,10 @@ import { readConfig } from '../config.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
 import { log } from '../logger.ts';
-import { ensureCloudSnapshot } from './cloudSnapshot.ts';
+import {
+  ensureAgentCloudSnapshot,
+  ensureCloudSnapshot,
+} from './cloudSnapshot.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import { sandboxExec } from './sandboxExec.ts';
 import {
@@ -473,6 +476,7 @@ export class CloudSandboxProvider implements SandboxProvider {
   // --------------------------------------------------------------------------
 
   async ensureImage(options?: {
+    agent?: AgentType;
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string> {
     const token = await getDenoToken();
@@ -484,35 +488,57 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     const region = await this.resolveRegion();
 
-    const slug = await ensureCloudSnapshot({
+    const mapProgress = (p: {
+      type: string;
+      message?: string;
+      snapshotSlug?: string;
+    }) => {
+      switch (p.type) {
+        case 'checking':
+          options?.onProgress?.({ type: 'checking' });
+          break;
+        case 'exists':
+          options?.onProgress?.({ type: 'exists' });
+          break;
+        case 'creating-volume':
+        case 'booting-sandbox':
+        case 'installing':
+        case 'snapshotting':
+        case 'cleaning-up':
+          options?.onProgress?.({
+            type: 'building',
+            message: p.message ?? '',
+          });
+          break;
+        case 'done':
+          options?.onProgress?.({ type: 'done' });
+          break;
+        case 'error':
+          log.error({ error: p.message }, 'Snapshot build error');
+          break;
+      }
+    };
+
+    // 1. Ensure base snapshot exists
+    const baseSlug = await ensureCloudSnapshot({
       token,
       region,
-      onProgress: (p) => {
-        switch (p.type) {
-          case 'checking':
-            options?.onProgress?.({ type: 'checking' });
-            break;
-          case 'exists':
-            options?.onProgress?.({ type: 'exists' });
-            break;
-          case 'creating-volume':
-          case 'booting-sandbox':
-          case 'installing':
-          case 'snapshotting':
-          case 'cleaning-up':
-            options?.onProgress?.({ type: 'building', message: p.message });
-            break;
-          case 'done':
-            options?.onProgress?.({ type: 'done' });
-            break;
-          case 'error':
-            log.error({ error: p.message }, 'Snapshot build error');
-            break;
-        }
-      },
+      onProgress: mapProgress,
     });
 
-    return slug;
+    // 2. If agent specified, ensure agent overlay snapshot exists
+    if (options?.agent) {
+      const agentSlug = await ensureAgentCloudSnapshot({
+        token,
+        region,
+        agent: options.agent,
+        baseSnapshotSlug: baseSlug,
+        onProgress: mapProgress,
+      });
+      return agentSlug;
+    }
+
+    return baseSlug;
   }
 
   // --------------------------------------------------------------------------
@@ -529,7 +555,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const { onProgress } = options;
     const client = await this.getClient();
     const region = await this.resolveRegion();
-    const baseSnapshot = await this.ensureImage();
+    const baseSnapshot = await this.ensureImage({ agent: options.agent });
 
     // 1. Create session-specific root volume from the base snapshot.
     onProgress?.('Creating volume');

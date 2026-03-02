@@ -1,9 +1,10 @@
 // ============================================================================
-// Cloud Snapshot Management - Base image for cloud sandboxes
+// Cloud Snapshot Management - Base + agent overlay snapshots for cloud sandboxes
 // ============================================================================
 
 import packageJson from '../../../package.json' with { type: 'json' };
-import toolVersions from '../../../sandbox/versions.json' with { type: 'json' };
+import type { AgentType } from '../config.ts';
+import { getAgentInstallScript, getAgentVersion } from '../docker.ts';
 import { log } from '../logger.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import { sandboxExec } from './sandboxExec.ts';
@@ -19,19 +20,40 @@ export type SnapshotBuildProgress =
   | { type: 'done'; snapshotSlug: string }
   | { type: 'error'; message: string };
 
-export function toolVersionsHash(): string {
+export function baseToolsHash(): string {
   const hasher = new Bun.CryptoHasher('md5');
-  hasher.update(`${toolVersions.claudeCode},${toolVersions.opencode}`);
+  // Base hash includes only the base environment version marker.
+  // Agent versions are encoded in the agent overlay snapshot slug.
+  hasher.update(`base-v3-${packageJson.version}`);
   return hasher.digest('hex').slice(0, 6);
+}
+
+/** @deprecated Use baseToolsHash + getAgentSnapshotSlug for per-agent snapshots */
+export function toolVersionsHash(): string {
+  return baseToolsHash();
 }
 
 export function getBaseSnapshotSlug(): string {
   // The base snapshot slug is deterministic (no nanoid) so we can find
   // an existing snapshot across runs. Includes ox version + a hash
-  // of pinned tool versions so that updating either triggers a rebuild.
+  // so that updating the base triggers a rebuild.
   const safeVersion = packageJson.version.replace(/[^a-z0-9-]/g, '-');
-  const tvHash = toolVersionsHash();
+  const tvHash = baseToolsHash();
   return `ox-base-${safeVersion}-${tvHash}`.slice(0, 32);
+}
+
+/**
+ * Get the deterministic snapshot slug for an agent overlay.
+ * Encodes the base version, agent name, and agent version.
+ * Constrained to 32 characters (Deno slug limit).
+ */
+export function getAgentSnapshotSlug(agent: AgentType): string {
+  const safeVersion = packageJson.version.replace(/[^a-z0-9-]/g, '-');
+  const agentVer = getAgentVersion(agent)
+    .replace(/[^a-z0-9-]/g, '-')
+    .slice(0, 6);
+  // e.g. "ox-0-14-1-codex-0-106-" — fit within 32 chars
+  return `ox-${safeVersion}-${agent}-${agentVer}`.slice(0, 32);
 }
 
 /**
@@ -179,39 +201,9 @@ export async function ensureCloudSnapshot(options: {
       { label: 'Install GitHub CLI', sudo: true },
     );
 
-    // 7. Install Claude Code (default user) — pinned version from sandbox/versions.json
-    onProgress?.({
-      type: 'installing',
-      message: `Installing Claude Code v${toolVersions.claudeCode}`,
-      detail: 'This may take a minute',
-    });
-    await sandboxExec(
-      sandbox,
-      `curl -fsSL https://claude.ai/install.sh | bash -s ${toolVersions.claudeCode}`,
-      { label: 'Install Claude Code' },
-    );
-
-    // 8. Install Tiger CLI (default user)
-    onProgress?.({
-      type: 'installing',
-      message: 'Installing Tiger CLI',
-    });
-    await sandboxExec(sandbox, 'curl -fsSL https://cli.tigerdata.com | sh', {
-      label: 'Install Tiger CLI',
-    });
-
-    // 9. Install OpenCode (default user, using ~ for home) — pinned version from sandbox/versions.json
-    onProgress?.({
-      type: 'installing',
-      message: `Installing OpenCode v${toolVersions.opencode}`,
-    });
-    await sandboxExec(
-      sandbox,
-      `curl -fsSL https://opencode.ai/install | bash -s -- --version ${toolVersions.opencode}`,
-      { label: 'Install OpenCode' },
-    );
-
-    // 10. Configure git and PATH (default user)
+    // 7. Configure git and PATH (default user)
+    // NOTE: Agent installation (Claude, OpenCode, Codex, Tiger) is now done
+    // in the agent overlay snapshot (ensureAgentCloudSnapshot), not the base.
     onProgress?.({
       type: 'installing',
       message: 'Configuring environment',
@@ -221,25 +213,26 @@ export async function ensureCloudSnapshot(options: {
       'git config --global user.email "ox@tigerdata.com" && git config --global user.name "Ox Agent"',
       { label: 'Configure git' },
     );
-    // Ensure ~/.local/bin and ~/.opencode/bin are in PATH for all shell types.
+    // Ensure ~/.local/bin is in PATH for all shell types.
     // SSH login shells source /etc/profile.d/*.sh (alphabetically).  The Deno
     // platform generates app-env.sh which resets PATH to system dirs.  Our
     // ox-path.sh (h > a) runs after and appends user bin dirs.
-    // Also set DISABLE_AUTOUPDATER=1 to prevent Claude Code from self-updating
-    // past the pinned version at runtime.
+    // Agent-specific paths (e.g. ~/.opencode/bin) are added in the agent
+    // overlay snapshot. DISABLE_AUTOUPDATER prevents Claude Code from
+    // self-updating past the pinned version at runtime.
     await sandboxExec(
       sandbox,
-      `printf 'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\\nexport DISABLE_AUTOUPDATER=1\\n' | sudo tee /etc/profile.d/ox-path.sh > /dev/null && sudo chmod +x /etc/profile.d/ox-path.sh`,
+      `printf 'export PATH="$HOME/.local/bin:$PATH"\\nexport DISABLE_AUTOUPDATER=1\\n' | sudo tee /etc/profile.d/ox-path.sh > /dev/null && sudo chmod +x /etc/profile.d/ox-path.sh`,
       { label: 'Configure PATH and env in profile.d' },
     );
     // Also add to .bashrc for non-login shells that use BASH_ENV
     await sandboxExec(
       sandbox,
-      `printf 'export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"\\nexport DISABLE_AUTOUPDATER=1\\n' >> ~/.bashrc`,
+      `printf 'export PATH="$HOME/.local/bin:$PATH"\\nexport DISABLE_AUTOUPDATER=1\\n' >> ~/.bashrc`,
       { label: 'Configure PATH and env in bashrc' },
     );
 
-    // 11. Configure tmux for detach/reattach workflow
+    // 8. Configure tmux for detach/reattach workflow
     // ctrl+\ immediately detaches (matches Docker's --detach-keys=ctrl-\\)
     await sandboxExec(
       sandbox,
@@ -260,7 +253,7 @@ TMUX_EOF`,
       { label: 'Configure tmux' },
     );
 
-    // 12. Create /work directory for session data, owned by the default user.
+    // 9. Create /work directory for session data, owned by the default user.
     //     Two steps: mkdir as root, then chown as the app user (so $(id -u)
     //     resolves to the correct non-root uid).
     await sandboxExec(sandbox, 'mkdir -p /work', {
@@ -278,7 +271,7 @@ TMUX_EOF`,
     // and uses iptables-nft which doesn't work in this kernel.
     // See docs/dev/sandbox-docker.md for full details.
 
-    // 13a. Add Docker's official apt repository (Debian trixie).
+    // 10a. Add Docker's official apt repository (Debian trixie).
     onProgress?.({
       type: 'installing',
       message: 'Installing Docker',
@@ -300,7 +293,7 @@ DKRREPO
       { label: 'Add Docker apt repository', sudo: true },
     );
 
-    // 13b. Install Docker CE packages.  The install triggers a known
+    // 10b. Install Docker CE packages.  The install triggers a known
     //      systemd-sysv failure (exit code 1) because /usr/sbin/init is
     //      on a different filesystem in the sandbox.  We allow the
     //      non-zero exit and fix the broken state in the next step.
@@ -313,7 +306,7 @@ DKRREPO
       { label: 'Install Docker CE packages', sudo: true },
     );
 
-    // 13c. Fix broken package state left by the systemd-sysv failure.
+    // 10c. Fix broken package state left by the systemd-sysv failure.
     //      Purge packages that failed to configure (none are needed for
     //      Docker) and finish configuring the rest.
     await sandboxExec(
@@ -322,7 +315,7 @@ DKRREPO
       { label: 'Fix broken packages after Docker install', sudo: true },
     );
 
-    // 13d. Switch to iptables-legacy (nft backend requires kernel nftables
+    // 10d. Switch to iptables-legacy (nft backend requires kernel nftables
     //      support that isn't available in this sandbox).
     await sandboxExec(
       sandbox,
@@ -330,7 +323,7 @@ DKRREPO
       { label: 'Switch to iptables-legacy', sudo: true },
     );
 
-    // 13e. Write a startup script that handles ephemeral setup (mounts and
+    // 10e. Write a startup script that handles ephemeral setup (mounts and
     //      daemon) that doesn't survive snapshot+restore.  This script is
     //      idempotent and can be called multiple times safely.
     await sandboxExec(
@@ -381,7 +374,7 @@ chmod +x /usr/local/bin/start-docker.sh`,
       { label: 'Write Docker startup script', sudo: true },
     );
 
-    // 13f. Add a profile.d hook so Docker starts automatically on login.
+    // 10f. Add a profile.d hook so Docker starts automatically on login.
     //      Uses a lockfile to avoid parallel startups from multiple shells.
     await sandboxExec(
       sandbox,
@@ -400,7 +393,7 @@ chmod +x /etc/profile.d/docker-start.sh`,
       { label: 'Add Docker auto-start hook', sudo: true },
     );
 
-    // 13g. Run the startup script now to verify Docker works and cache
+    // 10g. Run the startup script now to verify Docker works and cache
     //      the alpine image in the snapshot.  Best-effort: if the pull
     //      times out (sandbox networking can be slow), we still proceed
     //      with the snapshot — Docker will pull on first use at runtime.
@@ -422,7 +415,7 @@ chmod +x /etc/profile.d/docker-start.sh`,
       );
     }
 
-    // 14. Kill sandbox to detach the volume (required before snapshotting)
+    // 11. Kill sandbox to detach the volume (required before snapshotting)
     onProgress?.({
       type: 'snapshotting',
       message: 'Detaching volume',
@@ -453,7 +446,7 @@ chmod +x /etc/profile.d/docker-start.sh`,
     // Without this delay, snapshotVolume can hit a 500 error.
     await new Promise((resolve) => setTimeout(resolve, 5_000));
 
-    // 15. Snapshot the volume
+    // 12. Snapshot the volume
     onProgress?.({
       type: 'snapshotting',
       message: 'Creating snapshot (this may take a moment)',
@@ -512,6 +505,219 @@ chmod +x /etc/profile.d/docker-start.sh`,
       log.debug(
         { volumeId: volume.id, slug: volume.slug },
         'Leaving build volume intact to avoid disrupting snapshot finalization',
+      );
+    }
+  }
+}
+
+/**
+ * Ensure an agent-specific overlay cloud snapshot exists.
+ *
+ * Boots a sandbox from the base snapshot, installs the agent + tiger CLI,
+ * kills the sandbox, and snapshots the resulting volume.
+ *
+ * Returns the agent overlay snapshot slug.
+ */
+export async function ensureAgentCloudSnapshot(options: {
+  token: string;
+  region: string;
+  agent: AgentType;
+  baseSnapshotSlug: string;
+  onProgress?: (progress: SnapshotBuildProgress) => void;
+}): Promise<string> {
+  const { token, region, agent, baseSnapshotSlug, onProgress } = options;
+  const client = new DenoApiClient(token);
+  const snapshotSlug = getAgentSnapshotSlug(agent);
+
+  // 1. Check if agent overlay snapshot already exists AND is bootable
+  onProgress?.({ type: 'checking' });
+  try {
+    const existing = await client.getSnapshot(snapshotSlug);
+    if (existing) {
+      const bootable = await isSnapshotBootable(token, snapshotSlug);
+      if (bootable) {
+        onProgress?.({ type: 'exists', snapshotSlug });
+        return snapshotSlug;
+      }
+      log.warn(
+        { snapshotSlug },
+        'Agent snapshot exists but is not bootable — deleting and rebuilding',
+      );
+      try {
+        await client.deleteSnapshot(existing.id);
+      } catch (err) {
+        log.debug({ err }, 'Failed to delete non-bootable agent snapshot');
+      }
+    }
+  } catch (err) {
+    log.debug({ err }, 'Failed to check agent snapshot');
+  }
+
+  // 2. Create a bootable volume from the base snapshot
+  const buildVolumeSlug = denoSlug('hab');
+  onProgress?.({
+    type: 'creating-volume',
+    message: `Creating volume for ${agent} agent`,
+  });
+
+  const volume = await client.createVolume({
+    slug: buildVolumeSlug,
+    region,
+    capacity: '10GiB',
+    from: baseSnapshotSlug,
+  });
+
+  let sandbox: ResolvedSandbox | null = null;
+  let snapshotCreated = false;
+  let buildSandboxId: string | undefined;
+
+  try {
+    // 3. Boot sandbox from the base volume
+    onProgress?.({
+      type: 'booting-sandbox',
+      message: `Booting sandbox to install ${agent}`,
+    });
+
+    sandbox = await client.createSandbox({
+      region: region as 'ord' | 'ams',
+      root: volume.slug,
+      timeout: '30m',
+      memory: '2GiB',
+    });
+    buildSandboxId = sandbox.resolvedId || sandbox.id;
+    log.debug(
+      { sandboxId: buildSandboxId, agent },
+      'Agent overlay build sandbox created',
+    );
+
+    // 4. Install the agent
+    const agentVersion = getAgentVersion(agent);
+    onProgress?.({
+      type: 'installing',
+      message: `Installing ${agent} v${agentVersion}`,
+      detail: 'This may take a minute',
+    });
+
+    // Write the install script into a temp file and execute it
+    const agentScript = getAgentInstallScript(agent);
+    await sandboxExec(
+      sandbox,
+      `cat > /tmp/install-agent.sh << 'INSTALL_EOF'\n${agentScript}\nINSTALL_EOF\nbash /tmp/install-agent.sh ${agentVersion}`,
+      { label: `Install ${agent}` },
+    );
+
+    // 5. Install Tiger CLI
+    onProgress?.({
+      type: 'installing',
+      message: 'Installing Tiger CLI',
+    });
+    const tigerScript = getAgentInstallScript('tiger');
+    await sandboxExec(
+      sandbox,
+      `cat > /tmp/install-tiger.sh << 'INSTALL_EOF'\n${tigerScript}\nINSTALL_EOF\nbash /tmp/install-tiger.sh`,
+      { label: 'Install Tiger CLI' },
+    );
+
+    // 6. Add agent-specific bin dirs to PATH
+    // The base already has ~/.local/bin. Agents like opencode install to
+    // ~/.opencode/bin, codex installs to ~/.local/bin (already covered).
+    if (agent === 'opencode') {
+      await sandboxExec(
+        sandbox,
+        `printf 'export PATH="$HOME/.opencode/bin:$PATH"\\n' | sudo tee -a /etc/profile.d/ox-path.sh > /dev/null`,
+        { label: 'Add opencode bin to PATH' },
+      );
+      await sandboxExec(
+        sandbox,
+        `printf 'export PATH="$HOME/.opencode/bin:$PATH"\\n' >> ~/.bashrc`,
+        { label: 'Add opencode bin to bashrc' },
+      );
+    }
+
+    // Clean up temp files
+    await sandboxExec(
+      sandbox,
+      'rm -f /tmp/install-agent.sh /tmp/install-tiger.sh',
+      {
+        label: 'Clean up temp install scripts',
+      },
+    );
+
+    // 7. Kill sandbox to detach the volume
+    onProgress?.({
+      type: 'snapshotting',
+      message: 'Detaching volume',
+    });
+    log.debug({ sandboxId: buildSandboxId }, 'Stopping agent build sandbox');
+    try {
+      await sandbox.close();
+    } catch {
+      // ignore close errors
+    }
+    if (buildSandboxId) {
+      try {
+        await client.killSandbox(buildSandboxId);
+      } catch (err) {
+        log.warn(
+          { err, sandboxId: buildSandboxId },
+          'Failed to kill agent build sandbox',
+        );
+      }
+    }
+    sandbox = null;
+
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+
+    // 8. Snapshot the volume
+    onProgress?.({
+      type: 'snapshotting',
+      message: `Creating ${agent} agent snapshot`,
+    });
+    try {
+      await client.snapshotVolume(volume.id, { slug: snapshotSlug });
+    } catch (err) {
+      log.error(
+        { err, volumeId: volume.id, snapshotSlug },
+        'Failed to snapshot agent build volume',
+      );
+      throw err;
+    }
+    snapshotCreated = true;
+
+    onProgress?.({ type: 'done', snapshotSlug });
+    return snapshotSlug;
+  } finally {
+    const needsCleanup = !snapshotCreated || sandbox !== null;
+    if (needsCleanup) {
+      onProgress?.({
+        type: 'cleaning-up',
+        message: 'Cleaning up agent build resources',
+      });
+    }
+    if (sandbox) {
+      try {
+        await sandbox.close();
+      } catch {
+        // ignore close errors
+      }
+      if (buildSandboxId) {
+        try {
+          await client.killSandbox(buildSandboxId);
+        } catch (err) {
+          log.debug({ err }, 'Failed to kill agent build sandbox in cleanup');
+        }
+      }
+    }
+    if (!snapshotCreated) {
+      try {
+        await client.deleteVolume(volume.id);
+      } catch (err) {
+        log.debug({ err }, 'Failed to delete agent build volume');
+      }
+    } else {
+      log.debug(
+        { volumeId: volume.id, slug: volume.slug },
+        'Leaving agent build volume intact to avoid disrupting snapshot finalization',
       );
     }
   }

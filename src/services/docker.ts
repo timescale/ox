@@ -7,6 +7,19 @@ import { join, resolve } from 'node:path';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
 import packageJson from '../../package.json' with { type: 'json' };
+// Import agent install scripts as text - embedded in the binary
+import INSTALL_CLAUDE from '../../sandbox/agents/install-claude.sh' with {
+  type: 'text',
+};
+import INSTALL_CODEX from '../../sandbox/agents/install-codex.sh' with {
+  type: 'text',
+};
+import INSTALL_OPENCODE from '../../sandbox/agents/install-opencode.sh' with {
+  type: 'text',
+};
+import INSTALL_TIGER from '../../sandbox/agents/install-tiger.sh' with {
+  type: 'text',
+};
 // Import both Dockerfiles as text - Bun's bundler embeds these in the binary
 import FULL_DOCKERFILE from '../../sandbox/full.Dockerfile' with {
   type: 'text',
@@ -26,6 +39,7 @@ import {
 } from '../utils/shell.ts';
 import { buildAgentCommand } from './agentCommand';
 import { getClaudeConfigFiles } from './claude';
+import { getCodexConfigFiles } from './codex';
 import {
   type AgentType,
   type OxConfig,
@@ -33,7 +47,7 @@ import {
   readConfig,
   userConfigDir,
 } from './config';
-import { CONTAINER_HOME } from './dockerFiles';
+import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
 import { getGhConfigFiles } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
@@ -56,12 +70,13 @@ export const toVolumeArgs = (volumes: string[]): string[] =>
 export const getCredentialFiles = async (
   homeDir = CONTAINER_HOME,
 ): Promise<VirtualFile[]> => {
-  const [claudeFiles, opencodeFiles, ghFiles] = await Promise.all([
+  const [claudeFiles, opencodeFiles, codexFiles, ghFiles] = await Promise.all([
     getClaudeConfigFiles(),
     getOpencodeConfigFiles(),
+    getCodexConfigFiles(),
     getGhConfigFiles(),
   ]);
-  const files = [...claudeFiles, ...opencodeFiles, ...ghFiles];
+  const files = [...claudeFiles, ...opencodeFiles, ...codexFiles, ...ghFiles];
   // Rewrite paths if a different home directory was requested
   if (homeDir !== CONTAINER_HOME) {
     return files.map((f) => ({
@@ -273,11 +288,127 @@ type DockerfileVariant = 'slim' | 'full';
 export function computeDockerfileHash(content: string): string {
   const hasher = new Bun.CryptoHasher('md5');
   hasher.update(content);
-  // Include pinned tool versions so a version bump produces a new image tag
-  hasher.update(
-    `claude=${toolVersions.claudeCode},opencode=${toolVersions.opencode}`,
-  );
+  // Base image hash only includes the Dockerfile content — agent versions
+  // are encoded in the overlay image tag, not the base.
   return hasher.digest('hex').slice(0, 12);
+}
+
+// ============================================================================
+// Agent Install Scripts & Overlay Images
+// ============================================================================
+
+/** Map of agent type to embedded install script content */
+const AGENT_INSTALL_SCRIPTS: Record<string, string> = {
+  claude: INSTALL_CLAUDE,
+  opencode: INSTALL_OPENCODE,
+  codex: INSTALL_CODEX,
+  tiger: INSTALL_TIGER,
+};
+
+/** Get the pinned version for an agent from sandbox/versions.json */
+export function getAgentVersion(agent: AgentType): string {
+  switch (agent) {
+    case 'claude':
+      return toolVersions.claudeCode;
+    case 'opencode':
+      return toolVersions.opencode;
+    case 'codex':
+      return toolVersions.codex;
+  }
+}
+
+/** Get the embedded install script content for an agent */
+export function getAgentInstallScript(agent: AgentType | 'tiger'): string {
+  const script = AGENT_INSTALL_SCRIPTS[agent];
+  if (!script) {
+    throw new Error(`No install script for agent: ${agent}`);
+  }
+  return script;
+}
+
+/**
+ * Compute the overlay image tag for a given base image and agent.
+ * Format: <baseImage>-<agent>-<agentVersion>
+ */
+export function getAgentOverlayTag(
+  baseImage: string,
+  agent: AgentType,
+): string {
+  const version = getAgentVersion(agent);
+  return `${baseImage}-${agent}-${version}`;
+}
+
+/**
+ * Ensure an agent-specific overlay image exists on top of the base image.
+ *
+ * The overlay is created by:
+ * 1. Running a temporary container from the base image
+ * 2. Writing the agent + tiger install scripts into it
+ * 3. Executing them
+ * 4. Committing the container as a new image
+ *
+ * The overlay image tag encodes the base hash, agent name, and version
+ * so that any change to the base or agent version triggers a rebuild.
+ */
+export async function ensureAgentOverlay(
+  baseImage: string,
+  agent: AgentType,
+  options?: { onProgress?: (progress: ImageBuildProgress) => void },
+): Promise<string> {
+  const overlayTag = getAgentOverlayTag(baseImage, agent);
+
+  // Check if overlay already exists locally
+  if (await imageExists(overlayTag)) {
+    log.debug({ overlayTag, agent }, 'Agent overlay image already exists');
+    return overlayTag;
+  }
+
+  log.info({ overlayTag, baseImage, agent }, 'Building agent overlay image');
+  options?.onProgress?.({
+    type: 'building',
+    message: `Installing ${agent} agent`,
+  });
+
+  const version = getAgentVersion(agent);
+  const containerName = `ox-overlay-${agent}-${nanoid(6).toLowerCase()}`;
+
+  try {
+    // 1. Start a temporary container from the base image
+    await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+
+    // 2. Write install scripts into the container
+    const agentScript = getAgentInstallScript(agent);
+    const tigerScript = getAgentInstallScript('tiger');
+    await writeFileToContainer(
+      containerName,
+      '/tmp/install-agent.sh',
+      agentScript,
+    );
+    await writeFileToContainer(
+      containerName,
+      '/tmp/install-tiger.sh',
+      tigerScript,
+    );
+
+    // 3. Execute install scripts as the ox user
+    await $`docker exec ${containerName} bash /tmp/install-agent.sh ${version}`.quiet();
+    await $`docker exec ${containerName} bash /tmp/install-tiger.sh`.quiet();
+
+    // 4. Clean up temp files and commit
+    await $`docker exec ${containerName} rm -f /tmp/install-agent.sh /tmp/install-tiger.sh`.quiet();
+    await $`docker commit ${containerName} ${overlayTag}`.quiet();
+
+    log.info({ overlayTag }, 'Agent overlay image built successfully');
+    return overlayTag;
+  } catch (err) {
+    log.error({ err, overlayTag, agent }, 'Failed to build agent overlay');
+    throw new Error(
+      `Failed to build ${agent} overlay image: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    // Always clean up the temporary container
+    await $`docker rm -f ${containerName}`.quiet().nothrow();
+  }
 }
 
 export function getGhcrImageTags(variant: DockerfileVariant): {
@@ -671,10 +802,6 @@ async function buildDockerImage(
       'docker',
       'build',
       '-q',
-      '--build-arg',
-      `CLAUDE_CODE_VERSION=${toolVersions.claudeCode}`,
-      '--build-arg',
-      `OPENCODE_VERSION=${toolVersions.opencode}`,
       ...(cacheFromImage ? ['--cache-from', cacheFromImage] : []),
       '-t',
       imageName,
@@ -884,6 +1011,18 @@ export async function ensureDockerImage(
   return resolved;
 }
 
+/**
+ * Ensure the base Docker image + agent overlay image are both available.
+ * Returns the agent-specific overlay image tag, ready to use for containers.
+ */
+export async function ensureDockerImageForAgent(
+  agent: AgentType,
+  options: EnsureDockerImageOptions = {},
+): Promise<string> {
+  const baseImage = await ensureDockerImage(options);
+  return ensureAgentOverlay(baseImage, agent, options);
+}
+
 // ============================================================================
 // Container Options
 // ============================================================================
@@ -905,6 +1044,8 @@ export interface StartContainerOptions {
   agentArgs?: string[];
   /** How the user submitted the session (async, interactive, plan) */
   submitMode?: SubmitMode;
+  /** Pre-resolved Docker image to use (e.g., agent overlay image). If not set, uses the default resolved image. */
+  dockerImage?: string;
 }
 
 // ============================================================================
@@ -1397,6 +1538,8 @@ export interface ResumeSessionOptions {
   agentArgs?: string[];
   /** How the user submitted the session (async, interactive, plan) */
   submitMode?: SubmitMode;
+  /** Pre-resolved Docker image to use for the resumed container. If not set, commits from the stopped container. */
+  dockerImage?: string;
 }
 
 export async function resumeSession(
@@ -1633,6 +1776,7 @@ export async function startContainer(
     isGitRepo = true,
     agentArgs,
     submitMode,
+    dockerImage,
   } = options;
 
   const oxEnvPath = '.ox/.env';
@@ -1651,7 +1795,11 @@ export async function startContainer(
 
   // Pass through API keys from host environment (lowest precedence)
   const hostEnvArgs: string[] = [];
-  const apiKeysToPassthrough = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+  const apiKeysToPassthrough = [
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'CODEX_API_KEY',
+  ];
   for (const key of apiKeysToPassthrough) {
     const value = process.env[key];
     if (value) {
@@ -1784,6 +1932,7 @@ ${escapePrompt(agentCommand, fullPrompt, interactive)}
       ],
       cmdName: 'bash',
       cmdArgs: ['-c', startupScript],
+      dockerImage,
       // Always start detached — the caller uses provider.attach() for
       // interactive sessions.  allocateTty ensures the container has a
       // TTY so `docker attach` works correctly later.
@@ -1831,8 +1980,12 @@ export async function startShellContainer(
 
   // Pass through API keys from host environment
   const hostEnvArgs: string[] = [];
-  const apiKeysToPassthrough = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
-  for (const key of apiKeysToPassthrough) {
+  const apiKeysToPassthrough2 = [
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'CODEX_API_KEY',
+  ];
+  for (const key of apiKeysToPassthrough2) {
     const value = process.env[key];
     if (value) {
       hostEnvArgs.push('-e', `${key}=${value}`);
