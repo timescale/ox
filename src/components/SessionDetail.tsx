@@ -2,7 +2,7 @@ import { useKeyboard } from '@opentui/react';
 import open from 'open';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useContainerStats } from '../hooks/useContainerStats';
-import { useWindowSize } from '../hooks/useWindowSize';
+import { AGENT_INFO_MAP, type AgentInfo } from '../services/agents.ts';
 import { copyToClipboard } from '../services/clipboard';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import { formatCpuPercent, formatMemUsage } from '../services/docker';
@@ -24,6 +24,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { Frame } from './Frame';
 import { HotkeysBar } from './HotkeysBar';
 import { LogViewer } from './LogViewer';
+import { EmptyBorder } from './PromptScreen.tsx';
 
 /** Cache TTL in milliseconds (60 seconds) */
 const PR_CACHE_TTL = 60_000;
@@ -55,7 +56,6 @@ export function SessionDetail({
   const [session, setSession] = useState(initialSession);
   const [modal, setModal] = useState<ModalType>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
-  const { isTall } = useWindowSize();
 
   const isRunning = session.status === 'running';
   const isStopped = session.status === 'exited' || session.status === 'stopped';
@@ -83,8 +83,6 @@ export function SessionDetail({
 
   // Hover state for PR indicator
   const [prHovered, setPrHovered] = useState(false);
-  // Hover state for prompt box
-  const [promptHovered, setPromptHovered] = useState(false);
 
   // Fetch PR info if not cached or stale
   const fetchPrInfo = useCallback(async () => {
@@ -360,6 +358,7 @@ export function SessionDetail({
   const statusText = getStatusText(session);
   const model = session.model?.split('/').pop();
   const agentDisplay = model ? `${session.agent} (${model})` : session.agent;
+  const agentInfo: AgentInfo = AGENT_INFO_MAP[session.agent];
 
   // Build hotkey hints based on available actions
   const actions = [
@@ -478,22 +477,77 @@ export function SessionDetail({
       )}
 
       {/* Prompt section */}
+      {/* Half-height padding top */}
       <box
-        title="Prompt"
-        border
-        borderStyle="single"
-        height={3}
-        marginTop={isTall ? 1 : 0}
-        backgroundColor={
-          promptHovered && session.prompt ? theme.backgroundElement : undefined
-        }
-        onMouseDown={handlePromptClick}
-        onMouseOver={() => setPromptHovered(true)}
-        onMouseOut={() => setPromptHovered(false)}
+        height={1}
+        border={['left', 'right']}
+        borderColor={agentInfo?.color}
+        customBorderChars={{
+          ...EmptyBorder,
+          vertical: '\u257B',
+        }}
       >
-        <text fg={theme.text} height={1} overflow="scroll">
-          {session.prompt || '(no prompt)'}
-        </text>
+        <box
+          height={1}
+          border={['top']}
+          borderColor={theme.backgroundElement}
+          customBorderChars={{
+            ...EmptyBorder,
+            horizontal: '\u2584',
+          }}
+        />
+      </box>
+      <box
+        border={['left', 'right']}
+        borderColor={agentInfo?.color}
+        customBorderChars={{
+          ...EmptyBorder,
+          vertical: '\u2503',
+          bottomLeft: '\u2579',
+        }}
+      >
+        <box
+          flexDirection="column"
+          paddingLeft={1}
+          paddingRight={1}
+          flexShrink={0}
+          backgroundColor={theme.backgroundElement}
+          onMouseDown={handlePromptClick}
+        >
+          <textarea
+            textColor={theme.text}
+            backgroundColor={theme.backgroundElement}
+            focusedBackgroundColor={theme.backgroundElement}
+            minHeight={1}
+            maxHeight={3}
+            initialValue={session.prompt || '(no prompt)'}
+            onKeyDown={(evt) => {
+              if (!['left', 'right', 'up', 'down'].includes(evt.name)) {
+                evt.preventDefault();
+              }
+            }}
+          />
+        </box>
+      </box>
+      {/* Half-height padding bottom */}
+      <box
+        height={1}
+        border={['left', 'right']}
+        borderColor={agentInfo?.color}
+        customBorderChars={{
+          ...EmptyBorder,
+          vertical: '\u2579',
+        }}
+      >
+        <box
+          height={1}
+          border={['bottom']}
+          borderColor={theme.backgroundElement}
+          customBorderChars={{
+            ...EmptyBorder,
+            horizontal: '\u2580',
+          }}
+        />
       </box>
 
       {/* Logs section */}
