@@ -3,7 +3,7 @@ import { useTheme } from '../stores/themeStore.ts';
 
 export interface ActionButtonProps {
   label: string;
-  keybind: string;
+  keybind?: string;
   color: string;
   onPress: () => void;
   focused?: boolean;
@@ -33,14 +33,17 @@ export function ActionButton({
       paddingLeft={1}
       paddingRight={1}
       height={3}
+      gap={2}
+      flexDirection="row"
     >
       <text fg={highlighted ? theme.background : color}>
         {highlighted ? <strong>{label}</strong> : label}
-        {'  '}
-        <span fg={highlighted ? theme.backgroundPanel : theme.textMuted}>
-          {keybind}
-        </span>
       </text>
+      {keybind ? (
+        <text fg={highlighted ? theme.backgroundPanel : theme.textMuted}>
+          {keybind}
+        </text>
+      ) : null}
     </box>
   );
 }
