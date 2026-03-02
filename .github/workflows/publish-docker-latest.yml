@@ -9,7 +9,6 @@ on:
       - "sandbox/full.Dockerfile"
       - "sandbox/slim.Dockerfile"
       - "sandbox/versions.json"
-      - "sandbox/agents/**"
 
 permissions:
   packages: write
