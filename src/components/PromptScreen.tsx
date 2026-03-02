@@ -171,6 +171,7 @@ export function PromptScreen({
 
   // Suspend command keybind dispatch when sub-modals are open
   const suspend = useCommandStore((s) => s.suspend);
+  const isCmdPaletteOpen = useCommandStore((s) => s.isOpen);
   useEffect(() => {
     if (showModelSelector || showThemePicker) {
       return suspend();
@@ -663,7 +664,7 @@ export function PromptScreen({
   // Keyboard handling — slash command detection and prompt history navigation.
   // Action keybinds are handled by the centralized CommandPaletteHost.
   useKeyboard((key) => {
-    if (showModelSelector || showThemePicker) return;
+    if (showModelSelector || showThemePicker || isCmdPaletteOpen) return;
 
     // If slash commands are showing, let the popover handle navigation
     if (showSlashCommands) {
@@ -797,7 +798,9 @@ export function PromptScreen({
               {/* Prompt textarea */}
               <textarea
                 ref={textareaRef}
-                focused={!showModelSelector && !showThemePicker}
+                focused={
+                  !showModelSelector && !showThemePicker && !isCmdPaletteOpen
+                }
                 placeholder='Ask anything... Type "/" for commands'
                 onSubmit={handleSubmit}
                 onMouseDown={(r: MouseEvent) => r.target?.focus()}
