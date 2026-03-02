@@ -9,6 +9,7 @@ import {
   userConfig,
 } from '../services/config.ts';
 import { log } from '../services/logger.ts';
+import { readOpencodeTheme } from '../services/opencode.ts';
 import {
   DEFAULT_THEME_NAME,
   getTheme,
@@ -22,12 +23,15 @@ import {
 
 async function loadPersistedTheme(): Promise<string | null> {
   try {
-    return (await readConfigValue('themeName')) || null;
+    const oxTheme = (await readConfigValue('themeName')) || null;
+    if (oxTheme) return oxTheme;
   } catch (error) {
     log.error({ error }, 'Failed to load persisted theme');
-    // Ignore errors, use default
+    // Ignore errors, fall through to opencode theme
   }
-  return null;
+
+  // Fall back to OpenCode's theme preference if no ox theme is configured
+  return await readOpencodeTheme();
 }
 
 async function persistTheme(themeName: string): Promise<void> {

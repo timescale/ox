@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { file } from 'bun';
+import { xdgState } from 'xdg-basedir';
 import type { AuthEntry, OpencodeAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { readCache, writeCache } from './cache';
@@ -15,6 +16,7 @@ import {
   runInDocker,
   type VirtualFile,
 } from './runInDocker';
+import { getThemeNames } from './theme.ts';
 
 const homePaths = {
   authJson: join(homedir(), '.local', 'share', 'opencode', 'auth.json'),
@@ -290,6 +292,43 @@ export const checkOpencodeCredentials = async (
   );
   return exitCode2 === 0 && !errText.includes('Error');
 };
+
+/**
+ * Resolve the XDG state directory using `xdg-basedir`.
+ * Falls back to reading `$XDG_STATE_HOME` at call time so runtime
+ * env changes (e.g. in tests) are picked up, since `xdg-basedir`
+ * evaluates the env var once at import time.
+ */
+function getXdgState(): string | undefined {
+  return process.env.XDG_STATE_HOME || xdgState;
+}
+
+/**
+ * Read the theme preference from OpenCode's host state directory.
+ * OpenCode stores its KV state at `$XDG_STATE_HOME/opencode/kv.json`.
+ * Returns the theme name if it exists and is a valid ox theme, otherwise null.
+ */
+export async function readOpencodeTheme(): Promise<string | null> {
+  try {
+    const stateDir = getXdgState();
+    if (!stateDir) return null;
+    const kvPath = join(stateDir, 'opencode', 'kv.json');
+    const kvFile = file(kvPath);
+    if (!(await kvFile.exists())) return null;
+    const kv = (await kvFile.json()) as Record<string, unknown>;
+    const theme = kv.theme;
+    if (typeof theme !== 'string' || !theme) return null;
+    if (!getThemeNames().includes(theme)) {
+      log.debug({ theme }, 'OpenCode theme not recognized by ox, ignoring');
+      return null;
+    }
+    log.debug({ theme }, 'Using theme from OpenCode host config');
+    return theme;
+  } catch {
+    log.debug('Failed to read OpenCode theme from kv.json');
+    return null;
+  }
+}
 
 /**
  * Ensure Opencode credentials are valid, running interactive login if needed.
