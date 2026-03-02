@@ -642,11 +642,7 @@ export function SessionDetail({
           />
         ))}
         <box flexGrow={1} />
-        <ActionButton
-          label="back"
-          color={theme.textMuted}
-          onPress={onBack}
-        />
+        <ActionButton label="back" color={theme.textMuted} onPress={onBack} />
         <ActionButton
           label="commands"
           keybind="^p"
