@@ -491,7 +491,7 @@ export function SessionsList({
       },
       {
         id: 'session.openPr',
-        title: 'Open PR',
+        title: 'View PR',
         description:
           'Open the pull request for the selected session in browser',
         category: 'Session',

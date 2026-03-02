@@ -2,7 +2,7 @@
 // Command Palette — Zustand store, host component, and palette UI
 // ============================================================================
 
-import { RGBA, TextAttributes } from '@opentui/core';
+import { RGBA, type ScrollBoxRenderable, TextAttributes } from '@opentui/core';
 import { flushSync, useKeyboard } from '@opentui/react';
 import fuzzysort from 'fuzzysort';
 import {
@@ -333,8 +333,7 @@ function CommandPalette() {
   const { registrations, hide } = useCommandStore();
   const [filter, setFilter] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const scrollboxRef =
-    useRef<import('@opentui/core').ScrollBoxRenderable>(null);
+  const scrollboxRef = useRef<ScrollBoxRenderable>(null);
 
   // Gather visible commands
   const allCommands = getAllCommands(registrations);

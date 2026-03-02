@@ -20,9 +20,8 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
 import { formatShellError, type ShellError } from '../utils';
+import { ActionButton, type ActionButtonProps } from './ActionButton.tsx';
 import { ConfirmModal } from './ConfirmModal';
-import { Frame } from './Frame';
-import { HotkeysBar } from './HotkeysBar';
 import { LogViewer } from './LogViewer';
 import { EmptyBorder } from './PromptScreen.tsx';
 
@@ -56,6 +55,7 @@ export function SessionDetail({
   const [session, setSession] = useState(initialSession);
   const [modal, setModal] = useState<ModalType>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
+  const showCommands = useCommandStore((s) => s.show);
 
   const isRunning = session.status === 'running';
   const isStopped = session.status === 'exited' || session.status === 'stopped';
@@ -295,7 +295,7 @@ export function SessionDetail({
       },
       {
         id: 'session.openPr',
-        title: 'Open PR',
+        title: 'View PR',
         description: 'Open the pull request in browser',
         category: 'Session',
         keybind: { key: 'o', ctrl: true },
@@ -336,13 +336,105 @@ export function SessionDetail({
   // Read palette open state so escape doesn't go back when closing the palette
   const isOpen = useCommandStore((s) => s.isOpen);
 
-  // Keyboard shortcuts — navigation only.
+  // Build action button definitions based on session state
+  const actionButtons: ActionButtonProps[] = useMemo(
+    () =>
+      isRunning
+        ? [
+            {
+              label: session.interactive ? 'attach' : 'resume',
+              keybind: session.interactive ? '^a' : '^r',
+              color: theme.primary,
+              onPress: session.interactive
+                ? () => onAttach(session.id)
+                : () => onResume(session),
+            },
+            {
+              label: 'shell',
+              keybind: '^s',
+              color: theme.accent,
+              onPress: () => onShell(session.id),
+            },
+            {
+              label: 'stop',
+              keybind: '^x',
+              color: theme.warning,
+              onPress: () => setModal('stop'),
+            },
+          ]
+        : isStopped
+          ? [
+              {
+                label: 'resume',
+                keybind: '^r',
+                color: theme.primary,
+                onPress: handleResume,
+              },
+              {
+                label: 'delete',
+                keybind: '^d',
+                color: theme.error,
+                onPress: () => setModal('delete'),
+              },
+            ]
+          : [],
+    [
+      isRunning,
+      isStopped,
+      session,
+      theme,
+      onAttach,
+      onShell,
+      onResume,
+      handleResume,
+    ],
+  );
+
+  // Track which action button has tab focus (-1 = none)
+  const [focusedButton, setFocusedButton] = useState(-1);
+  // Clamp to valid range when buttons change
+  const clampedFocusedButton =
+    actionButtons.length === 0
+      ? -1
+      : focusedButton >= actionButtons.length
+        ? actionButtons.length - 1
+        : focusedButton;
+
+  // Keyboard shortcuts — navigation and tab cycling for action buttons.
   // Action keybinds are handled by the centralized CommandPaletteHost.
   useKeyboard((key) => {
     if (modal || actionInProgress) return;
 
     if (key.name === 'escape') {
+      if (clampedFocusedButton >= 0) {
+        setFocusedButton(-1);
+        return;
+      }
       if (!isOpen) onBack();
+      return;
+    }
+
+    // Tab / Shift+Tab to cycle through action buttons
+    if (key.name === 'tab' && actionButtons.length > 0) {
+      key.preventDefault();
+      if (key.shift) {
+        setFocusedButton((prev) =>
+          prev <= 0 ? actionButtons.length - 1 : prev - 1,
+        );
+      } else {
+        setFocusedButton((prev) =>
+          prev >= actionButtons.length - 1 ? 0 : prev + 1,
+        );
+      }
+      return;
+    }
+
+    // Enter to activate the focused button
+    if (
+      (key.name === 'return' || key.name === 'enter') &&
+      clampedFocusedButton >= 0
+    ) {
+      actionButtons[clampedFocusedButton]?.onPress();
       return;
     }
   });
@@ -360,35 +452,31 @@ export function SessionDetail({
   const agentDisplay = model ? `${session.agent} (${model})` : session.agent;
   const agentInfo: AgentInfo = AGENT_INFO_MAP[session.agent];
 
-  // Build hotkey hints based on available actions
-  const actions = [
-    ...(isRunning
-      ? [
-          ['ctrl+a', 'attach'],
-          ['ctrl+s', 'shell'],
-          ['ctrl+x', 'stop'],
-        ]
-      : []),
-    ...(isStopped
-      ? [
-          ['ctrl+r', 'resume'],
-          ['ctrl+d', 'delete'],
-        ]
-      : []),
-    ...(prInfo ? [['ctrl+o', 'open PR']] : []),
-    ['ctrl+g', 'git switch'],
-    ['ctrl+p', 'commands'],
-  ] as unknown as readonly [string, string][];
-
   return (
-    <Frame title={session.branch}>
+    <box flexGrow={1} flexDirection="column" padding={1}>
       {/* Metadata section */}
+      <box flexDirection="row" gap={1} height={1} overflow="hidden">
+        <box flexDirection="row" gap={3}>
+          <text wrapMode="none" fg={theme.textMuted}>
+            name
+          </text>
+          <text wrapMode="none">{session.name}</text>
+        </box>
+        <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-end">
+          <text fg={theme.textMuted}>created</text>
+          <text>
+            {session.created ? formatRelativeTime(session.created) : 'unknown'}
+          </text>
+        </box>
+      </box>
       <box flexDirection="row" gap={1} height={1} overflow="hidden">
         <box flexDirection="row" gap={3}>
           <text wrapMode="none" fg={theme.textMuted}>
             repo
           </text>
-          <text wrapMode="none">{session.repo}</text>
+          <text wrapMode="none">
+            {session.repo} : ox/{session.branch}
+          </text>
         </box>
         {prInfo && (
           <box
@@ -411,12 +499,6 @@ export function SessionDetail({
             </text>
           </box>
         )}
-        <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-end">
-          <text fg={theme.textMuted}>created</text>
-          <text>
-            {session.created ? formatRelativeTime(session.created) : 'unknown'}
-          </text>
-        </box>
       </box>
       <box flexDirection="row" gap={3} height={1} overflow="hidden">
         <box flexDirection="row" gap={1}>
@@ -550,24 +632,43 @@ export function SessionDetail({
         />
       </box>
 
-      {/* Logs section */}
-      <box
-        title="Logs"
-        border
-        borderStyle="single"
-        flexGrow={1}
-        flexShrink={1}
-        flexDirection="column"
-      >
-        <LogViewer
-          containerId={session.id}
-          streamLogs={(id) => sessionProvider.streamLogs(id)}
-          isInteractive={session.interactive}
-          onError={handleLogError}
+      {/* Action buttons */}
+      <box flexDirection="row" flexWrap="wrap" gap={1}>
+        {actionButtons.map((btn, i) => (
+          <ActionButton
+            key={btn.label}
+            {...btn}
+            focused={clampedFocusedButton === i}
+          />
+        ))}
+        <box flexGrow={1} />
+        <ActionButton
+          label="commands"
+          keybind="^p"
+          color={theme.text}
+          onPress={showCommands}
         />
       </box>
 
-      <HotkeysBar keyList={actions} />
+      {/* Logs section (hidden for interactive sessions) */}
+      {!session.interactive && (
+        <box
+          title="Logs"
+          border
+          borderStyle="single"
+          marginTop={1}
+          flexGrow={1}
+          flexShrink={1}
+          flexDirection="column"
+        >
+          <LogViewer
+            containerId={session.id}
+            streamLogs={(id) => sessionProvider.streamLogs(id)}
+            isInteractive={session.interactive}
+            onError={handleLogError}
+          />
+        </box>
+      )}
 
       {/* Confirmation modals */}
       {modal === 'stop' && (
@@ -593,6 +694,6 @@ export function SessionDetail({
           onCancel={() => setModal(null)}
         />
       )}
-    </Frame>
+    </box>
   );
 }
