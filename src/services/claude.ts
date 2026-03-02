@@ -143,34 +143,69 @@ const captureClaudeCredentialsJsonFromContainer = async (
   return false;
 };
 
-interface ClaudeConfigJson {
-  primaryApiKey?: string;
-  oauthAccount?: ClaudeOAuthAccount | null;
+interface ClaudeConfigJsonProject {
+  allowedTools?: string[];
+  disabledMcpjsonServers?: string[];
+  enabledMcpjsonServers?: string[];
+  exampleFiles?: string[];
+  exampleFilesGeneratedAt?: number;
+  hasClaudeMdExternalIncludesApproved?: boolean;
+  hasCompletedProjectOnboarding?: boolean;
+  hasTrustDialogAccepted?: boolean;
+  mcpContextUris?: string[];
+  mcpServers?: Record<string, unknown>;
 }
 
-const projectConfig = {
+interface ClaudeConfigJson {
+  autoUpdates?: boolean;
+  bypassPermissionsModeAccepted?: boolean;
+  editorMode?: string;
+  effortCalloutDismissed?: boolean;
+  hasAcknowledgedCostThreshold?: boolean;
+  hasCompletedOnboarding?: boolean;
+  installMethod?: string;
+  numStartups?: number;
+  oauthAccount?: ClaudeOAuthAccount | null;
+  primaryApiKey?: string;
+  projects?: Record<string, ClaudeConfigJsonProject>;
+  theme?: string;
+  userID?: string;
+}
+
+const projectConfig: ClaudeConfigJsonProject = {
   allowedTools: [],
-  mcpContextUris: [],
-  mcpServers: {},
-  enabledMcpjsonServers: [],
   disabledMcpjsonServers: [],
-  hasTrustDialogAccepted: true,
+  enabledMcpjsonServers: [],
   hasClaudeMdExternalIncludesApproved: true,
   hasCompletedProjectOnboarding: true,
+  hasTrustDialogAccepted: true,
+  mcpContextUris: [],
+  mcpServers: {},
 };
 
-export const baseConfig = {
-  numStartups: 1,
-  installMethod: 'native',
+export const baseConfig: ClaudeConfigJson = {
   autoUpdates: false,
-  hasCompletedOnboarding: true,
-  effortCalloutDismissed: true,
   bypassPermissionsModeAccepted: true,
-  projects: {
-    '/work': projectConfig,
-    '/work/app': projectConfig,
-  },
+  effortCalloutDismissed: true,
+  hasAcknowledgedCostThreshold: true,
+  hasCompletedOnboarding: true,
+  installMethod: 'native',
+  numStartups: 1,
+  projects: { '/work': projectConfig, '/work/app': projectConfig },
 };
+
+export const readHostConfigJson =
+  async (): Promise<ClaudeConfigJson | null> => {
+    try {
+      const hostConfigFile = file(homePaths.configJson);
+      if (!(await hostConfigFile.exists())) return null;
+      const config: ClaudeConfigJson = await hostConfigFile.json();
+      return config;
+    } catch (err) {
+      log.debug({ err }, 'Failed to read host .claude.json');
+      return null;
+    }
+  };
 
 const readHostConfigApiKey = async (): Promise<string | null> => {
   const { username } = userInfo();
@@ -186,10 +221,8 @@ const readHostConfigApiKey = async (): Promise<string | null> => {
 
   // Look for a file in the home directory
   try {
-    const hostConfigFile = file(homePaths.configJson);
-    if (!(await hostConfigFile.exists())) return null;
-    const config: ClaudeConfigJson = await hostConfigFile.json();
-    if (config.primaryApiKey) {
+    const config = await readHostConfigJson();
+    if (config?.primaryApiKey) {
       log.debug('Found claude API key in home directory');
       return config.primaryApiKey;
     }
@@ -286,11 +319,20 @@ export const getClaudeApiKey = async (
 export const getClaudeConfigFiles = async (): Promise<VirtualFile[]> => {
   const { oauthAccount, ...creds } = (await getClaudeCredentialsJson()) || {};
   const apiKey = await getClaudeApiKey();
+  const hostConfig = await readHostConfigJson();
   const config = {
     ...baseConfig,
+    ...(hostConfig?.theme ? { theme: hostConfig.theme } : null),
+    ...(hostConfig?.editorMode ? { editorMode: hostConfig.editorMode } : null),
     ...(apiKey ? { primaryApiKey: apiKey } : null),
     ...(oauthAccount ? { oauthAccount } : null),
   };
+  const cwdProject = hostConfig?.projects?.[process.cwd()];
+  const cfgProject = config.projects?.['/work/app'];
+  if (cwdProject?.exampleFiles && cfgProject) {
+    cfgProject.exampleFiles = cwdProject.exampleFiles;
+    cfgProject.exampleFilesGeneratedAt = cwdProject.exampleFilesGeneratedAt;
+  }
   return [
     {
       path: containerPaths.credentialsJson,
