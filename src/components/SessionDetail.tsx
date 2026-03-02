@@ -278,7 +278,7 @@ export function SessionDetail({
       {
         id: 'session.resume',
         title: 'Resume',
-        description: 'Resume this stopped session with a new prompt',
+        description: 'Resume this stopped session',
         category: 'Session',
         keybind: { key: 'r', ctrl: true },
         enabled: isStopped,

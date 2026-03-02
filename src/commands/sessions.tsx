@@ -819,10 +819,27 @@ function SessionsApp({
     [onComplete, startSession],
   );
 
-  // Handle resume from session detail - navigate to PromptScreen with resume context
-  const handleResume = useCallback((session: OxSession) => {
-    setView({ type: 'prompt', resumeSession: session });
-  }, []);
+  // Handle resume from session detail
+  const handleResume = useCallback(
+    (session: OxSession) => {
+      if (session.interactive) {
+        // Interactive/plan sessions: skip prompt screen — agents don't support
+        // new prompts in continue mode. Resume directly with -c.
+        resumeSessionFlow(
+          session,
+          '', // no prompt for interactive continue
+          session.model ?? '',
+          session.submitMode ?? 'interactive',
+          session.mountDir,
+          session.provider,
+        );
+      } else {
+        // Detached sessions: show prompt screen for new prompt entry
+        setView({ type: 'prompt', resumeSession: session });
+      }
+    },
+    [resumeSessionFlow],
+  );
 
   // Handle cloud setup completion - resume pending start/resume action
   const handleCloudSetupComplete = useCallback(
