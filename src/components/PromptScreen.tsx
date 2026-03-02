@@ -19,7 +19,11 @@ import {
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import type { AgentType } from '../services/config';
 import { log } from '../services/logger';
-import type { OxSession, SandboxProviderType } from '../services/sandbox';
+import type {
+  OxSession,
+  SandboxProviderType,
+  SubmitMode,
+} from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { usePromptHistoryStore } from '../stores/promptHistoryStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
@@ -33,12 +37,12 @@ import { SlashCommandPopover } from './SlashCommandPopover.tsx';
 import { ThemePicker } from './ThemePicker.tsx';
 import { Toast, type ToastType } from './Toast';
 
-export type SubmitMode = 'async' | 'interactive' | 'plan';
-
 export interface PromptScreenProps {
   defaultAgent: AgentType;
   defaultModel?: string | null;
   defaultSandboxProvider?: SandboxProviderType;
+  /** Default submit mode (preserved from prior session on resume) */
+  defaultSubmitMode?: SubmitMode;
   resumeSession?: OxSession; // If set, we're resuming this session
   /** Initial mount directory from CLI flag (enables mount mode if set) */
   initialMountDir?: string | null;
@@ -98,6 +102,7 @@ export function PromptScreen({
   defaultAgent,
   defaultModel = null,
   defaultSandboxProvider,
+  defaultSubmitMode,
   resumeSession,
   initialMountDir,
   forceMountMode = false,
@@ -124,7 +129,7 @@ export function PromptScreen({
   const [slashQuery, setSlashQuery] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
   const [submitMode, setSubmitMode] = useState<SubmitMode>(
-    resumeSession?.interactive ? 'interactive' : 'async',
+    defaultSubmitMode ?? 'interactive',
   );
   // Mount mode state - enabled when initialMountDir is set, forced, or toggled via Ctrl+D
   // When forceMountMode is true, mount mode cannot be toggled off
@@ -178,7 +183,7 @@ export function PromptScreen({
       {
         id: 'mode.cycle',
         title: 'Switch interaction mode',
-        description: 'Cycle between async, interactive, and plan modes',
+        description: 'Cycle between interactive, plan, and async modes',
         category: 'Prompt',
         keybind: { key: 'tab', shift: true, display: 'shift+tab' },
         onSelect: () =>
@@ -813,16 +818,16 @@ export function PromptScreen({
               {/* Agent and model display row */}
               <box flexDirection="row" marginTop={1} height={1} gap={1}>
                 <text fg={agentInfo?.color}>{agentInfo?.name || agent}</text>
-                {submitMode === 'interactive' ? (
-                  <text fg={theme.success}>[interactive]</text>
-                ) : null}
-                {submitMode === 'plan' ? (
+                {submitMode === 'async' ? (
+                  <text fg={theme.success}>[async]</text>
+                ) : submitMode === 'plan' ? (
                   <text fg={theme.info}>[plan]</text>
                 ) : null}
                 {sandboxProvider === 'cloud' ? (
                   <text fg={theme.accent}>[cloud]</text>
+                ) : mountMode ? (
+                  <text fg={theme.warning}>[mount]</text>
                 ) : null}
-                {mountMode ? <text fg={theme.warning}>[mount]</text> : null}
                 <text fg={model?.name ? theme.text : theme.textMuted}>
                   {model?.name || modelId || 'Loading...'}
                 </text>

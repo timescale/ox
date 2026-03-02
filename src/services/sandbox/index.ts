@@ -16,6 +16,7 @@ export type {
   SandboxProviderType,
   SandboxStats,
   ShellSession,
+  SubmitMode,
 } from './types.ts';
 
 import { track } from '../analytics.ts';

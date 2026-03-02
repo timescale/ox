@@ -39,6 +39,7 @@ import type { RepoInfo } from './git';
 import { log } from './logger';
 import { getOpencodeConfigFiles } from './opencode';
 import { runInDocker, type VirtualFile } from './runInDocker';
+import type { SubmitMode } from './sandbox/types';
 
 /**
  * Escape a string for safe use in shell commands using base64 encoding.
@@ -102,6 +103,8 @@ export interface OxContainerLabels {
   resumedFrom?: string;
   /** Docker image used for resume */
   resumeImage?: string;
+  /** How the user submitted the session (async, interactive, plan) */
+  submitMode?: SubmitMode;
 }
 
 /**
@@ -129,6 +132,7 @@ export function buildOxLabels(
   if (input.noGit) result['ox.no-git'] = 'true';
   if (input.resumedFrom) result['ox.resumed-from'] = input.resumedFrom;
   if (input.resumeImage) result['ox.resume-image'] = input.resumeImage;
+  if (input.submitMode) result['ox.submit-mode'] = input.submitMode;
   return result;
 }
 
@@ -756,6 +760,8 @@ export interface StartContainerOptions {
   isGitRepo?: boolean;
   /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
   agentArgs?: string[];
+  /** How the user submitted the session (async, interactive, plan) */
+  submitMode?: SubmitMode;
 }
 
 // ============================================================================
@@ -781,6 +787,7 @@ export interface OxSession {
   exitCode?: number;
   startedAt?: string;
   finishedAt?: string;
+  submitMode?: SubmitMode;
 }
 
 interface DockerInspectResult {
@@ -859,6 +866,7 @@ export async function listOxSessions(): Promise<OxSession[]> {
         resumedFrom: labels['ox.resumed-from'],
         interactive: labels['ox.interactive'] === 'true',
         mountDir: labels['ox.mount'],
+        submitMode: (labels['ox.submit-mode'] as SubmitMode) || undefined,
         status,
         exitCode: status === 'exited' ? state.ExitCode : undefined,
         startedAt: state.StartedAt,
@@ -1199,6 +1207,8 @@ export interface ResumeSessionOptions {
   mountDir?: string;
   /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
   agentArgs?: string[];
+  /** How the user submitted the session (async, interactive, plan) */
+  submitMode?: SubmitMode;
 }
 
 export async function resumeSession(
@@ -1318,6 +1328,9 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
     mount: absoluteMountDir,
     resumedFrom: container.Name.replace(/^\//, ''),
     resumeImage,
+    submitMode:
+      options.submitMode ??
+      ((containerLabels['ox.submit-mode'] as SubmitMode) || undefined),
   });
 
   try {
@@ -1397,6 +1410,7 @@ export async function getSession(nameOrId: string): Promise<OxSession | null> {
       resumedFrom: labels['ox.resumed-from'],
       interactive: labels['ox.interactive'] === 'true',
       mountDir: labels['ox.mount'],
+      submitMode: (labels['ox.submit-mode'] as SubmitMode) || undefined,
       status,
       exitCode: status === 'exited' ? state.ExitCode : undefined,
       startedAt: state.StartedAt,
@@ -1430,6 +1444,7 @@ export async function startContainer(
     mountDir,
     isGitRepo = true,
     agentArgs,
+    submitMode,
   } = options;
 
   const oxEnvPath = '.ox/.env';
@@ -1566,6 +1581,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
     model,
     mount: absoluteMountDir,
     noGit: !isGitRepo || undefined,
+    submitMode,
   });
 
   try {

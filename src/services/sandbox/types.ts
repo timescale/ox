@@ -10,6 +10,9 @@ export type SandboxProviderType = 'docker' | 'cloud';
 // Docker-specific exec type (keep for backward compat)
 export type ExecType = 'agent' | 'shell';
 
+// How the user submitted the session (affects interactivity + agent flags)
+export type SubmitMode = 'async' | 'interactive' | 'plan';
+
 // Unified session metadata (provider-agnostic)
 export interface OxSession {
   id: string; // containerId (Docker) or sandbox ID (cloud)
@@ -33,6 +36,7 @@ export interface OxSession {
   snapshotSlug?: string; // cloud only (for resume)
   startedAt?: string;
   finishedAt?: string;
+  submitMode?: SubmitMode;
 }
 
 // Options for creating a new sandbox
@@ -49,6 +53,7 @@ export interface CreateSandboxOptions {
   mountDir?: string; // Docker-only: local dir mount
   isGitRepo?: boolean;
   agentArgs?: string[];
+  submitMode?: SubmitMode;
   initScript?: string;
   overlayMounts?: string[];
   onProgress?: (step: string) => void;
@@ -80,6 +85,7 @@ export interface ResumeSandboxOptions {
   model?: string;
   mountDir?: string;
   agentArgs?: string[];
+  submitMode?: SubmitMode;
   onProgress?: (step: string) => void;
 }
 

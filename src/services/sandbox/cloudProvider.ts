@@ -608,6 +608,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       interactive: options.interactive,
       region,
       volumeSlug: rootVolume.slug,
+      submitMode: options.submitMode,
     };
 
     const db = openSessionDb();
@@ -822,6 +823,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       region,
       volumeSlug: bootVolumeSlug,
       resumedFrom: sessionId,
+      submitMode: options.submitMode ?? existing.submitMode,
     };
     upsertSession(db, newSession);
 
