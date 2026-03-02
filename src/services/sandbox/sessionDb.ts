@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { userConfigDir } from '../config.ts';
 import { log } from '../logger.ts';
 import { initPromptHistorySchema } from '../promptHistoryDb.ts';
-import type { OxSession, SandboxProviderType } from './types.ts';
+import type { OxSession, SandboxProviderType, SubmitMode } from './types.ts';
 
 // ============================================================================
 // Schema
@@ -51,12 +51,19 @@ CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);
 
 /** Initialize the schema on a database instance (useful for testing with :memory:) */
 export function initSessionSchema(db: Database): void {
-  db.exec('PRAGMA journal_mode=WAL');
-  db.exec(SCHEMA_SQL);
+  db.run('PRAGMA journal_mode=WAL');
+  db.run(SCHEMA_SQL);
 
   // Migration: add deleted_at column for soft-delete support
   try {
-    db.exec('ALTER TABLE sessions ADD COLUMN deleted_at TEXT');
+    db.run('ALTER TABLE sessions ADD COLUMN deleted_at TEXT');
+  } catch {
+    // Column already exists — expected on subsequent runs
+  }
+
+  // Migration: add submit_mode column for preserving SubmitMode across resumes
+  try {
+    db.run('ALTER TABLE sessions ADD COLUMN submit_mode TEXT');
   } catch {
     // Column already exists — expected on subsequent runs
   }
@@ -105,6 +112,7 @@ interface SessionRow {
   started_at: string | null;
   finished_at: string | null;
   deleted_at: string | null;
+  submit_mode: string | null;
   extra: string | null;
 }
 
@@ -137,6 +145,7 @@ function rowToSession(row: SessionRow): OxSession {
     snapshotSlug: row.snapshot_slug ?? undefined,
     startedAt: row.started_at ?? undefined,
     finishedAt: row.finished_at ?? undefined,
+    submitMode: (row.submit_mode as SubmitMode) ?? undefined,
   };
 }
 
@@ -152,12 +161,12 @@ export function upsertSession(db: Database, session: OxSession): void {
       id, provider, name, branch, agent, model, prompt, repo,
       created, status, exit_code, interactive, exec_type, resumed_from,
       region, mount_dir, container_name, volume_slug, snapshot_slug,
-      started_at, finished_at, extra
+      started_at, finished_at, submit_mode, extra
     ) VALUES (
       $id, $provider, $name, $branch, $agent, $model, $prompt, $repo,
       $created, $status, $exit_code, $interactive, $exec_type, $resumed_from,
       $region, $mount_dir, $container_name, $volume_slug, $snapshot_slug,
-      $started_at, $finished_at, $extra
+      $started_at, $finished_at, $submit_mode, $extra
     )
     ON CONFLICT(id) DO UPDATE SET
       provider = excluded.provider,
@@ -180,6 +189,7 @@ export function upsertSession(db: Database, session: OxSession): void {
       snapshot_slug = excluded.snapshot_slug,
       started_at = excluded.started_at,
       finished_at = excluded.finished_at,
+      submit_mode = excluded.submit_mode,
       extra = excluded.extra
   `);
 
@@ -205,6 +215,7 @@ export function upsertSession(db: Database, session: OxSession): void {
     $snapshot_slug: session.snapshotSlug ?? null,
     $started_at: session.startedAt ?? null,
     $finished_at: session.finishedAt ?? null,
+    $submit_mode: session.submitMode ?? null,
     $extra: null,
   });
 }

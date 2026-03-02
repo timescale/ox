@@ -78,6 +78,7 @@ export function mapDockerSession(docker: DockerSession): OxSession {
     containerName: docker.containerName,
     startedAt: docker.startedAt,
     finishedAt: docker.finishedAt,
+    submitMode: docker.submitMode,
   };
 }
 
@@ -147,6 +148,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       mountDir: options.mountDir,
       isGitRepo: options.isGitRepo,
       agentArgs: options.agentArgs,
+      submitMode: options.submitMode,
     });
 
     // Fetch the full session info for the container

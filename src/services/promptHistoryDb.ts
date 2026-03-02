@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_prompt_history_created ON prompt_history(created_
 
 /** Initialize the prompt history schema on a database instance */
 export function initPromptHistorySchema(db: Database): void {
-  db.exec(PROMPT_HISTORY_SCHEMA_SQL);
+  db.run(PROMPT_HISTORY_SCHEMA_SQL);
 }
 
 // ============================================================================

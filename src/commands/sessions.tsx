@@ -14,7 +14,7 @@ import { CopyOnSelect } from '../components/CopyOnSelect';
 import { DockerSetup, type DockerSetupResult } from '../components/DockerSetup';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { GlobalToast } from '../components/GlobalToast';
-import { PromptScreen, type SubmitMode } from '../components/PromptScreen';
+import { PromptScreen } from '../components/PromptScreen';
 import { ResourcesList } from '../components/ResourcesList';
 import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
@@ -52,6 +52,7 @@ import {
   type SandboxProvider,
   type SandboxProviderType,
   type ShellSession,
+  type SubmitMode,
 } from '../services/sandbox';
 import { formatRelativeTime } from '../services/sessionDisplay';
 import { createTui } from '../services/tui.ts';
@@ -519,6 +520,7 @@ function SessionsApp({
           mountDir,
           isGitRepo: inGitRepo,
           agentArgs,
+          submitMode: mode,
           onProgress: (step) => {
             setView((v) => (v.type === 'starting' ? { ...v, step } : v));
           },
@@ -620,6 +622,7 @@ function SessionsApp({
           model,
           mountDir,
           agentArgs,
+          submitMode: mode,
           onProgress: (step) => {
             setView((v) => (v.type === 'resuming' ? { ...v, step } : v));
           },
@@ -925,6 +928,7 @@ function SessionsApp({
           defaultSandboxProvider={
             resumeSess?.provider ?? config?.sandboxProvider ?? provider.type
           }
+          defaultSubmitMode={resumeSess?.submitMode}
           resumeSession={resumeSess}
           initialMountDir={resumeSess?.mountDir ?? initialMountDir}
           forceMountMode={!isGitRepo}

@@ -19,7 +19,11 @@ import {
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import type { AgentType } from '../services/config';
 import { log } from '../services/logger';
-import type { OxSession, SandboxProviderType } from '../services/sandbox';
+import type {
+  OxSession,
+  SandboxProviderType,
+  SubmitMode,
+} from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { usePromptHistoryStore } from '../stores/promptHistoryStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
@@ -33,12 +37,12 @@ import { SlashCommandPopover } from './SlashCommandPopover.tsx';
 import { ThemePicker } from './ThemePicker.tsx';
 import { Toast, type ToastType } from './Toast';
 
-export type SubmitMode = 'async' | 'interactive' | 'plan';
-
 export interface PromptScreenProps {
   defaultAgent: AgentType;
   defaultModel?: string | null;
   defaultSandboxProvider?: SandboxProviderType;
+  /** Default submit mode (preserved from prior session on resume) */
+  defaultSubmitMode?: SubmitMode;
   resumeSession?: OxSession; // If set, we're resuming this session
   /** Initial mount directory from CLI flag (enables mount mode if set) */
   initialMountDir?: string | null;
@@ -98,6 +102,7 @@ export function PromptScreen({
   defaultAgent,
   defaultModel = null,
   defaultSandboxProvider,
+  defaultSubmitMode,
   resumeSession,
   initialMountDir,
   forceMountMode = false,
@@ -123,7 +128,9 @@ export function PromptScreen({
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [slashQuery, setSlashQuery] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [submitMode, setSubmitMode] = useState<SubmitMode>('interactive');
+  const [submitMode, setSubmitMode] = useState<SubmitMode>(
+    defaultSubmitMode ?? 'interactive',
+  );
   // Mount mode state - enabled when initialMountDir is set, forced, or toggled via Ctrl+D
   // When forceMountMode is true, mount mode cannot be toggled off
   const [mountMode, setMountMode] = useState<boolean>(
