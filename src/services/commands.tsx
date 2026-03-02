@@ -454,6 +454,7 @@ function CommandPalette() {
       alignItems="center"
       justifyContent="center"
       backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      onMouseDown={hide}
     >
       <box
         flexDirection="column"
@@ -462,6 +463,7 @@ function CommandPalette() {
         maxHeight="90%"
         backgroundColor={theme.backgroundPanel}
         padding={1}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Title bar */}
         <box
@@ -473,7 +475,9 @@ function CommandPalette() {
           <text flexGrow={1} attributes={TextAttributes.BOLD} fg={theme.text}>
             Commands
           </text>
-          <text fg={theme.textMuted}>esc</text>
+          <text fg={theme.textMuted} onMouseDown={hide}>
+            esc
+          </text>
         </box>
 
         {/* Search input */}
