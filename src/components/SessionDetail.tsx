@@ -19,7 +19,7 @@ import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
-import { formatShellError, type ShellError } from '../utils';
+import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { ActionButton, type ActionButtonProps } from './ActionButton.tsx';
 import { ConfirmModal } from './ConfirmModal';
 import { LogViewer } from './LogViewer';

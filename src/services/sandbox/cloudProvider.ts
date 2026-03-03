@@ -11,7 +11,7 @@ import {
   type SubprocessScreenOptions,
   shellEscape,
   TUI_SUBPROCESS_OPTS,
-} from '../../utils.ts';
+} from '../../utils/shell.ts';
 import { buildAgentCommand, buildContinueCommand } from '../agentCommand.ts';
 import type { AgentType } from '../config.ts';
 import { readConfig } from '../config.ts';

@@ -39,7 +39,7 @@ import {
   type TigerService,
 } from '../services/tiger';
 import { createTui } from '../services/tui';
-import { ensureGitignore } from '../utils';
+import { ensureGitignore } from '../utils/shell.ts';
 
 // ============================================================================
 // Types

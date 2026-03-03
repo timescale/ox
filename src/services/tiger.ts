@@ -2,7 +2,7 @@
 // Tiger Service - Interact with tiger CLI
 // ============================================================================
 
-import { formatShellError, type ShellError } from '../utils';
+import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { log } from './logger';
 
 export interface TigerService {

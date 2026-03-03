@@ -10,7 +10,7 @@ import {
   isCompiledBinary,
   performUpdate,
 } from '../services/updater';
-import { printErr } from '../utils';
+import { printErr } from '../utils/shell.ts';
 
 async function upgradeAction(): Promise<void> {
   if (!isCompiledBinary()) {

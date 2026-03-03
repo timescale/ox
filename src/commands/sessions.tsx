@@ -68,7 +68,7 @@ import {
   enterSubprocessScreen,
   resetTerminal,
   TUI_SUBPROCESS_OPTS,
-} from '../utils';
+} from '../utils/shell.ts';
 
 // ============================================================================
 // Types

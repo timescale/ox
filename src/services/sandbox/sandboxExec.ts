@@ -4,7 +4,7 @@
 
 import type { Sandbox } from '@deno/sandbox';
 
-import { shellEscape } from '../../utils.ts';
+import { shellEscape } from '../../utils/shell.ts';
 import { log } from '../logger.ts';
 
 export interface SandboxExecOptions {

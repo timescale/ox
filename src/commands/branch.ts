@@ -16,7 +16,7 @@ import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
 import type { SandboxProviderType } from '../services/sandbox';
 import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
-import { ensureGitignore } from '../utils';
+import { ensureGitignore } from '../utils/shell.ts';
 import { configAction } from './config';
 
 interface BranchOptions {

@@ -10,7 +10,7 @@ import {
   checkOpencodeCredentials,
   ensureOpencodeAuth,
 } from '../services/opencode';
-import type { ShellError } from '../utils';
+import type { ShellError } from '../utils/shell.ts';
 
 export const authCommand = new Command('auth').description(
   'Manage authentication tokens',

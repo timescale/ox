@@ -2,7 +2,7 @@
 // Agent Command Builder - Shared logic for building agent shell commands
 // ============================================================================
 
-import { shellEscape } from '../utils.ts';
+import { shellEscape } from '../utils/shell.ts';
 import type { AgentType } from './config.ts';
 
 export interface AgentCommandOptions {

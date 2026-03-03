@@ -32,7 +32,7 @@ import {
 } from './services/analytics';
 import { log } from './services/logger';
 import { checkForUpdate, isCompiledBinary } from './services/updater';
-import { printErr } from './utils';
+import { printErr } from './utils/shell.ts';
 
 program
   .name('ox')

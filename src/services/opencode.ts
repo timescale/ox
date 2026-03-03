@@ -1,9 +1,8 @@
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { file } from 'bun';
-import { xdgState } from 'xdg-basedir';
 import type { AuthEntry, OpencodeAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
+import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
 import { readConfig } from './config';
@@ -19,7 +18,7 @@ import {
 import { getThemeNames } from './theme.ts';
 
 const homePaths = {
-  authJson: join(homedir(), '.local', 'share', 'opencode', 'auth.json'),
+  authJson: join(getXdgData(), 'opencode', 'auth.json'),
 };
 
 const containerPaths = {
@@ -294,26 +293,13 @@ export const checkOpencodeCredentials = async (
 };
 
 /**
- * Resolve the XDG state directory using `xdg-basedir`.
- * Falls back to reading `$XDG_STATE_HOME` at call time so runtime
- * env changes (e.g. in tests) are picked up, since `xdg-basedir`
- * evaluates the env var once at import time.
- */
-function getXdgState(): string | undefined {
-  return process.env.XDG_STATE_HOME || xdgState;
-}
-
-/**
  * Read the theme preference from OpenCode's host state directory.
  * OpenCode stores its KV state at `$XDG_STATE_HOME/opencode/kv.json`.
  * Returns the theme name if it exists and is a valid ox theme, otherwise null.
  */
 export async function readOpencodeTheme(): Promise<string | null> {
   try {
-    const stateDir = getXdgState();
-    if (!stateDir) return null;
-    const kvPath = join(stateDir, 'opencode', 'kv.json');
-    const kvFile = file(kvPath);
+    const kvFile = file(join(getXdgState(), 'opencode', 'kv.json'));
     if (!(await kvFile.exists())) return null;
     const kv = (await kvFile.json()) as Record<string, unknown>;
     const theme = kv.theme;
