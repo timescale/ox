@@ -4,6 +4,7 @@ import fuzzysort from 'fuzzysort';
 import open from 'open';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useContainerStats } from '../hooks/useContainerStats';
+import { usePollingInterval } from '../hooks/usePollingInterval';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import { formatCpuPercent, formatMemUsage } from '../services/docker';
 import { getPrForBranch } from '../services/github';
@@ -173,10 +174,10 @@ export function SessionsList({
       const loaded = await listAllSessions();
       const { pendingDeletes } = useSessionStore.getState();
       setSessions(loaded.filter((s) => !pendingDeletes.has(s.id)));
-      setLoading(false);
     } catch (err) {
       log.error({ err }, 'Failed to load sessions');
       useToastStore.getState().show(`Failed to load sessions: ${err}`, 'error');
+    } finally {
       setLoading(false);
     }
   }, []);
@@ -237,6 +238,14 @@ export function SessionsList({
     removePendingDelete,
   ]);
 
+  // Poll sessions with exponential backoff — starts fast (100ms) so the list
+  // is up-to-date immediately on mount, then backs off to 60s steady-state.
+  // rush() is called after actions (e.g. stop) to trigger a fast refresh cycle.
+  const { rush: rushSessionsPoll } = usePollingInterval(loadSessions, {
+    initialMs: 100,
+    maxMs: 10_000,
+  });
+
   const handleStop = useCallback(async () => {
     if (!stopModal) return;
     const session = stopModal;
@@ -246,14 +255,15 @@ export function SessionsList({
     try {
       await getProviderForSession(session).stop(session.id);
       useToastStore.getState().show('Container stopped', 'success');
-      await loadSessions();
+      // Reset polling to fast interval so the status update is reflected quickly
+      rushSessionsPoll();
     } catch (err) {
       log.error({ err }, `Failed to stop container ${session.id}`);
       useToastStore.getState().show(`Failed to stop: ${err}`, 'error');
     } finally {
       setActionInProgress(false);
     }
-  }, [stopModal, loadSessions]);
+  }, [stopModal, rushSessionsPoll]);
 
   const handleGitSwitch = useCallback(async () => {
     const session = filteredSessions[selectedIndex];
@@ -273,17 +283,6 @@ export function SessionsList({
       setActionInProgress(false);
     }
   }, [filteredSessions, selectedIndex]);
-
-  // Initial load
-  useEffect(() => {
-    loadSessions();
-  }, [loadSessions]);
-
-  // Auto-refresh every 60 seconds
-  useEffect(() => {
-    const interval = setInterval(loadSessions, 60000);
-    return () => clearInterval(interval);
-  }, [loadSessions]);
 
   // Fetch PR info for all sessions when sessions list changes
   useEffect(() => {
