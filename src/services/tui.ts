@@ -3,7 +3,7 @@ import type { Root } from '@opentui/react';
 import { createRoot } from '@opentui/react';
 import type { ReactNode } from 'react';
 import { useTheme } from '../stores/themeStore';
-import { ensureSaneTerminal, restoreConsole } from '../utils';
+import { ensureSaneTerminal, restoreConsole } from '../utils/shell.ts';
 import { supportsTrueColor } from './theme';
 
 interface TuiResult {

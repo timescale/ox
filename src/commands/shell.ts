@@ -3,7 +3,7 @@ import { tryGetRepoInfo } from '../services/git';
 import { log } from '../services/logger';
 import type { SandboxProviderType } from '../services/sandbox';
 import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
-import { ensureSaneTerminal } from '../utils';
+import { ensureSaneTerminal } from '../utils/shell.ts';
 
 interface ShellOptions {
   mount?: string | true;

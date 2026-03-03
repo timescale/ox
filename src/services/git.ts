@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { nanoid } from 'nanoid';
-import { formatShellError, type ShellError } from '../utils';
+import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { runClaudeInDocker } from './claude';
 import type { AgentType } from './config';
 import { log } from './logger';

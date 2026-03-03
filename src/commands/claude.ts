@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { runClaudeInDocker } from '../services/claude';
 import { ensureDockerSandbox } from '../services/docker';
 import { log } from '../services/logger';
-import type { ShellError } from '../utils';
+import type { ShellError } from '../utils/shell.ts';
 
 interface ClaudeOptions {
   mount?: string | true;

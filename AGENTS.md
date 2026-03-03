@@ -95,7 +95,7 @@ function Selector({ title, onSelect }: SelectorProps) { }        // Components: 
 Use the `ShellError` interface for shell command errors:
 
 ```typescript
-import { formatShellError, type ShellError } from '../utils.ts';
+import { formatShellError, type ShellError } from '../utils/shell.ts';
 
 // Pattern 1: Format shell errors for user display
 try {
@@ -171,7 +171,7 @@ ox/
 ├── index.ts                 # CLI entry point
 ├── src/
 │   ├── index.ts            # CLI setup with commander
-│   ├── utils.ts            # Shared utilities
+│   ├── utils/              # Shared utilities
 │   ├── commands/           # CLI command implementations
 │   ├── components/         # React TUI components (@opentui/react)
 │   ├── services/           # Business logic

@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { ensureDockerSandbox } from '../services/docker';
 import { runGhInDocker } from '../services/gh';
 import { log } from '../services/logger';
-import type { ShellError } from '../utils';
+import type { ShellError } from '../utils/shell.ts';
 
 interface Options {
   mount?: string | true;

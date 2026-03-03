@@ -5,7 +5,7 @@ import {
   formatShellError,
   type ShellError,
   shellEscape,
-} from './utils';
+} from './shell.ts';
 
 describe('formatShellError', () => {
   test('formats error with stderr only', () => {

@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { ensureDockerSandbox } from '../services/docker';
 import { log } from '../services/logger';
 import { runOpencodeInDocker } from '../services/opencode';
-import type { ShellError } from '../utils';
+import type { ShellError } from '../utils/shell.ts';
 
 interface OpencodeOptions {
   mount?: string | true;

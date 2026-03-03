@@ -23,7 +23,7 @@ import {
   resetTerminal,
   type ShellError,
   TUI_SUBPROCESS_OPTS,
-} from '../utils';
+} from '../utils/shell.ts';
 import { buildAgentCommand } from './agentCommand';
 import { getClaudeConfigFiles } from './claude';
 import {

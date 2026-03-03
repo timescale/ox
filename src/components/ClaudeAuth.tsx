@@ -15,7 +15,7 @@ import { copyToClipboard } from '../services/clipboard';
 import { log } from '../services/logger';
 import { createTui } from '../services/tui';
 import { useTheme } from '../stores/themeStore';
-import { resetTerminal, restoreConsole } from '../utils';
+import { resetTerminal, restoreConsole } from '../utils/shell.ts';
 import { CopyOnSelect } from './CopyOnSelect';
 import { Dots } from './Dots';
 import { Frame } from './Frame';

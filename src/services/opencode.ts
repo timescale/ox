@@ -1,8 +1,8 @@
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { file } from 'bun';
 import type { AuthEntry, OpencodeAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
+import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
 import { readConfig } from './config';
@@ -15,9 +15,10 @@ import {
   runInDocker,
   type VirtualFile,
 } from './runInDocker';
+import { getThemeNames } from './theme.ts';
 
 const homePaths = {
-  authJson: join(homedir(), '.local', 'share', 'opencode', 'auth.json'),
+  authJson: join(getXdgData(), 'opencode', 'auth.json'),
 };
 
 const containerPaths = {
@@ -290,6 +291,30 @@ export const checkOpencodeCredentials = async (
   );
   return exitCode2 === 0 && !errText.includes('Error');
 };
+
+/**
+ * Read the theme preference from OpenCode's host state directory.
+ * OpenCode stores its KV state at `$XDG_STATE_HOME/opencode/kv.json`.
+ * Returns the theme name if it exists and is a valid ox theme, otherwise null.
+ */
+export async function readOpencodeTheme(): Promise<string | null> {
+  try {
+    const kvFile = file(join(getXdgState(), 'opencode', 'kv.json'));
+    if (!(await kvFile.exists())) return null;
+    const kv = (await kvFile.json()) as Record<string, unknown>;
+    const theme = kv.theme;
+    if (typeof theme !== 'string' || !theme) return null;
+    if (!getThemeNames().includes(theme)) {
+      log.debug({ theme }, 'OpenCode theme not recognized by ox, ignoring');
+      return null;
+    }
+    log.debug({ theme }, 'Using theme from OpenCode host config');
+    return theme;
+  } catch {
+    log.debug('Failed to read OpenCode theme from kv.json');
+    return null;
+  }
+}
 
 /**
  * Ensure Opencode credentials are valid, running interactive login if needed.
