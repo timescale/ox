@@ -2,6 +2,7 @@ import { useKeyboard } from '@opentui/react';
 import open from 'open';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useContainerStats } from '../hooks/useContainerStats';
+import { usePollingInterval } from '../hooks/usePollingInterval';
 import { AGENT_INFO_MAP, type AgentInfo } from '../services/agents.ts';
 import { copyToClipboard } from '../services/clipboard';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
@@ -101,23 +102,26 @@ export function SessionDetail({
     fetchPrInfo();
   }, [fetchPrInfo]);
 
-  // Refresh session metadata periodically
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const updated = await sessionProvider.get(session.id);
-      if (updated) {
-        setSession(updated);
-      } else {
-        // Container no longer exists
-        useToastStore.getState().show('Container no longer exists', 'error');
-        setTimeout(() => onSessionDeleted(), 1500);
-      }
-      // Also refresh PR info if stale
-      fetchPrInfo();
-    }, 5000);
-
-    return () => clearInterval(interval);
+  // Refresh session metadata with exponential backoff polling.
+  // Starts fast (100ms) so status changes are reflected near-instantly when the
+  // view first opens (e.g. after detaching), then backs off to 5s steady-state.
+  const pollSession = useCallback(async () => {
+    const updated = await sessionProvider.get(session.id);
+    if (updated) {
+      setSession(updated);
+    } else {
+      // Container no longer exists
+      useToastStore.getState().show('Container no longer exists', 'error');
+      setTimeout(() => onSessionDeleted(), 1500);
+    }
+    // Also refresh PR info if stale
+    fetchPrInfo();
   }, [session.id, sessionProvider, onSessionDeleted, fetchPrInfo]);
+
+  const { rush: rushSessionPoll } = usePollingInterval(pollSession, {
+    initialMs: 100,
+    maxMs: 5000,
+  });
 
   const handleStop = useCallback(async () => {
     setModal(null);
@@ -126,18 +130,15 @@ export function SessionDetail({
     try {
       await sessionProvider.stop(session.id);
       useToastStore.getState().show('Container stopped', 'success');
-      // Refresh session
-      const updated = await sessionProvider.get(session.id);
-      if (updated) {
-        setSession(updated);
-      }
+      // Reset polling to fast interval so the status update is reflected quickly
+      rushSessionPoll();
     } catch (err) {
       log.error({ err }, `Failed to stop container ${session.id}`);
       useToastStore.getState().show(`Failed to stop: ${err}`, 'error');
     } finally {
       setActionInProgress(false);
     }
-  }, [session.id, sessionProvider]);
+  }, [session.id, sessionProvider, rushSessionPoll]);
 
   const handleDelete = useCallback(() => {
     setModal(null);
