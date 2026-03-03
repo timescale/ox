@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { log } from '../services/logger';
 
 export const useWindowSize = () => {
   const [columns, setColumns] = useState(() => process.stdout.columns ?? 80);
@@ -6,8 +7,11 @@ export const useWindowSize = () => {
 
   useEffect(() => {
     const handleResize = () => {
-      setColumns(process.stdout.columns ?? 80);
-      setRows(process.stdout.rows ?? 24);
+      const c = process.stdout.columns ?? 80;
+      const r = process.stdout.rows ?? 24;
+      setColumns(c);
+      setRows(r);
+      log.debug({ c, r }, 'Window resized');
     };
 
     process.stdout.on('resize', handleResize);
@@ -16,5 +20,5 @@ export const useWindowSize = () => {
     };
   }, []);
 
-  return { columns, rows, isWide: columns > 100, isTall: rows > 50 };
+  return { columns, rows, isWide: columns > 100, isTall: rows > 40 };
 };

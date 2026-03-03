@@ -5,6 +5,7 @@ import open from 'open';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useContainerStats } from '../hooks/useContainerStats';
 import { usePollingInterval } from '../hooks/usePollingInterval';
+import { useWindowSize } from '../hooks/useWindowSize';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import { formatCpuPercent, formatMemUsage } from '../services/docker';
 import { getPrForBranch } from '../services/github';
@@ -25,9 +26,9 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
+import { ActionButton } from './ActionButton.tsx';
 import { ConfirmModal } from './ConfirmModal';
-import { Frame } from './Frame';
-import { HotkeysBar } from './HotkeysBar';
+import { SessionDetailPanel } from './SessionDetailPanel.tsx';
 
 /** Cache TTL in milliseconds (60 seconds) */
 const PR_CACHE_TTL = 60_000;
@@ -73,6 +74,8 @@ export function SessionsList({
   currentRepo,
 }: SessionsListProps) {
   const { theme } = useTheme();
+  const { rows, columns } = useWindowSize();
+  const isBig = rows >= 30 && columns >= 61;
   const {
     selectedSessionId,
     setSelectedSessionId,
@@ -157,6 +160,9 @@ export function SessionsList({
     return 0;
   }, [filteredSessions, selectedSessionId]);
 
+  // The currently highlighted session (for split-view detail panel)
+  const selectedSession = filteredSessions[selectedIndex];
+
   // Helper to select by index (updates the store with session ID)
   const selectByIndex = useCallback(
     (index: number) => {
@@ -197,6 +203,21 @@ export function SessionsList({
   const handleMouseOut = useCallback(() => {
     setHoveredIndex(null);
   }, []);
+
+  // Clickable filter/scope toggle handlers
+  const cycleFilter = useCallback(() => {
+    const currentIdx = FILTER_ORDER.indexOf(filterMode);
+    const nextIdx = (currentIdx + 1) % FILTER_ORDER.length;
+    const nextMode = FILTER_ORDER[nextIdx];
+    if (nextMode) setFilterMode(nextMode);
+  }, [filterMode]);
+
+  const toggleScope = useCallback(() => {
+    const currentIdx = SCOPE_ORDER.indexOf(scopeMode);
+    const nextIdx = (currentIdx + 1) % SCOPE_ORDER.length;
+    const nextScope = SCOPE_ORDER[nextIdx];
+    if (nextScope) setScopeMode(nextScope);
+  }, [scopeMode]);
 
   // Delete session handler
   const handleDelete = useCallback(() => {
@@ -328,6 +349,7 @@ export function SessionsList({
   // Suspend command keybind dispatch when modals are open
   const suspend = useCommandStore((s) => s.suspend);
   const isOpen = useCommandStore((s) => s.isOpen);
+  const showCommands = useCommandStore((s) => s.show);
   useEffect(() => {
     if (deleteModal || stopModal || actionInProgress) {
       return suspend();
@@ -336,6 +358,13 @@ export function SessionsList({
 
   // Helper to get the currently selected session
   const getSelectedSession = () => filteredSessions[selectedIndex];
+
+  // Handler for session deleted from the split-view detail panel
+  const handlePanelSessionDeleted = useCallback(() => {
+    // The panel handles the delete toast and background task.
+    // We just need to refresh the list.
+    rushSessionsPoll();
+  }, [rushSessionsPoll]);
 
   // Register commands for the command palette
   useRegisterCommands(() => {
@@ -382,12 +411,7 @@ export function SessionsList({
           'Cycle between all, running, and completed session filters',
         category: 'View',
         keybind: { key: 'tab', display: 'tab' },
-        onSelect: () => {
-          const currentIdx = FILTER_ORDER.indexOf(filterMode);
-          const nextIdx = (currentIdx + 1) % FILTER_ORDER.length;
-          const nextMode = FILTER_ORDER[nextIdx];
-          if (nextMode) setFilterMode(nextMode);
-        },
+        onSelect: cycleFilter,
       },
       {
         id: 'scope.toggle',
@@ -397,12 +421,7 @@ export function SessionsList({
         category: 'View',
         keybind: { key: 'tab', shift: true, display: 'shift+tab' },
         enabled: !!currentRepo,
-        onSelect: () => {
-          const currentIdx = SCOPE_ORDER.indexOf(scopeMode);
-          const nextIdx = (currentIdx + 1) % SCOPE_ORDER.length;
-          const nextScope = SCOPE_ORDER[nextIdx];
-          if (nextScope) setScopeMode(nextScope);
-        },
+        onSelect: toggleScope,
       },
       {
         id: 'sessions.refresh',
@@ -527,9 +546,9 @@ export function SessionsList({
     onShell,
     onResume,
     onResources,
-    filterMode,
+    cycleFilter,
+    toggleScope,
     currentRepo,
-    scopeMode,
     clearPrCache,
     loadSessions,
     filteredSessions,
@@ -586,11 +605,15 @@ export function SessionsList({
     }
   });
 
+  // Hover states for clickable filter chips
+  const [filterHovered, setFilterHovered] = useState(false);
+  const [scopeHovered, setScopeHovered] = useState(false);
+
   if (loading && sessions.length === 0) {
     return (
-      <Frame title="Ox Sessions" centered>
+      <box flexGrow={1} flexDirection="column" padding={1}>
         <text fg={theme.textMuted}>Loading sessions...</text>
-      </Frame>
+      </box>
     );
   }
 
@@ -599,17 +622,37 @@ export function SessionsList({
   const countText = `${filteredSessions.length} of ${sessions.length}`;
 
   return (
-    <Frame title="Ox Sessions">
+    <box flexGrow={1} flexDirection="column" padding={1}>
       {/* Filter bar */}
       <box height={1} marginBottom={1} flexDirection="row">
         <text height={1}>
           Filter: <span fg={theme.primary}>{filterText || ''}</span>
           <span fg={theme.textMuted}>█</span>
         </text>
-        <text height={1} flexGrow={1} />
-        <text height={1} fg={theme.textMuted}>
-          {scopeLabel && `[${scopeLabel}] `}[{filterLabel}] {countText}
-        </text>
+        <box height={1} flexGrow={1} />
+        <box height={1} flexDirection="row" gap={1}>
+          {scopeLabel && (
+            <box
+              onMouseDown={toggleScope}
+              onMouseOver={() => setScopeHovered(true)}
+              onMouseOut={() => setScopeHovered(false)}
+            >
+              <text fg={scopeHovered ? theme.primary : theme.textMuted}>
+                [{scopeLabel}]
+              </text>
+            </box>
+          )}
+          <box
+            onMouseDown={cycleFilter}
+            onMouseOver={() => setFilterHovered(true)}
+            onMouseOut={() => setFilterHovered(false)}
+          >
+            <text fg={filterHovered ? theme.primary : theme.textMuted}>
+              [{filterLabel}]
+            </text>
+          </box>
+          <text fg={theme.textMuted}>{countText}</text>
+        </box>
       </box>
 
       {/* Column headers */}
@@ -620,14 +663,14 @@ export function SessionsList({
         paddingRight={1}
         gap={2}
       >
-        <text height={1} width={3} />
+        <text height={1} width={1} />
         <text height={1} width={1} fg={theme.textMuted}>
           P
         </text>
-        <text height={1} flexGrow={2} flexBasis={0} fg={theme.textMuted}>
+        <text height={1} flexGrow={3} flexBasis={10} fg={theme.textMuted}>
           NAME
         </text>
-        <text height={1} width={12} fg={theme.textMuted}>
+        <text height={1} width={8} fg={theme.textMuted}>
           STATUS
         </text>
         <text height={1} width={6} fg={theme.textMuted}>
@@ -657,7 +700,7 @@ export function SessionsList({
         >
           REPO
         </text>
-        <text height={1} width={10} fg={theme.textMuted}>
+        <text height={1} width={7} fg={theme.textMuted}>
           CREATED
         </text>
       </box>
@@ -759,7 +802,7 @@ export function SessionsList({
                 onMouseDown={() => handleRowClick(session)}
                 onMouseOver={() => handleRowHover(index)}
               >
-                <text height={1} width={3} fg={statusColor}>
+                <text height={1} width={1} fg={statusColor}>
                   {statusIcon}
                 </text>
                 <text
@@ -769,10 +812,10 @@ export function SessionsList({
                 >
                   {providerBadge}
                 </text>
-                <text height={1} flexGrow={2} flexBasis={0} fg={itemFg}>
+                <text height={1} flexGrow={3} flexBasis={10} fg={itemFg}>
                   {session.name}
                 </text>
-                <text height={1} width={12} fg={itemFgMuted}>
+                <text height={1} width={8} fg={itemFgMuted}>
                   {statusText}
                 </text>
                 <text height={1} width={6} fg={itemFgMuted}>
@@ -806,7 +849,7 @@ export function SessionsList({
                 >
                   {session.repo}
                 </text>
-                <text height={1} width={10} fg={itemFgMuted}>
+                <text height={1} width={7} fg={itemFgMuted}>
                   {timeText}
                 </text>
               </box>
@@ -815,15 +858,48 @@ export function SessionsList({
         </scrollbox>
       )}
 
-      <HotkeysBar
-        keyList={[
-          ['tab', 'filter'],
-          ...(currentRepo ? [['shift+tab', 'scope'] as [string, string]] : []),
-          ['ctrl+n', 'new'],
-          ['f2', 'refresh'],
-          ['ctrl+p', 'commands'],
-        ]}
-      />
+      {/* Split-view detail panel for the highlighted session (tall terminals only) */}
+      {isBig && selectedSession ? (
+        <box
+          flexGrow={1}
+          flexShrink={0}
+          flexDirection="column"
+          borderStyle="single"
+          border={['top']}
+          borderColor={theme.border}
+          paddingTop={1}
+        >
+          <SessionDetailPanel
+            key={selectedSession.id}
+            session={selectedSession}
+            onAttach={(id) => {
+              const s = filteredSessions.find((sess) => sess.id === id);
+              if (s) onAttach?.(s);
+            }}
+            onShell={(id) => {
+              const s = filteredSessions.find((sess) => sess.id === id);
+              if (s) onShell?.(s);
+            }}
+            onResume={(s) => onResume?.(s)}
+            onSessionDeleted={handlePanelSessionDeleted}
+            poll={false}
+          />
+        </box>
+      ) : (
+        <box
+          flexGrow={1}
+          flexShrink={0}
+          flexDirection="row"
+          justifyContent="flex-end"
+        >
+          <ActionButton
+            label="commands"
+            keybind="^p"
+            color={theme.text}
+            onPress={showCommands}
+          />
+        </box>
+      )}
 
       {/* Delete confirmation modal */}
       {deleteModal && (
@@ -850,6 +926,6 @@ export function SessionsList({
           onCancel={() => setStopModal(null)}
         />
       )}
-    </Frame>
+    </box>
   );
 }
