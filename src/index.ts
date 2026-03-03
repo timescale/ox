@@ -195,6 +195,7 @@ async function handleCrash(source: string, err: unknown): Promise<void> {
       ? 'Uncaught exception'
       : 'Unhandled promise rejection';
   console.error(`${label}:`, err);
+  log.fatal({ err, source }, label);
 
   const isError = err instanceof Error;
   const errorType = isError ? err.name || err.constructor.name : typeof err;
