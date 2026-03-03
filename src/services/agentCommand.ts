@@ -57,6 +57,7 @@ export function buildAgentCommand(options: AgentCommandOptions): string {
 
   if (agent === 'codex') {
     const dangerFlag = '--dangerously-bypass-approvals-and-sandbox';
+    // --skip-git-repo-check is only supported on `codex exec`, not the interactive TUI
     const skipGitFlag = '--skip-git-repo-check';
 
     if (mode === 'detached') {
@@ -73,7 +74,7 @@ export function buildAgentCommand(options: AgentCommandOptions): string {
       // Resume last session: codex resume --last [--model X]
       return `codex resume --last${modelArg}${extraArgs}`;
     }
-    const cmd = `codex${modelArg}${extraArgs} ${dangerFlag} ${skipGitFlag}`;
+    const cmd = `codex${modelArg}${extraArgs} ${dangerFlag}`;
     if (hasPrompt) {
       const b64 = Buffer.from(prompt).toString('base64');
       return `echo '${b64}' | base64 -d | ${cmd}`;

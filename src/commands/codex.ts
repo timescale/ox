@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { runCodexInDocker } from '../services/codex';
 import { ensureDockerSandbox } from '../services/docker';
 import { log } from '../services/logger';
-import type { ShellError } from '../utils';
+import type { ShellError } from '../utils/shell.ts';
 
 interface CodexOptions {
   mount?: string | true;

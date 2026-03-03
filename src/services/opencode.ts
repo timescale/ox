@@ -6,6 +6,7 @@ import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
 import { readConfig } from './config';
+import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
 import { log } from './logger';
@@ -204,8 +205,13 @@ export const runOpencodeInDocker = async ({
 > => {
   const configFiles = await getOpencodeConfigFiles();
 
+  // Ensure the opencode agent overlay image is available when no explicit image is provided
+  const resolvedImage =
+    dockerImage ?? (await ensureDockerImageForAgent('opencode'));
+
   const effectiveDockerArgs = [
     ...dockerArgs,
+    ...(process.env.TERM ? ['-e', `TERM=${process.env.TERM}`] : []),
     ...(process.env.COLORTERM
       ? ['-e', `COLORTERM=${process.env.COLORTERM}`]
       : []),
@@ -215,7 +221,7 @@ export const runOpencodeInDocker = async ({
     dockerArgs: effectiveDockerArgs,
     cmdArgs,
     cmdName: 'opencode',
-    dockerImage,
+    dockerImage: resolvedImage,
     interactive,
     shouldThrow,
     files: [...configFiles, ...files],

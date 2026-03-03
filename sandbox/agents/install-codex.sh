@@ -19,5 +19,6 @@ else
   URL="https://github.com/openai/codex/releases/download/rust-v${VERSION}/codex-${TARGET}.tar.gz"
 fi
 
-curl -fsSL "$URL" | tar -xzf - -C ~/.local/bin codex
+curl -fsSL "$URL" | tar -xzf - -C /tmp "codex-${TARGET}"
+mv "/tmp/codex-${TARGET}" ~/.local/bin/codex
 chmod +x ~/.local/bin/codex

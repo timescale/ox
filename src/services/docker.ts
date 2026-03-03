@@ -491,6 +491,11 @@ export interface SandboxImageConfig {
  */
 let ensuredImageOverride: string | null = null;
 
+/** Reset the cached image override. Exported for testing only. */
+export function resetEnsuredImageOverride(): void {
+  ensuredImageOverride = null;
+}
+
 /**
  * Resolve which Docker image to use based on configuration.
  *
@@ -1596,6 +1601,13 @@ export async function resumeSession(
   for (const envVar of container.Config.Env ?? []) {
     envArgs.push('-e', envVar);
   }
+  // Ensure terminal env vars are current (may not have been in the original container)
+  for (const key of ['TERM', 'COLORTERM']) {
+    const value = process.env[key];
+    if (value) {
+      envArgs.push('-e', `${key}=${value}`);
+    }
+  }
 
   // Read config for overlay mounts and init script
   const config = await readConfig();
@@ -1807,6 +1819,14 @@ export async function startContainer(
     }
   }
 
+  // Pass through terminal environment for proper color rendering
+  for (const key of ['TERM', 'COLORTERM']) {
+    const value = process.env[key];
+    if (value) {
+      hostEnvArgs.push('-e', `${key}=${value}`);
+    }
+  }
+
   // Explicit env vars passed to startContainer (highest precedence)
   const envArgs: string[] = [];
   for (const [key, value] of Object.entries(envVars ?? {})) {
@@ -1978,7 +1998,7 @@ export async function startShellContainer(
   const shellSuffix = nanoid(6).toLowerCase();
   const containerName = `ox-shell-${shellSuffix}`;
 
-  // Pass through API keys from host environment
+  // Pass through API keys and terminal env from host environment
   const hostEnvArgs: string[] = [];
   const apiKeysToPassthrough2 = [
     'ANTHROPIC_API_KEY',
@@ -1986,6 +2006,12 @@ export async function startShellContainer(
     'CODEX_API_KEY',
   ];
   for (const key of apiKeysToPassthrough2) {
+    const value = process.env[key];
+    if (value) {
+      hostEnvArgs.push('-e', `${key}=${value}`);
+    }
+  }
+  for (const key of ['TERM', 'COLORTERM']) {
     const value = process.env[key];
     if (value) {
       hostEnvArgs.push('-e', `${key}=${value}`);

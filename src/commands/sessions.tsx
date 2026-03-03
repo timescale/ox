@@ -21,7 +21,9 @@ import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
 import { ShutdownOverlay } from '../components/ShutdownOverlay';
 import { StartingScreen } from '../components/StartingScreen';
+import { AGENT_INFO_MAP } from '../services/agents';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
+import { checkCodexCredentials, ensureCodexAuth } from '../services/codex';
 import { CommandPaletteHost } from '../services/commands.tsx';
 import {
   type AgentType,
@@ -375,7 +377,11 @@ function SessionsApp({
         // Use cached result from readiness store if available
         const readiness = useReadinessStore.getState();
         const cachedAgentAuth =
-          agent === 'claude' ? readiness.claudeAuth : readiness.opencodeAuth;
+          agent === 'claude'
+            ? readiness.claudeAuth
+            : agent === 'codex'
+              ? readiness.codexAuth
+              : readiness.opencodeAuth;
         let agentAuthValid: boolean;
         if (cachedAgentAuth === 'ready') {
           agentAuthValid = true;
@@ -387,10 +393,19 @@ function SessionsApp({
               ? { ...v, step: `Checking ${agent} credentials` }
               : v,
           );
-          agentAuthValid =
-            agent === 'claude'
-              ? await checkClaudeCredentials(model || undefined)
-              : await checkOpencodeCredentials(model || undefined);
+          switch (agent) {
+            case 'claude':
+              agentAuthValid = await checkClaudeCredentials(model || undefined);
+              break;
+            case 'codex':
+              agentAuthValid = await checkCodexCredentials();
+              break;
+            default:
+              agentAuthValid = await checkOpencodeCredentials(
+                model || undefined,
+              );
+              break;
+          }
         }
 
         const { isGitRepo: inGitRepo } = propsRef.current;
@@ -1371,7 +1386,7 @@ export async function runSessionsTui({
     // Handle needs-agent-auth action - run interactive login and retry
     if (result.type === 'needs-agent-auth' && result.authInfo) {
       const { agent, model, prompt } = result.authInfo;
-      const agentName = agent === 'claude' ? 'Claude' : 'Opencode';
+      const agentName = AGENT_INFO_MAP[agent].name;
 
       // Auth flows run inside Docker containers, so ensure the image is
       // available before attempting login.
@@ -1402,10 +1417,18 @@ export async function runSessionsTui({
       console.log(`\n${agentName} credentials are missing or expired.`);
       console.log(`Starting ${agentName} login...\n`);
 
-      const authResult =
-        agent === 'claude'
-          ? await ensureClaudeAuth()
-          : await ensureOpencodeAuth();
+      let authResult: boolean;
+      switch (agent) {
+        case 'claude':
+          authResult = await ensureClaudeAuth();
+          break;
+        case 'codex':
+          authResult = await ensureCodexAuth();
+          break;
+        default:
+          authResult = await ensureOpencodeAuth();
+          break;
+      }
 
       if (!authResult) {
         console.error(`\nError: ${agentName} login failed`);

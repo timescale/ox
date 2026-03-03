@@ -4,6 +4,10 @@
 
 import type { SelectOption } from '@opentui/core';
 import { useEffect, useState } from 'react';
+
+import { CODEX_MODELS } from './codexModels.generated.ts';
+export { CODEX_MODELS };
+
 import type { AgentType } from './config';
 import { log } from './logger';
 import { runOpencodeInDocker } from './opencode';
@@ -26,25 +30,6 @@ export const CLAUDE_MODELS: Model[] = [
     id: 'opus',
     name: 'Opus',
     description: 'Most capable, best for complex tasks',
-  },
-];
-
-// Codex models (hardcoded — available via OpenAI Responses API)
-export const CODEX_MODELS: Model[] = [
-  {
-    id: 'o4-mini',
-    name: 'o4-mini',
-    description: 'Default, fastest',
-  },
-  {
-    id: 'gpt-4.1',
-    name: 'GPT-4.1',
-    description: 'Best general-purpose',
-  },
-  {
-    id: 'o3',
-    name: 'o3',
-    description: 'Advanced reasoning',
   },
 ];
 
@@ -124,11 +109,11 @@ async function getOpencodeModels(): Promise<readonly Model[]> {
 }
 
 /**
- * Get available models for codex by running the CLI inside the Docker container.
- * Falls back to hardcoded models if the CLI is unavailable.
+ * Get available models for codex.
+ * Returns the list generated from the official codex repository's models.json.
+ * Run `./bun scripts/codex/update-models.ts` to refresh.
  */
 async function getCodexModels(): Promise<readonly Model[]> {
-  // Codex doesn't have a `models` subcommand, so return hardcoded list
   return CODEX_MODELS;
 }
 

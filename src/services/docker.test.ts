@@ -1,8 +1,9 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   buildOxLabels,
   formatCpuPercent,
   formatMemUsage,
+  resetEnsuredImageOverride,
   resolveSandboxImage,
   toVolumeArgs,
 } from './docker';
@@ -155,6 +156,11 @@ describe('buildOxLabels', () => {
 });
 
 describe('docker service', () => {
+  // Reset module-level image cache to avoid cross-test pollution
+  beforeEach(() => {
+    resetEnsuredImageOverride();
+  });
+
   describe('resolveSandboxImage', () => {
     test('returns a valid image config', async () => {
       // Pass empty config to avoid reading from filesystem

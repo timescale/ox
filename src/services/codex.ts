@@ -8,6 +8,7 @@ import { file } from 'bun';
 import type { CodexAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { readCache, writeCache } from './cache';
+import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
 import { log } from './logger';
@@ -30,7 +31,12 @@ const codexCredsValid = (creds?: CodexAuthJson | null): boolean => {
   if (!creds) return false;
   // API key auth
   if (creds.auth_mode === 'apikey' && creds.OPENAI_API_KEY) return true;
-  // OAuth/device-auth
+  // OAuth/device-auth with nested tokens (current codex format)
+  if (creds.tokens?.access_token) {
+    if (creds.tokens.refresh_token) return true; // can refresh
+    return true;
+  }
+  // Legacy flat OAuth fields (older codex versions)
   if (creds.access_token) {
     if (creds.refresh_token) return true; // can refresh
     if (creds.expires_at && creds.expires_at < Date.now()) return false;
@@ -155,17 +161,12 @@ const captureCodexCredentialsFromContainer = async (
  */
 export const getCodexConfigFiles = async (): Promise<VirtualFile[]> => {
   const creds = await getCodexAuthJson();
-  const files: VirtualFile[] = [];
-
-  // Only write auth.json if we have credentials
-  if (codexCredsValid(creds)) {
-    files.push({
+  return [
+    {
       path: containerPaths.authJson,
       value: JSON.stringify(creds),
-    });
-  }
-
-  return files;
+    },
+  ];
 };
 
 export const runCodexInDocker = async ({
@@ -182,8 +183,13 @@ export const runCodexInDocker = async ({
 > => {
   const configFiles = await getCodexConfigFiles();
 
+  // Ensure the codex agent overlay image is available when no explicit image is provided
+  const resolvedImage =
+    dockerImage ?? (await ensureDockerImageForAgent('codex'));
+
   const effectiveDockerArgs = [
     ...dockerArgs,
+    ...(process.env.TERM ? ['-e', `TERM=${process.env.TERM}`] : []),
     ...(process.env.COLORTERM
       ? ['-e', `COLORTERM=${process.env.COLORTERM}`]
       : []),
@@ -193,7 +199,7 @@ export const runCodexInDocker = async ({
     dockerArgs: effectiveDockerArgs,
     cmdArgs,
     cmdName: 'codex',
-    dockerImage,
+    dockerImage: resolvedImage,
     interactive,
     shouldThrow,
     files: [...configFiles, ...files],

@@ -9,6 +9,7 @@
     "lint": "biome check",
     "test": "./bun test",
     "check": "./bun i --silent && ./bun run typecheck && ./bun run lint --write && ./bun run test --only-failures",
+    "update-codex-models": "./bun scripts/codex/update-models.ts",
     "pilotty": "pilotty"
   },
   "devDependencies": {
