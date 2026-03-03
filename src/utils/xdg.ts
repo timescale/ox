@@ -11,8 +11,5 @@ import { xdgData, xdgState } from 'xdg-basedir';
 export const getXdgData = (): string =>
   process.env.XDG_DATA_HOME || xdgData || join(homedir(), '.local', 'share');
 
-export const getXdgState = (): string => {
-  return (
-    process.env.XDG_STATE_HOME || xdgState || join(homedir(), '.local', 'state')
-  );
-};
+export const getXdgState = (): string =>
+  process.env.XDG_STATE_HOME || xdgState || join(homedir(), '.local', 'state');
