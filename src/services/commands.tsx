@@ -394,10 +394,14 @@ function CommandPalette() {
     }
   }
 
-  // Keyboard handling for the palette
+  // Keyboard handling for the palette.
+  // stopPropagation prevents sibling useKeyboard handlers (e.g. prompt history
+  // navigation) from also processing these keys while the palette is open.
   useKeyboard((key) => {
     if (key.name === 'escape') {
       hide();
+      key.stopPropagation();
+      key.preventDefault();
       return;
     }
 
@@ -405,6 +409,8 @@ function CommandPalette() {
       const newIndex = Math.max(0, clampedIndex - 1);
       flushSync(() => setSelectedIndex(newIndex));
       scrollToItem(scrollboxRef.current, itemOffsets[newIndex] ?? newIndex);
+      key.stopPropagation();
+      key.preventDefault();
       return;
     }
 
@@ -412,6 +418,8 @@ function CommandPalette() {
       const newIndex = Math.min(flat.length - 1, clampedIndex + 1);
       flushSync(() => setSelectedIndex(newIndex));
       scrollToItem(scrollboxRef.current, itemOffsets[newIndex] ?? newIndex);
+      key.stopPropagation();
+      key.preventDefault();
       return;
     }
 
@@ -421,6 +429,8 @@ function CommandPalette() {
         hide();
         cmd.onSelect();
       }
+      key.stopPropagation();
+      key.preventDefault();
       return;
     }
   });
