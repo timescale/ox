@@ -390,6 +390,7 @@ export function SessionDetailPanel({
       {/* Half-height padding top */}
       <box
         height={1}
+        flexShrink={0}
         border={['left', 'right']}
         borderColor={agentInfo?.color}
         customBorderChars={{
@@ -399,6 +400,7 @@ export function SessionDetailPanel({
       >
         <box
           height={1}
+          flexShrink={0}
           border={['top']}
           borderColor={theme.backgroundElement}
           customBorderChars={{
@@ -408,6 +410,7 @@ export function SessionDetailPanel({
         />
       </box>
       <box
+        flexShrink={0}
         border={['left', 'right']}
         borderColor={agentInfo?.color}
         customBorderChars={{
@@ -442,6 +445,7 @@ export function SessionDetailPanel({
       {/* Half-height padding bottom */}
       <box
         height={1}
+        flexShrink={0}
         border={['left', 'right']}
         borderColor={agentInfo?.color}
         customBorderChars={{
@@ -451,6 +455,7 @@ export function SessionDetailPanel({
       >
         <box
           height={1}
+          flexShrink={0}
           border={['bottom']}
           borderColor={theme.backgroundElement}
           customBorderChars={{
