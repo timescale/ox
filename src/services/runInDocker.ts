@@ -32,6 +32,13 @@ export interface RunInDockerOptionsBase {
   mountCwd?: boolean | string;
   /** Docker container labels as key-value pairs (expanded to --label args) */
   labels?: Record<string, string>;
+  /**
+   * Optional AbortSignal to cancel the container run.
+   * When aborted, the container is forcibly removed (`docker rm -f`) and the
+   * returned promise resolves with a no-op stub result.
+   * Only effective for non-interactive, non-detached runs.
+   */
+  signal?: AbortSignal;
 }
 
 interface RunInDockerOptions extends RunInDockerOptionsBase {
@@ -48,6 +55,29 @@ export interface RunInDockerResult {
   rm: (shouldThrow?: boolean) => Promise<void>;
 }
 
+/** Return a no-op stub result. Used when the signal is aborted so that
+ *  the returned promise resolves (never rejects) — callers may not have
+ *  .catch() handlers attached when abort fires synchronously during React
+ *  cleanup. */
+const abortedStubResult = (
+  containerId: string | null = null,
+): RunInDockerResult => ({
+  containerId,
+  errorText: () => '',
+  text: () => '',
+  json: () => null,
+  exited: Promise.resolve(1),
+  rm: () => Promise.resolve(),
+  removed: Promise.resolve(),
+});
+
+/** Force-remove a container (fire-and-forget) and return an aborted stub. */
+const abortAndRemoveContainer = (containerId: string): RunInDockerResult => {
+  log.debug({ containerId }, 'Aborting runInDocker — removing container');
+  $`docker rm -f ${containerId}`.quiet().catch(() => {});
+  return abortedStubResult(containerId);
+};
+
 export const runInDocker = async ({
   containerName = `ox-anon-${nanoid(12)}`,
   dockerArgs = ['--rm'],
@@ -61,8 +91,20 @@ export const runInDocker = async ({
   files = [],
   mountCwd = false,
   labels = {},
+  signal,
 }: RunInDockerOptions): Promise<RunInDockerResult> => {
+  // Bail early if already aborted.
+  if (signal?.aborted) {
+    return abortedStubResult();
+  }
+
   const resolvedImage = dockerImage ?? (await resolveSandboxImage()).image;
+
+  // Check after potentially slow image resolution.
+  if (signal?.aborted) {
+    return abortedStubResult();
+  }
+
   const labelArgs = Object.entries(labels).flatMap(([k, v]) => [
     '--label',
     `${k}=${v}`,
@@ -125,12 +167,22 @@ export const runInDocker = async ({
     throw new Error(`Failed to create container`);
   }
 
+  // Check after container creation — if aborted, clean up immediately.
+  if (signal?.aborted) {
+    return abortAndRemoveContainer(containerId);
+  }
+
   // write any files into the container
   await Promise.all(
     files.map((file) =>
       writeFileToContainer(containerId, file.path, file.value),
     ),
   );
+
+  // Check after file writes.
+  if (signal?.aborted) {
+    return abortAndRemoveContainer(containerId);
+  }
 
   const deferredResult = new Deferred<RunInDockerResult>();
   const deferredRemoved = new Deferred<void>();
@@ -160,20 +212,65 @@ export const runInDocker = async ({
       };
     });
   } else if (!detached) {
+    // Check once more before spawning the attach process.
+    if (signal?.aborted) {
+      return abortAndRemoveContainer(containerId);
+    }
+
+    // Use Bun.spawn so we get a killable subprocess handle for abort support.
+    const attachProc = spawn(['docker', 'attach', '--no-stdin', containerId], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    // Eagerly buffer stdout/stderr so text()/errorText() can be sync after exited.
+    const stdoutPromise = new Response(attachProc.stdout).text();
+    const stderrPromise = new Response(attachProc.stderr).text();
+
+    // Wire up abort: kill the attach process and force-remove the container.
+    if (signal) {
+      const onAbort = () => {
+        try {
+          log.debug({ containerId }, 'Aborting runInDocker container');
+          attachProc.kill();
+          $`docker rm -f ${containerId}`.quiet().catch(() => {});
+        } catch (err) {
+          log.debug({ err, containerId }, 'Error during runInDocker abort');
+        }
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+        // Clean up the listener once the process exits naturally.
+        attachProc.exited.finally(() =>
+          signal.removeEventListener('abort', onAbort),
+        );
+      }
+    }
+
     deferredResult.wrap(
-      $`docker attach --no-stdin ${containerId}`
-        .quiet()
-        .throws(shouldThrow)
-        .then((proc) => ({
+      attachProc.exited.then(async (exitCode) => {
+        // If aborted, return a stub result so the promise resolves (not rejects).
+        if (signal?.aborted) {
+          return abortedStubResult(containerId);
+        }
+        const stdoutText = await stdoutPromise;
+        const stderrText = await stderrPromise;
+        if (shouldThrow && exitCode !== 0) {
+          throw new Error(`${cmdName} exited with code ${exitCode}`);
+        }
+        return {
           containerId,
-          errorText: () => proc.stderr.toString(),
-          text: () => proc.text(),
-          json: () => proc.json(),
-          exited: Promise.resolve(proc.exitCode),
+          errorText: () => stderrText,
+          text: () => stdoutText,
+          json: () => JSON.parse(stdoutText),
+          exited: Promise.resolve(exitCode),
           rm: (shouldThrow) =>
             deferredRemoved.wrap(dockerContainerRm(containerId, shouldThrow)),
           removed: deferredRemoved.promise,
-        })),
+        } satisfies RunInDockerResult;
+      }),
     );
   } else {
     deferredResult.resolve({
@@ -186,6 +283,11 @@ export const runInDocker = async ({
         deferredRemoved.wrap(dockerContainerRm(containerId, shouldThrow)),
       removed: deferredRemoved.promise,
     });
+  }
+
+  // Check before the final file write.
+  if (signal?.aborted) {
+    return abortAndRemoveContainer(containerId);
   }
 
   // signal ready

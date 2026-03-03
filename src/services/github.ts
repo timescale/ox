@@ -36,8 +36,10 @@ interface GhPrListItem {
 export async function getPrForBranch(
   repo: string,
   sessionName: string,
+  signal?: AbortSignal,
 ): Promise<PrInfo | null> {
   if (repo === 'local') return null;
+  if (signal?.aborted) return null;
 
   // Session branch names don't include the 'ox/' prefix, but the actual
   // git branches are created with it (e.g., 'ox/feature-xyz')
@@ -62,6 +64,7 @@ export async function getPrForBranch(
         'all',
       ],
       shouldThrow: false,
+      signal,
     });
 
     const exitCode = await result.exited;

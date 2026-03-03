@@ -1,5 +1,5 @@
 import open from 'open';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useContainerStats } from '../hooks/useContainerStats';
 import { usePollingInterval } from '../hooks/usePollingInterval';
 import { useWindowSize } from '../hooks/useWindowSize.ts';
@@ -91,22 +91,47 @@ export function SessionDetailPanel({
   // Hover state for PR indicator
   const [prHovered, setPrHovered] = useState(false);
 
-  // Fetch PR info if not cached or stale
-  const fetchPrInfo = useCallback(async () => {
-    const now = Date.now();
-    const cached = prCache[session.id];
-    const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
-
-    if (isStale) {
-      const info = await getPrForBranch(session.repo, session.branch);
-      setPrInfo(session.id, info);
-    }
-  }, [session.id, session.repo, session.branch, prCache, setPrInfo]);
-
-  // Fetch PR info on mount
+  // AbortController ref for cancelling in-flight PR fetches on unmount.
+  // This prevents `gh pr list` docker containers from keeping the process alive
+  // after the TUI exits.
+  const prAbortRef = useRef(new AbortController());
   useEffect(() => {
-    fetchPrInfo();
-  }, [fetchPrInfo]);
+    return () => {
+      try {
+        prAbortRef.current.abort();
+      } catch {
+        // AbortController.abort() can throw if listeners throw synchronously.
+        // Safe to ignore — the abort signal is still marked as aborted.
+      }
+    };
+  }, []);
+
+  // Fetch PR info if not cached or stale.  Reads from the store directly
+  // (not via the `prCache` selector) so callers don't re-trigger on every
+  // cache update.
+  const fetchPrIfStale = useCallback(() => {
+    const now = Date.now();
+    const cached = useSessionStore.getState().prCache[session.id];
+    const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
+    if (!isStale) return;
+
+    getPrForBranch(session.repo, session.branch, prAbortRef.current.signal)
+      .then((info) => {
+        if (!prAbortRef.current.signal.aborted) {
+          setPrInfo(session.id, info);
+        }
+      })
+      .catch((err) => {
+        if (!prAbortRef.current.signal.aborted) {
+          log.error({ err }, 'Failed to fetch PR info');
+        }
+      });
+  }, [session.id, session.repo, session.branch, setPrInfo]);
+
+  // Fetch PR info on mount (or when session identity changes).
+  useEffect(() => {
+    fetchPrIfStale();
+  }, [fetchPrIfStale]);
 
   // Refresh session metadata with exponential backoff polling.
   const pollSession = useCallback(async () => {
@@ -118,8 +143,8 @@ export function SessionDetailPanel({
       useToastStore.getState().show('Container no longer exists', 'error');
       setTimeout(() => onSessionDeleted(), 1500);
     }
-    fetchPrInfo();
-  }, [poll, session.id, sessionProvider, onSessionDeleted, fetchPrInfo]);
+    fetchPrIfStale();
+  }, [poll, session.id, sessionProvider, onSessionDeleted, fetchPrIfStale]);
 
   const { rush: rushSessionPoll } = usePollingInterval(pollSession, {
     initialMs: poll ? 100 : 60_000,

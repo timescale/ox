@@ -197,6 +197,7 @@ export const runGhInDocker = async ({
   files = [],
   mountCwd,
   saveCredentials = false,
+  signal,
 }: RunGhInDockerOptions): Promise<
   RunInDockerResult & { credsCaptured: Promise<boolean> }
 > => {
@@ -211,6 +212,7 @@ export const runGhInDocker = async ({
     shouldThrow,
     files: [...configFiles, ...files],
     mountCwd,
+    signal,
   });
 
   const deferredCredsCaptured = new Deferred<boolean>();
@@ -236,6 +238,9 @@ export const runGhInDocker = async ({
         deferredCredsCaptured.resolve(false);
       })
       .finally(async () => {
+        // Skip explicit removal if aborted — the abort handler already
+        // force-removed the container via `docker rm -f`.
+        if (signal?.aborted) return;
         await result.rm().catch((err) => {
           log.error({ err }, 'Failed to remove container');
         });

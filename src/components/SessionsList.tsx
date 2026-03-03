@@ -86,6 +86,10 @@ export function SessionsList({
     removePendingDelete,
   } = useSessionStore();
   const [sessions, setSessions] = useState<OxSession[]>([]);
+  // Ref to hold the latest sessions list so callbacks/effects can read it
+  // without depending on the array reference (which changes on every poll).
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const [loading, setLoading] = useState(true);
   const [filterText, setFilterText] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -99,14 +103,26 @@ export function SessionsList({
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
 
-  // Poll CPU/memory stats for running containers
-  const runningIds = useMemo(
-    () => sessions.filter((s) => s.status === 'running').map((s) => s.id),
+  // Poll CPU/memory stats for running containers.
+  // Stabilize `runningIds` so it only gets a new reference when the actual set
+  // of running container IDs changes — not on every poll cycle that returns the
+  // same sessions with a new array reference.
+  const runningIdsKey = useMemo(
+    () =>
+      sessions
+        .filter((s) => s.status === 'running')
+        .map((s) => s.id)
+        .join(','),
     [sessions],
   );
+  const runningIds = useMemo(
+    () => (runningIdsKey ? runningIdsKey.split(',') : []),
+    [runningIdsKey],
+  );
+  // Use sessionsRef so the callback identity is stable across polls.
   const getStats = useCallback(
-    (ids: string[]) => fetchDockerStats(ids, sessions),
-    [sessions],
+    (ids: string[]) => fetchDockerStats(ids, sessionsRef.current),
+    [],
   );
   const containerStats = useContainerStats(runningIds, getStats);
 
@@ -305,26 +321,49 @@ export function SessionsList({
     }
   }, [filteredSessions, selectedIndex]);
 
-  // Fetch PR info for all sessions when sessions list changes
+  // Stable key derived from the session list — only changes when sessions are
+  // added or removed, NOT on every poll cycle that returns the same set.
+  const sessionIds = useMemo(
+    () => sessions.map((s) => s.id).join(','),
+    [sessions],
+  );
+
+  // Fetch PR info for all sessions when the session list changes.
+  // An AbortController is used so that in-flight `gh pr list` docker containers
+  // are killed on unmount, preventing them from keeping the process alive after
+  // the TUI exits.
   useEffect(() => {
-    if (!sessions?.length) return;
+    if (!sessionIds) return;
+    const controller = new AbortController();
     const now = Date.now();
     const cache = useSessionStore.getState().prCache;
-    for (const session of sessions) {
+    for (const session of sessionsRef.current) {
       const cached = cache[session.id];
       const isStale = !cached || now - cached.lastChecked > PR_CACHE_TTL;
 
       if (isStale) {
-        getPrForBranch(session.repo, session.branch)
+        getPrForBranch(session.repo, session.branch, controller.signal)
           .then((prInfo) => {
-            setPrInfo(session.id, prInfo);
+            if (!controller.signal.aborted) {
+              setPrInfo(session.id, prInfo);
+            }
           })
           .catch((err) => {
-            log.error({ err }, 'Failed to fetch PR info');
+            if (!controller.signal.aborted) {
+              log.error({ err }, 'Failed to fetch PR info');
+            }
           });
       }
     }
-  }, [sessions, setPrInfo]);
+    return () => {
+      try {
+        controller.abort();
+      } catch {
+        // AbortController.abort() can throw if listeners throw synchronously.
+        // Safe to ignore — the abort signal is still marked as aborted.
+      }
+    };
+  }, [sessionIds, setPrInfo]);
 
   // Keep selected index in bounds (update store if current selection is out of bounds)
   useEffect(() => {
