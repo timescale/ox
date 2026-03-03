@@ -11,7 +11,11 @@ import {
   openCodeIdToModel,
 } from './agents';
 
-// Mock runInDocker to avoid Docker dependency in tests
+// Mock Docker dependencies to avoid Docker dependency in tests
+mock.module('./docker', () => ({
+  ensureDockerImageForAgent: mock(() => Promise.resolve('mock-image:latest')),
+}));
+
 mock.module('./runInDocker', () => ({
   runInDocker: mock(() =>
     Promise.resolve({
