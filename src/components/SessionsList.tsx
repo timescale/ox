@@ -729,9 +729,16 @@ export function SessionsList({
         <text height={1} width={1} fg={theme.textMuted}>
           P
         </text>
-        <text height={1} flexGrow={3} flexBasis={10} fg={theme.textMuted}>
-          NAME
-        </text>
+        <text
+          height={1}
+          flexGrow={3}
+          flexShrink={1}
+          flexBasis={0}
+          fg={theme.textMuted}
+          overflow="hidden"
+          wrapMode="none"
+          content="NAME"
+        />
         <text height={1} width={8} fg={theme.textMuted}>
           STATUS
         </text>
@@ -750,18 +757,20 @@ export function SessionsList({
           flexShrink={1}
           flexBasis={0}
           fg={theme.textMuted}
-        >
-          AGENT
-        </text>
+          overflow="hidden"
+          wrapMode="none"
+          content="AGENT"
+        />
         <text
           height={1}
           flexGrow={2}
           flexShrink={1}
           flexBasis={0}
           fg={theme.textMuted}
-        >
-          REPO
-        </text>
+          overflow="hidden"
+          wrapMode="none"
+          content="REPO"
+        />
         <text height={1} width={7} fg={theme.textMuted}>
           CREATED
         </text>
@@ -781,6 +790,7 @@ export function SessionsList({
           ref={scrollboxRef}
           flexGrow={1}
           flexShrink={1}
+          verticalScrollbarOptions={{ visible: false }}
           onMouseOut={handleMouseOut}
         >
           {filteredSessions.map((session, index) => {
@@ -874,9 +884,16 @@ export function SessionsList({
                 >
                   {providerBadge}
                 </text>
-                <text height={1} flexGrow={3} flexBasis={10} fg={itemFg}>
-                  {session.name}
-                </text>
+                <text
+                  height={1}
+                  flexGrow={3}
+                  flexShrink={1}
+                  flexBasis={0}
+                  fg={itemFg}
+                  overflow="hidden"
+                  wrapMode="none"
+                  content={session.name}
+                />
                 <text height={1} width={8} fg={itemFgMuted}>
                   {statusText}
                 </text>
@@ -897,9 +914,8 @@ export function SessionsList({
                   fg={itemFg}
                   overflow="hidden"
                   wrapMode="none"
-                >
-                  {agentText}
-                </text>
+                  content={agentText}
+                />
                 <text
                   height={1}
                   flexGrow={2}
@@ -908,9 +924,8 @@ export function SessionsList({
                   fg={itemFg}
                   overflow="hidden"
                   wrapMode="none"
-                >
-                  {session.repo}
-                </text>
+                  content={session.repo}
+                />
                 <text height={1} width={7} fg={itemFgMuted}>
                   {timeText}
                 </text>
