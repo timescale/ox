@@ -82,7 +82,7 @@ export async function resumeAction(
       await provider.shell(result.id);
     } else {
       // Interactive mode — attach to the session
-      await provider.attach(result.id);
+      await provider.attach(result.id, { agent: result.agent });
     }
   } catch (err) {
     log.error({ err }, 'Failed to resume session');

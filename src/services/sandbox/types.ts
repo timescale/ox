@@ -13,6 +13,12 @@ export type ExecType = 'agent' | 'shell';
 // How the user submitted the session (affects interactivity + agent flags)
 export type SubmitMode = 'async' | 'interactive' | 'plan';
 
+/** Options for attaching to a running sandbox session. */
+export interface AttachOptions {
+  /** Agent type running in the session (affects terminal mouse handling). */
+  agent?: AgentType;
+}
+
 // Unified session metadata (provider-agnostic)
 export interface OxSession {
   id: string; // containerId (Docker) or sandbox ID (cloud)
@@ -137,7 +143,7 @@ export interface SandboxProvider {
   stop(sessionId: string): Promise<void>;
 
   // Interactive access
-  attach(sessionId: string): Promise<void>;
+  attach(sessionId: string, options?: AttachOptions): Promise<void>;
   shell(sessionId: string): Promise<void>;
 
   // Logs

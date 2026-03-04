@@ -31,6 +31,7 @@ import {
   upsertSession,
 } from './sessionDb.ts';
 import type {
+  AttachOptions,
   CreateSandboxOptions,
   CreateShellSandboxOptions,
   LogStream,
@@ -1040,7 +1041,7 @@ export class CloudSandboxProvider implements SandboxProvider {
   // Interactive Access
   // --------------------------------------------------------------------------
 
-  async attach(sessionId: string): Promise<void> {
+  async attach(sessionId: string, _options?: AttachOptions): Promise<void> {
     const token = await getDenoToken();
     if (!token) throw new Error('No Deno Deploy token available');
 

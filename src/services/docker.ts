@@ -18,11 +18,11 @@ import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
 import toolVersions from '../../sandbox/versions.json' with { type: 'json' };
 import { runDockerSetupScreen } from '../components/DockerSetup';
 import {
+  CLI_SUBPROCESS_OPTS,
   enterSubprocessScreen,
   formatShellError,
   resetTerminal,
   type ShellError,
-  TUI_SUBPROCESS_OPTS,
 } from '../utils/shell.ts';
 import { buildAgentCommand } from './agentCommand';
 import { getClaudeConfigFiles } from './claude';
@@ -39,7 +39,7 @@ import type { RepoInfo } from './git';
 import { log } from './logger';
 import { getOpencodeConfigFiles } from './opencode';
 import { runInDocker, type VirtualFile } from './runInDocker';
-import type { SubmitMode } from './sandbox/types';
+import type { AttachOptions, SubmitMode } from './sandbox/types';
 
 /**
  * Escape a string for safe use in shell commands using base64 encoding.
@@ -1171,11 +1171,24 @@ export function streamContainerLogs(nameOrId: string): LogStream {
  * Sends a WINCH signal first to trigger the TUI to redraw at the correct size.
  * After detaching, resets the terminal to a clean state since the container's
  * process may have altered terminal modes (alternate screen, raw mode, etc.).
+ *
+ * @param agent - The agent type running in the container. When `'opencode'`,
+ *   mouse tracking is enabled so its TUI receives mouse events. For `'claude'`
+ *   (or when unknown), mouse tracking is disabled to avoid garbled output.
  */
-export async function attachToContainer(nameOrId: string): Promise<void> {
+export async function attachToContainer(
+  nameOrId: string,
+  options?: AttachOptions,
+): Promise<void> {
   // Enter alternate screen so all container output is isolated from the
   // user's main screen buffer / scrollback history.
-  enterSubprocessScreen(TUI_SUBPROCESS_OPTS);
+  // Only enable mouse tracking for agents with a TUI that handles mouse
+  // events (opencode). Claude Code is a CLI and prints garbled escape
+  // sequences when it receives mouse reports.
+  enterSubprocessScreen({
+    alternateScreen: true,
+    mouse: options?.agent === 'opencode',
+  });
 
   const proc = Bun.spawn(
     ['docker', 'attach', '--detach-keys=ctrl-\\', nameOrId],
@@ -1218,7 +1231,7 @@ export async function signalContainerTTYResize(
 export async function shellInContainer(nameOrId: string): Promise<void> {
   // Enter alternate screen so all shell output is isolated from the
   // user's main screen buffer / scrollback history.
-  enterSubprocessScreen(TUI_SUBPROCESS_OPTS);
+  enterSubprocessScreen(CLI_SUBPROCESS_OPTS);
 
   const proc = Bun.spawn(['docker', 'exec', '-it', nameOrId, '/bin/bash'], {
     stdio: ['inherit', 'inherit', 'inherit'],

@@ -21,6 +21,7 @@ import {
 } from '../docker.ts';
 import { log } from '../logger.ts';
 import type {
+  AttachOptions,
   CreateSandboxOptions,
   CreateShellSandboxOptions,
   LogStream,
@@ -221,9 +222,9 @@ export class DockerSandboxProvider implements SandboxProvider {
     await stopContainer(sessionId);
   }
 
-  async attach(sessionId: string): Promise<void> {
+  async attach(sessionId: string, options?: AttachOptions): Promise<void> {
     log.debug({ sessionId }, 'Attaching to Docker sandbox');
-    await attachToContainer(sessionId);
+    await attachToContainer(sessionId, options);
   }
 
   async shell(sessionId: string): Promise<void> {

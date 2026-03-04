@@ -79,6 +79,11 @@ export const TUI_SUBPROCESS_OPTS: SubprocessScreenOptions = {
   mouse: true,
 };
 
+export const CLI_SUBPROCESS_OPTS: SubprocessScreenOptions = {
+  alternateScreen: true,
+  mouse: false,
+};
+
 /**
  * Prepare the terminal before handing it to a subprocess (docker attach,
  * docker exec, SSH, etc.).

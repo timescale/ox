@@ -64,10 +64,10 @@ import {
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useToastStore } from '../stores/toastStore';
 import {
+  CLI_SUBPROCESS_OPTS,
   ensureGitignore,
   enterSubprocessScreen,
   resetTerminal,
-  TUI_SUBPROCESS_OPTS,
 } from '../utils/shell.ts';
 
 // ============================================================================
@@ -1254,7 +1254,9 @@ export async function runSessionsTui({
         ? getProviderForSession(result.session)
         : provider;
       try {
-        await actionProvider.attach(result.sessionId);
+        await actionProvider.attach(result.sessionId, {
+          agent: result.session?.agent,
+        });
       } catch (err) {
         log.error(
           { err, sessionId: result.sessionId },
@@ -1299,7 +1301,9 @@ export async function runSessionsTui({
         result.attachProvider ?? provider.type,
       );
       try {
-        await actionProvider.attach(result.sessionId);
+        await actionProvider.attach(result.sessionId, {
+          agent: result.session?.agent,
+        });
       } catch (err) {
         log.error(
           { err, sessionId: result.sessionId },
@@ -1319,7 +1323,7 @@ export async function runSessionsTui({
 
     // Handle shell action - resume a stopped container and open a shell in it
     if (result.type === 'shell' && result.resumeSessionId) {
-      enterSubprocessScreen(TUI_SUBPROCESS_OPTS);
+      enterSubprocessScreen(CLI_SUBPROCESS_OPTS);
       try {
         const actionProvider = getSandboxProvider(
           result.resumeProvider ?? provider.type,
@@ -1338,7 +1342,7 @@ export async function runSessionsTui({
 
     // Handle connect-shell action - shell was prepared in the TUI, now connect
     if (result.type === 'connect-shell' && result.shellSession) {
-      enterSubprocessScreen(TUI_SUBPROCESS_OPTS);
+      enterSubprocessScreen(CLI_SUBPROCESS_OPTS);
       try {
         await result.shellSession.connect();
       } catch (err) {
