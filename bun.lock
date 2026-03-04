@@ -6,7 +6,7 @@
       "name": "ox",
       "dependencies": {
         "@bomb.sh/tab": "^0.0.14",
-        "@deno/sandbox": "^0.12.0",
+        "@deno/sandbox": "^0.13.0",
         "@napi-rs/keyring": "^1.2.0",
         "@opentui/react": "^0.1.86",
         "build-strap": "^5.2.0",
@@ -41,7 +41,7 @@
     },
   },
   "patchedDependencies": {
-    "@deno/sandbox@0.12.0": "patches/@deno%2Fsandbox@0.12.0.patch",
+    "@deno/sandbox@0.13.0": "patches/@deno%2Fsandbox@0.13.0.patch",
   },
   "packages": {
     "@biomejs/biome": ["@biomejs/biome@2.4.5", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.4.5", "@biomejs/cli-darwin-x64": "2.4.5", "@biomejs/cli-linux-arm64": "2.4.5", "@biomejs/cli-linux-arm64-musl": "2.4.5", "@biomejs/cli-linux-x64": "2.4.5", "@biomejs/cli-linux-x64-musl": "2.4.5", "@biomejs/cli-win32-arm64": "2.4.5", "@biomejs/cli-win32-x64": "2.4.5" }, "bin": { "biome": "bin/biome" } }, "sha512-OWNCyMS0Q011R6YifXNOg6qsOg64IVc7XX6SqGsrGszPbkVCoaO7Sr/lISFnXZ9hjQhDewwZ40789QmrG0GYgQ=="],
@@ -64,7 +64,7 @@
 
     "@bomb.sh/tab": ["@bomb.sh/tab@0.0.14", "", { "peerDependencies": { "cac": "^6.7.14", "citty": "^0.1.6 || ^0.2.0", "commander": "^13.1.0" }, "optionalPeers": ["cac", "citty", "commander"], "bin": { "tab": "dist/bin/cli.mjs" } }, "sha512-cHMk2LI430MVoX1unTt9oK1iZzQS4CYDz97MSxKLNErW69T43Z2QLFTpdS/3jVOIKrIADWfuxQ+nQNJkNV7E4w=="],
 
-    "@deno/sandbox": ["@deno/sandbox@0.12.0", "", { "dependencies": { "@deno/shim-deno": "~0.18.0", "ws": "^8.18.3", "zod": "^4.1.5" } }, "sha512-nhZ27CNrdhiUQGnZ/HUVC0g88RSUtBmZjNNtRG4wVQYzd51eJ8RCLDweKg9LiEp2YlTcEiPfBlwmc+F22+fcLA=="],
+    "@deno/sandbox": ["@deno/sandbox@0.13.0", "", { "dependencies": { "@deno/shim-deno": "~0.18.0", "ws": "^8.18.3", "zod": "^4.1.5" } }, "sha512-lbfdrkv0UrufR1g/0mAM4eH1X1ym6/OFEwX4v6FUnk1lh2nzVmU9Vvpj5uHNSckp4DFuyb2NjPOzof9/oodgCg=="],
 
     "@deno/shim-deno": ["@deno/shim-deno@0.18.2", "", { "dependencies": { "@deno/shim-deno-test": "^0.5.0", "which": "^4.0.0" } }, "sha512-oQ0CVmOio63wlhwQF75zA4ioolPvOwAoK0yuzcS5bDC1JUvH3y1GS8xPh8EOpcoDQRU4FTG8OQfxhpR+c6DrzA=="],
 
