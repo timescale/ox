@@ -140,6 +140,10 @@ export function PromptScreen({
     initialMountDir ?? (forceMountMode ? process.cwd() : null),
   );
   const modelsMap = useAgentModels();
+  // Ref so callbacks can read the latest modelsMap without depending on the
+  // object reference (which changes when models finish loading).
+  const modelsMapRef = useRef(modelsMap);
+  modelsMapRef.current = modelsMap;
   const currentModels = modelsMap[agent];
   const agentInfo: AgentInfo = AGENT_INFO_MAP[agent];
   const model =
@@ -161,13 +165,14 @@ export function PromptScreen({
       defaultAgent ||
       DEFAULT_AGENT;
     setAgent(newAgent);
+    const models = modelsMapRef.current;
     setModelId(
       modelMem.current[newAgent] ||
-        findEquivalentModel(modelId, modelsMap[newAgent]) ||
-        modelsMap[newAgent]?.[0]?.id ||
+        findEquivalentModel(modelId, models[newAgent]) ||
+        models[newAgent]?.[0]?.id ||
         null,
     );
-  }, [resumeSession, agent, defaultAgent, modelId, modelsMap]);
+  }, [resumeSession, agent, defaultAgent, modelId]);
 
   // Suspend command keybind dispatch when sub-modals are open
   const suspend = useCommandStore((s) => s.suspend);

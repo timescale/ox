@@ -206,7 +206,6 @@ export function useRegisterCommands(
   useEffect(() => {
     return register(fnRef.current());
     // Re-register when any dep changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [register, ...deps]);
 }
 

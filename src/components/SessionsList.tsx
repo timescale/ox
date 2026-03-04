@@ -284,6 +284,19 @@ export function SessionsList({
     maxMs: 10_000,
   });
 
+  // Refs for the latest filtered sessions and selected index so callbacks can
+  // read current values at invocation time without depending on the references.
+  const filteredSessionsRef = useRef(filteredSessions);
+  filteredSessionsRef.current = filteredSessions;
+  const selectedIndexRef = useRef(selectedIndex);
+  selectedIndexRef.current = selectedIndex;
+
+  // Helper to get the currently selected session (reads from refs).
+  const getSelectedSession = useCallback(
+    () => filteredSessionsRef.current[selectedIndexRef.current],
+    [],
+  );
+
   const handleStop = useCallback(async () => {
     if (!stopModal) return;
     const session = stopModal;
@@ -304,7 +317,7 @@ export function SessionsList({
   }, [stopModal, rushSessionsPoll]);
 
   const handleGitSwitch = useCallback(async () => {
-    const session = filteredSessions[selectedIndex];
+    const session = getSelectedSession();
     if (!session) return;
     const branchName = `ox/${session.branch}`;
     setActionInProgress(true);
@@ -320,7 +333,7 @@ export function SessionsList({
     } finally {
       setActionInProgress(false);
     }
-  }, [filteredSessions, selectedIndex]);
+  }, [getSelectedSession]);
 
   // Stable key derived from the session list — only changes when sessions are
   // added or removed, NOT on every poll cycle that returns the same set.
@@ -396,15 +409,18 @@ export function SessionsList({
     }
   }, [deleteModal, stopModal, actionInProgress, suspend]);
 
-  // Helper to get the currently selected session
-  const getSelectedSession = () => filteredSessions[selectedIndex];
-
   // Handler for session deleted from the split-view detail panel
   const handlePanelSessionDeleted = useCallback(() => {
     // The panel handles the delete toast and background task.
     // We just need to refresh the list.
     rushSessionsPoll();
   }, [rushSessionsPoll]);
+
+  // Stable primitives derived from the selected session, used as deps for
+  // useRegisterCommands so `enabled` flags update when status changes without
+  // depending on the full filteredSessions array reference.
+  const hasSessions = filteredSessions.length > 0;
+  const selectedStatus = selectedSession?.status;
 
   // Register commands for the command palette
   useRegisterCommands(() => {
@@ -420,7 +436,7 @@ export function SessionsList({
         description: 'Open the selected session detail view',
         category: 'Navigation',
         keybind: { key: 'return', display: 'enter' },
-        enabled: filteredSessions.length > 0,
+        enabled: hasSessions,
         onSelect: () => {
           const s = getSelectedSession();
           if (s) onSelect(s);
@@ -512,7 +528,8 @@ export function SessionsList({
         ],
         enabled: !!selected,
         onSelect: () => {
-          if (selected) setDeleteModal(selected);
+          const s = getSelectedSession();
+          if (s) setDeleteModal(s);
         },
       },
       {
@@ -544,7 +561,8 @@ export function SessionsList({
         keybind: { key: 'x', ctrl: true },
         enabled: isRunning && !!selected,
         onSelect: () => {
-          if (selected) setStopModal(selected);
+          const s = getSelectedSession();
+          if (s) setStopModal(s);
         },
       },
       {
@@ -555,8 +573,9 @@ export function SessionsList({
         category: 'Session',
         keybind: { key: 'o', ctrl: true },
         onSelect: () => {
-          if (selected) {
-            const prInfo = prCache[selected.id]?.prInfo;
+          const s = getSelectedSession();
+          if (s) {
+            const prInfo = useSessionStore.getState().prCache[s.id]?.prInfo;
             if (prInfo) {
               open(prInfo.url)
                 .then(() => {
@@ -579,6 +598,9 @@ export function SessionsList({
         },
       },
     ];
+    // Dependencies: only include values that affect `enabled`/`hidden` flags or
+    // that change the set of commands.  Handlers read dynamic state at invocation
+    // time via refs / store.getState() so they don't need to be deps.
   }, [
     onSelect,
     onNewTask,
@@ -591,10 +613,10 @@ export function SessionsList({
     currentRepo,
     clearPrCache,
     loadSessions,
-    filteredSessions,
-    selectedIndex,
-    prCache,
     handleGitSwitch,
+    hasSessions,
+    selectedStatus,
+    getSelectedSession,
   ]);
 
   // Keyboard handling — navigation keys only.

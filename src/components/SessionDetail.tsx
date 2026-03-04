@@ -1,6 +1,6 @@
 import { useKeyboard } from '@opentui/react';
 import open from 'open';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import { log } from '../services/logger';
 import { getSandboxProvider, type OxSession } from '../services/sandbox';
@@ -8,7 +8,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useToastStore } from '../stores/toastStore';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { LogViewer } from './LogViewer';
-import { SessionDetailPanel } from './SessionDetailPanel.tsx';
+import { type ModalType, SessionDetailPanel } from './SessionDetailPanel.tsx';
 
 export interface SessionDetailProps {
   session: OxSession;
@@ -29,10 +29,19 @@ export function SessionDetail({
   onSessionDeleted,
   onNewPrompt,
 }: SessionDetailProps) {
-  const { prCache } = useSessionStore();
+  // Track the live session (updated by SessionDetailPanel polling).
+  // The prop `session` is set once when navigating to the detail view and
+  // doesn't update, so we maintain our own copy for derived state.
+  const [liveSession, setLiveSession] = useState(session);
+  const sessionRef = useRef(liveSession);
+  sessionRef.current = liveSession;
 
-  const isRunning = session.status === 'running';
-  const isStopped = session.status === 'exited' || session.status === 'stopped';
+  // Modal state shared with SessionDetailPanel (controlled mode).
+  const [modal, setModal] = useState<ModalType>(null);
+
+  const isRunning = liveSession.status === 'running';
+  const isStopped =
+    liveSession.status === 'exited' || liveSession.status === 'stopped';
   const providerType = session.provider;
   const sessionProvider = useMemo(
     () => getSandboxProvider(providerType),
@@ -40,7 +49,7 @@ export function SessionDetail({
   );
 
   const handleGitSwitch = useCallback(async () => {
-    const branchName = `ox/${session.branch}`;
+    const branchName = `ox/${sessionRef.current.branch}`;
     try {
       await Bun.$`git fetch && git switch ${branchName}`.quiet();
       useToastStore
@@ -51,10 +60,11 @@ export function SessionDetail({
       log.error({ err }, `Failed to switch to branch ${branchName}`);
       useToastStore.getState().show(formattedError.message, 'error');
     }
-  }, [session.branch]);
+  }, []);
 
   const handlePrOpen = useCallback(() => {
-    const prInfo = prCache[session.id]?.prInfo;
+    const prInfo =
+      useSessionStore.getState().prCache[sessionRef.current.id]?.prInfo;
     if (!prInfo) {
       useToastStore.getState().show('No PR found for this session', 'warning');
       return;
@@ -69,9 +79,11 @@ export function SessionDetail({
         log.error({ err }, 'Failed to open PR URL in browser');
         useToastStore.getState().show('Failed to open PR in browser', 'error');
       });
-  }, [prCache, session.id]);
+  }, []);
 
-  // Register commands for the command palette
+  // Register commands for the command palette.
+  // Handlers read dynamic state at invocation time via sessionRef / store.getState()
+  // so only values that affect `enabled`/`hidden` flags need to be deps.
   useRegisterCommands(
     () => [
       {
@@ -98,7 +110,7 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 'a', ctrl: true },
         enabled: isRunning,
-        onSelect: () => onAttach(session.id),
+        onSelect: () => onAttach(sessionRef.current.id),
       },
       {
         id: 'session.shell',
@@ -107,7 +119,7 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 's', ctrl: true },
         enabled: isRunning,
-        onSelect: () => onShell(session.id),
+        onSelect: () => onShell(sessionRef.current.id),
       },
       {
         id: 'session.stop',
@@ -116,8 +128,7 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 'x', ctrl: true },
         enabled: isRunning,
-        // Stop is handled by the panel's action buttons/modal
-        onSelect: () => {},
+        onSelect: () => setModal('stop'),
       },
       {
         id: 'session.resume',
@@ -126,7 +137,7 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 'r', ctrl: true },
         enabled: isStopped,
-        onSelect: () => onResume(session),
+        onSelect: () => onResume(sessionRef.current),
       },
       {
         id: 'session.delete',
@@ -135,8 +146,7 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 'd', ctrl: true },
         enabled: isStopped,
-        // Delete is handled by the panel's action buttons/modal
-        onSelect: () => {},
+        onSelect: () => setModal('delete'),
       },
       {
         id: 'session.openPr',
@@ -160,7 +170,6 @@ export function SessionDetail({
       onNewPrompt,
       isRunning,
       isStopped,
-      session,
       onAttach,
       onShell,
       onResume,
@@ -192,6 +201,9 @@ export function SessionDetail({
         onResume={onResume}
         onSessionDeleted={onSessionDeleted}
         onBack={onBack}
+        onSessionUpdated={setLiveSession}
+        modal={modal}
+        onModalChange={setModal}
       />
 
       {/* Logs section (hidden for interactive sessions) */}

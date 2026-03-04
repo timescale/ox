@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTheme } from '../stores/themeStore.ts';
 
 export type ToastType = 'error' | 'success' | 'info' | 'warning';
@@ -25,10 +25,15 @@ export function Toast({
 }: ToastProps) {
   const { theme } = useTheme();
 
+  // Ref so the timer always calls the latest onDismiss without restarting
+  // the timeout when the parent re-renders with a new callback reference.
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
   useEffect(() => {
-    const timer = setTimeout(onDismiss, duration);
+    const timer = setTimeout(() => onDismissRef.current(), duration);
     return () => clearTimeout(timer);
-  }, [duration, onDismiss]);
+  }, [duration]);
 
   const color =
     {

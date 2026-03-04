@@ -37,9 +37,15 @@ export interface SessionDetailPanelProps {
   onBack?: () => void;
   /** If true, polls for session updates and PR info. Defaults to true. */
   poll?: boolean;
+  /** Called when the session metadata is refreshed via polling. */
+  onSessionUpdated?: (session: OxSession) => void;
+  /** When provided, the panel uses this as the modal state (controlled mode). */
+  modal?: ModalType;
+  /** Called when the panel wants to open/close a modal (controlled mode). */
+  onModalChange?: (modal: ModalType) => void;
 }
 
-type ModalType = 'stop' | 'delete' | null;
+export type ModalType = 'stop' | 'delete' | null;
 
 export function SessionDetailPanel({
   session: initialSession,
@@ -49,6 +55,9 @@ export function SessionDetailPanel({
   onSessionDeleted,
   onBack,
   poll = true,
+  onSessionUpdated,
+  modal: controlledModal,
+  onModalChange,
 }: SessionDetailPanelProps) {
   const { theme } = useTheme();
   const { prCache, setPrInfo, addPendingDelete, removePendingDelete } =
@@ -58,7 +67,12 @@ export function SessionDetailPanel({
   // on the object reference (which changes on every poll).
   const sessionRef = useRef(session);
   sessionRef.current = session;
-  const [modal, setModal] = useState<ModalType>(null);
+  const onSessionUpdatedRef = useRef(onSessionUpdated);
+  onSessionUpdatedRef.current = onSessionUpdated;
+  // Support controlled (external) or uncontrolled (internal) modal state.
+  const [internalModal, setInternalModal] = useState<ModalType>(null);
+  const modal = controlledModal !== undefined ? controlledModal : internalModal;
+  const setModal = onModalChange ?? setInternalModal;
   const [actionInProgress, setActionInProgress] = useState(false);
   const showCommands = useCommandStore((s) => s.show);
   const { isWide } = useWindowSize();
@@ -151,6 +165,7 @@ export function SessionDetailPanel({
     const updated = await sessionProvider.get(session.id);
     if (updated) {
       setSession(updated);
+      onSessionUpdatedRef.current?.(updated);
     } else {
       useToastStore.getState().show('Container no longer exists', 'error');
       setTimeout(() => onSessionDeleted(), 1500);
@@ -177,7 +192,7 @@ export function SessionDetailPanel({
     } finally {
       setActionInProgress(false);
     }
-  }, [session.id, sessionProvider, rushSessionPoll]);
+  }, [session.id, sessionProvider, rushSessionPoll, setModal]);
 
   const handleDelete = useCallback(() => {
     setModal(null);
@@ -200,28 +215,32 @@ export function SessionDetailPanel({
     onSessionDeleted,
     addPendingDelete,
     removePendingDelete,
+    setModal,
   ]);
 
   const handleResume = useCallback(() => {
-    onResume(session);
-  }, [onResume, session]);
+    onResume(sessionRef.current);
+  }, [onResume]);
 
   // Handle prompt click to copy to clipboard
   const handlePromptClick = useCallback(() => {
-    if (session.prompt) {
-      copyToClipboard(session.prompt);
+    const { prompt } = sessionRef.current;
+    if (prompt) {
+      copyToClipboard(prompt);
       useToastStore.getState().show('Prompt copied to clipboard', 'info', 1500);
     }
-  }, [session.prompt]);
+  }, []);
 
   // Handle PR click
   const handlePrClick = useCallback(() => {
-    if (prInfo) {
-      open(prInfo.url)
+    const pr =
+      useSessionStore.getState().prCache[sessionRef.current.id]?.prInfo;
+    if (pr) {
+      open(pr.url)
         .then(() => {
           useToastStore
             .getState()
-            .show(`Opening PR #${prInfo.number}...`, 'info', 1000);
+            .show(`Opening PR #${pr.number}...`, 'info', 1000);
         })
         .catch((err) => {
           log.error({ err }, 'Failed to open PR URL in browser');
@@ -230,7 +249,7 @@ export function SessionDetailPanel({
             .show('Failed to open PR in browser', 'error');
         });
     }
-  }, [prInfo]);
+  }, []);
 
   // Suspend command keybind dispatch when modal is open
   const suspend = useCommandStore((s) => s.suspend);
@@ -240,7 +259,9 @@ export function SessionDetailPanel({
     }
   }, [modal, actionInProgress, suspend]);
 
-  // Build action button definitions based on session state
+  // Build action button definitions based on session state.
+  // Uses sessionRef in onPress handlers so the memo only needs to recompute
+  // when status or theme changes, not on every poll cycle.
   const actionButtons: ActionButtonProps[] = useMemo(
     () =>
       isRunning
@@ -250,14 +271,14 @@ export function SessionDetailPanel({
               keybind: session.interactive ? '^a' : '^r',
               color: theme.primary,
               onPress: session.interactive
-                ? () => onAttach(session.id)
-                : () => onResume(session),
+                ? () => onAttach(sessionRef.current.id)
+                : () => onResume(sessionRef.current),
             },
             {
               label: 'shell',
               keybind: '^s',
               color: theme.accent,
-              onPress: () => onShell(session.id),
+              onPress: () => onShell(sessionRef.current.id),
             },
             {
               label: 'stop',
@@ -285,12 +306,13 @@ export function SessionDetailPanel({
     [
       isRunning,
       isStopped,
-      session,
+      session.interactive,
       theme,
       onAttach,
       onShell,
       onResume,
       handleResume,
+      setModal,
     ],
   );
 
