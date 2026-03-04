@@ -30,7 +30,7 @@ import {
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { getDenoToken } from '../services/deno';
-import { ensureDockerImage, ensureDockerSandbox } from '../services/docker';
+import { ensureDockerImage } from '../services/docker';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -125,7 +125,8 @@ interface SessionsResult {
     | 'exec-shell'
     | 'shell'
     | 'connect-shell'
-    | 'needs-agent-auth';
+    | 'needs-agent-auth'
+    | 'needs-gh-auth';
   sessionId?: string;
   // For attach/exec-shell: the session to return to after detaching
   session?: OxSession;
@@ -150,6 +151,44 @@ interface SessionsResult {
     prompt: string;
     mountDir?: string;
     isGitRepo?: boolean;
+  };
+  ghAuthInfo?: {
+    agent: AgentType;
+    model: string;
+    prompt: string;
+    mountDir?: string;
+    isGitRepo?: boolean;
+  };
+}
+
+interface GhAuthRetryState {
+  nextView: SessionsAppProps['initialView'];
+  nextPrompt: string;
+  nextAgent: AgentType;
+  nextModel: string;
+  nextMountDir?: string;
+  nextIsGitRepo?: boolean;
+}
+
+export async function handleNeedsGhAuth(
+  result: SessionsResult,
+): Promise<GhAuthRetryState | null> {
+  if (result.type !== 'needs-gh-auth' || !result.ghAuthInfo) {
+    return null;
+  }
+
+  const { agent, model, prompt } = result.ghAuthInfo;
+
+  await ensureDockerImage();
+  await ensureGhAuth();
+
+  return {
+    nextView: 'starting',
+    nextPrompt: prompt,
+    nextAgent: agent,
+    nextModel: model,
+    nextMountDir: result.ghAuthInfo.mountDir,
+    nextIsGitRepo: result.ghAuthInfo.isGitRepo,
   };
 }
 
@@ -485,9 +524,17 @@ function SessionsApp({
 
         // Only check GitHub credentials if in a git repo
         if (inGitRepo && !(await checkGhCredentials())) {
-          throw new Error(
-            'GitHub authentication not configured. Run `ox config` to set up.',
-          );
+          onComplete({
+            type: 'needs-gh-auth',
+            ghAuthInfo: {
+              agent,
+              model,
+              prompt,
+              mountDir,
+              isGitRepo: inGitRepo,
+            },
+          });
+          return;
         }
 
         const isInteractive = mode === 'interactive' || mode === 'plan';
@@ -1141,14 +1188,6 @@ export async function runSessionsTui({
   // Use passed isGitRepo if provided, otherwise detect from currentRepoInfo
   const effectiveIsGitRepo = isGitRepo ?? currentRepoInfo !== null;
 
-  // Only require GitHub auth if in a git repo.
-  // ensureGhAuth validates credentials by running `gh` inside Docker,
-  // so Docker must be ready first.
-  if (effectiveIsGitRepo) {
-    await ensureDockerSandbox();
-    await ensureGhAuth();
-  }
-
   // Loop: after interactive actions (attach, shell, etc.), return to the TUI
   // instead of exiting the process.
   let nextView: SessionsAppProps['initialView'] = initialView;
@@ -1353,6 +1392,33 @@ export async function runSessionsTui({
       nextModel = model;
       nextMountDir = result.authInfo.mountDir;
       nextIsGitRepo = result.authInfo.isGitRepo;
+    }
+
+    // Handle needs-gh-auth action - run interactive GitHub login and retry
+    if (result.type === 'needs-gh-auth' && result.ghAuthInfo) {
+      try {
+        console.log('\nGitHub credentials are missing or expired.');
+        console.log('Starting GitHub login...\n');
+
+        const retry = await handleNeedsGhAuth(result);
+        if (!retry) continue;
+
+        const { nextAgent: agent, nextModel: model } = retry;
+
+        nextView = retry.nextView;
+        nextPrompt = retry.nextPrompt;
+        nextAgent = agent;
+        nextModel = model;
+        nextMountDir = retry.nextMountDir;
+        nextIsGitRepo = retry.nextIsGitRepo;
+
+        console.log('\nGitHub login successful. Resuming...\n');
+      } catch (err) {
+        console.error(
+          `\nError: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
     }
   }
 }

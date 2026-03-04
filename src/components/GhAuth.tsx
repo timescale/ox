@@ -6,7 +6,11 @@ import { useKeyboard } from '@opentui/react';
 import open from 'open';
 import { useEffect, useState } from 'react';
 import { copyToClipboard } from '../services/clipboard';
-import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
+import {
+  applyHostGhCreds,
+  checkGhCredentials,
+  checkGhCredentialsLocal,
+} from '../services/gh';
 import { startContainerGhAuth } from '../services/ghAuth';
 import { log } from '../services/logger';
 import { createTui } from '../services/tui';
@@ -118,9 +122,14 @@ export const runGhAuthScreen = async (): Promise<boolean> => {
 };
 
 export const ensureGhAuth = async (): Promise<void> => {
+  if (await checkGhCredentialsLocal()) {
+    return;
+  }
+
   if (await checkGhCredentials()) {
     return;
   }
+
   log.warn('GitHub credentials are missing or expired.');
 
   if (await applyHostGhCreds()) return;
