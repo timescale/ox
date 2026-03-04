@@ -1332,7 +1332,7 @@ export async function runSessionsTui({
         log.error({ err }, 'Failed to start shell');
         console.error(`Failed to start shell: ${err}`);
       }
-      resetTerminal(TUI_SUBPROCESS_OPTS);
+      resetTerminal();
       continue;
     }
 
@@ -1345,7 +1345,7 @@ export async function runSessionsTui({
         log.error({ err }, 'Failed to connect to shell');
         console.error(`Failed to connect to shell: ${err}`);
       }
-      resetTerminal(TUI_SUBPROCESS_OPTS);
+      resetTerminal();
       // Enqueue cleanup as a background task so the TUI returns immediately
       const { cleanup } = result.shellSession;
       useBackgroundTaskStore

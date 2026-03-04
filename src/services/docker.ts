@@ -1191,7 +1191,7 @@ export async function attachToContainer(nameOrId: string): Promise<void> {
   await proc.exited;
 
   // Exit alternate screen and clean up terminal state after detaching.
-  resetTerminal(TUI_SUBPROCESS_OPTS);
+  resetTerminal();
 }
 
 export async function signalContainerTTYResize(
@@ -1226,7 +1226,7 @@ export async function shellInContainer(nameOrId: string): Promise<void> {
   await proc.exited;
 
   // Exit alternate screen and clean up terminal state after the shell exits.
-  resetTerminal(TUI_SUBPROCESS_OPTS);
+  resetTerminal();
 }
 
 // ============================================================================

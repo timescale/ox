@@ -32,7 +32,7 @@ import {
 } from './services/analytics';
 import { log } from './services/logger';
 import { checkForUpdate, isCompiledBinary } from './services/updater';
-import { printErr } from './utils/shell.ts';
+import { printErr, resetTerminal } from './utils/shell.ts';
 
 program
   .name('ox')
@@ -164,11 +164,14 @@ function wrapCommandsWithAnalytics(cmd: CommandType): void {
 
 wrapCommandsWithAnalytics(program);
 
-// Ensure analytics events are flushed before exit.
-// 'exit' fires even on process.exit(), unlike 'beforeExit'.
-// We can't do async work here, but posthog-node with flushAt:1
-// sends each event immediately on capture, so this is just a safety net.
+// Last-chance terminal cleanup.  'exit' fires even on process.exit(),
+// unlike 'beforeExit' (where @opentui registers its cleanup).  If the
+// renderer's own cleanup didn't run — e.g. due to an unhandled exception
+// triggering handleCrash → process.exit(1) — this ensures mouse tracking,
+// alternate screen, and raw mode don't leak into the user's shell.
+// All sequences are idempotent, so this is harmless on a clean exit.
 process.on('exit', () => {
+  resetTerminal();
   shutdownAnalytics().catch(() => {});
 });
 
@@ -186,6 +189,11 @@ let crashHandlerFired = false;
 async function handleCrash(source: string, err: unknown): Promise<void> {
   if (crashHandlerFired) return;
   crashHandlerFired = true;
+
+  // Reset terminal state before printing — the TUI may have left the
+  // terminal in raw mode / mouse-tracking / alternate screen, and the
+  // @opentui `beforeExit` handler won't fire on an explicit process.exit().
+  resetTerminal();
 
   // Print the error to stderr so the user sees what happened.
   // Registering an uncaughtException handler suppresses the default output,
