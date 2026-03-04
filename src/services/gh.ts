@@ -264,6 +264,20 @@ export const checkGhCredentials = async (): Promise<boolean> => {
   return exitCode === 0;
 };
 
+export const checkGhCredentialsLocal = async (
+  resolveCredentialsFn: () => Promise<GhHostsYml> = resolveAndCacheCredentials,
+): Promise<boolean> => {
+  try {
+    const creds = await resolveCredentialsFn();
+    const valid = ghCredsValid(creds);
+    log.debug({ valid }, 'checkGhCredentialsLocal');
+    return valid;
+  } catch (err) {
+    log.debug({ err }, 'checkGhCredentialsLocal failed');
+    return false;
+  }
+};
+
 /**
  * Try to apply host gh credentials to the ox keyring cache.
  * Returns true if valid credentials were found and cached.
