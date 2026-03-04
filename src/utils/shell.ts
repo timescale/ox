@@ -63,17 +63,12 @@ export function ensureSaneTerminal(): void {
 }
 
 export interface SubprocessScreenOptions {
-  /**
-   * Use the alternate screen buffer to isolate subprocess output from the
-   * user's main scrollback. Set to true when launching a subprocess from
-   * within a TUI that will be restored afterward.
-   */
+  /** Enter the alternate screen buffer to isolate subprocess output. */
   alternateScreen?: boolean;
   /**
-   * Enable mouse tracking escape sequences. Only needed when the subprocess
-   * is a TUI that consumes mouse events (e.g. tmux with mouse support).
-   * Plain shells and most CLI tools do NOT need this — enabling it causes
-   * garbage escape codes to appear when the user moves the mouse.
+   * Enable mouse tracking so the subprocess's TUI can receive mouse
+   * events.  Required when reattaching to a container running a TUI
+   * (e.g. opencode) that only configures mouse tracking at startup.
    */
   mouse?: boolean;
 }
@@ -81,6 +76,7 @@ export interface SubprocessScreenOptions {
 /** Default options used when entering a subprocess from the TUI. */
 export const TUI_SUBPROCESS_OPTS: SubprocessScreenOptions = {
   alternateScreen: true,
+  mouse: true,
 };
 
 /**
@@ -90,25 +86,21 @@ export const TUI_SUBPROCESS_OPTS: SubprocessScreenOptions = {
  * By default this is a no-op. Pass options to opt-in to alternate screen
  * and/or mouse tracking:
  *
- * - **From TUI:** use `{ alternateScreen: true }` so subprocess output
- *   doesn't pollute the TUI's scrollback.
+ * - **From TUI:** use `TUI_SUBPROCESS_OPTS` so subprocess output doesn't
+ *   pollute the TUI's scrollback and mouse events reach the subprocess.
  * - **From standalone CLI:** omit options (or pass `{}`) so progress
  *   messages remain visible in the user's terminal.
- * - **Mouse tracking:** only enable for subprocesses that actually
- *   consume mouse events (very rare for shell sessions).
  *
- * Pair with {@link resetTerminal} using the same options after the
- * subprocess exits.
+ * Pair with {@link resetTerminal} after the subprocess exits.
  */
 export function enterSubprocessScreen(
   options: SubprocessScreenOptions = {},
 ): void {
-  const { alternateScreen = false, mouse = false } = options;
   const sequences: string[] = [];
-  if (alternateScreen) {
+  if (options.alternateScreen) {
     sequences.push('\x1b[?1049h'); // Enter alternate screen buffer
   }
-  if (mouse) {
+  if (options.mouse) {
     sequences.push(
       '\x1b[?1000h', // Enable X11 mouse button tracking
       '\x1b[?1002h', // Enable button-event tracking (drag)
@@ -122,38 +114,40 @@ export function enterSubprocessScreen(
 }
 
 /**
- * Reset terminal to a clean state after a subprocess exits.
+ * Reset terminal to a clean state.
  *
- * Pass the same options used for {@link enterSubprocessScreen} so only the
- * features that were enabled get disabled. Also resets cursor visibility
- * and text attributes defensively, and refreshes the cached terminal
- * dimensions which may be stale after the subprocess.
+ * Unconditionally disables mouse tracking, exits the alternate screen
+ * buffer, restores cursor visibility, and resets text attributes.  All of
+ * these sequences are idempotent — sending them when the corresponding
+ * mode is already off is a harmless no-op.
+ *
+ * Called after subprocess exits and as a last-chance cleanup on
+ * process exit / crash to ensure the user's terminal isn't left in a
+ * broken state.
  */
-export function resetTerminal(options: SubprocessScreenOptions = {}): void {
-  const { alternateScreen = false, mouse = false } = options;
-  const sequences: string[] = [
-    '\x1b[?25h', // Show cursor (if subprocess hid it)
-    '\x1b[0m', // Reset text attributes (colors, bold, etc.)
-  ];
-  if (mouse) {
-    sequences.push(
+export function resetTerminal(): void {
+  process.stdout.write(
+    [
       '\x1b[?1003l', // Disable any-event mouse tracking
       '\x1b[?1002l', // Disable button-event mouse tracking
       '\x1b[?1000l', // Disable X11 mouse button tracking
       '\x1b[?1006l', // Disable SGR extended mouse mode
-    );
-  }
-  if (alternateScreen) {
-    sequences.push('\x1b[?1049l'); // Exit alternate screen buffer → restores main screen
-  }
-  process.stdout.write(sequences.join(''));
+      '\x1b[?1049l', // Exit alternate screen buffer → restores main screen
+      '\x1b[?25h', // Show cursor (if subprocess hid it)
+      '\x1b[0m', // Reset text attributes (colors, bold, etc.)
+    ].join(''),
+  );
 
   // Force a fresh ioctl(TIOCGWINSZ) to update cached terminal dimensions.
   // While attached to a Docker subprocess, SIGWINCH signals go to Docker
   // (not our process), so process.stdout.columns/rows may be stale.
   // This also emits a 'resize' event if the dimensions changed, which
   // propagates to opentui and the useWindowSize hook.
-  process.stdout._refreshSize();
+  try {
+    process.stdout._refreshSize();
+  } catch {
+    // Best-effort: may fail if stdout is already closing (e.g. in exit handler)
+  }
 }
 
 // ============================================================================

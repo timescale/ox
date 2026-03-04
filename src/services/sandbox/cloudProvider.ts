@@ -398,7 +398,7 @@ async function sshIntoSandbox(
       log.warn({ exitCode }, 'SSH process exited with non-zero status');
     }
   } finally {
-    resetTerminal(screen);
+    resetTerminal();
   }
 }
 
