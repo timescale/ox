@@ -54,6 +54,10 @@ export function SessionDetailPanel({
   const { prCache, setPrInfo, addPendingDelete, removePendingDelete } =
     useSessionStore();
   const [session, setSession] = useState(initialSession);
+  // Ref to hold the latest session so callbacks can read it without depending
+  // on the object reference (which changes on every poll).
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const [modal, setModal] = useState<ModalType>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
   const showCommands = useCommandStore((s) => s.show);
@@ -72,15 +76,22 @@ export function SessionDetailPanel({
     [providerType],
   );
 
-  // Poll CPU/memory stats for running Docker containers only
-  const statsIds = useMemo(
-    () => (isRunning && providerType === 'docker' ? [session.id] : []),
+  // Poll CPU/memory stats for running Docker containers only.
+  // Stabilize `statsIds` so it only gets a new reference when the actual set
+  // of IDs changes — not on every poll cycle.
+  const statsIdsKey = useMemo(
+    () => (isRunning && providerType === 'docker' ? session.id : ''),
     [isRunning, providerType, session.id],
   );
+  const statsIds = useMemo(
+    () => (statsIdsKey ? [statsIdsKey] : []),
+    [statsIdsKey],
+  );
+  // Use sessionRef so the callback identity is stable across polls.
   const getStats = useCallback(
     (ids: string[], signal: AbortSignal) =>
-      fetchDockerStats(ids, [session], signal),
-    [session],
+      fetchDockerStats(ids, [sessionRef.current], signal),
+    [],
   );
   const containerStats = useContainerStats(statsIds, getStats);
   const stats = containerStats.get(session.id);
