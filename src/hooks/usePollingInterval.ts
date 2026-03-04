@@ -45,16 +45,26 @@ export function usePollingInterval(
   const callbackRef = useRef(callback);
   callbackRef.current = callback;
 
+  // When true, prevents scheduleNext from scheduling any more work.
+  // This is needed because an in-flight async callback can finish *after*
+  // the cleanup function clears the pending timeout, and then call
+  // scheduleNext() which would schedule a new timeout that cleanup will
+  // never clear.
+  const cancelledRef = useRef(false);
+
   // Core scheduling function — calls the callback then schedules the next tick
   // at the current delay, increasing it afterward.
   const scheduleNext = useCallback(() => {
+    if (cancelledRef.current) return;
     const delay = currentDelayRef.current;
     timerRef.current = setTimeout(async () => {
+      if (cancelledRef.current) return;
       try {
         await callbackRef.current();
       } catch (err) {
         log.error({ err }, 'usePollingInterval callback error');
       }
+      if (cancelledRef.current) return;
       // Increase delay for next tick (capped at maxMs)
       currentDelayRef.current = Math.min(delay * backoffFactor, maxMs);
       scheduleNext();
@@ -63,6 +73,7 @@ export function usePollingInterval(
 
   // Main effect — fire immediately on mount, then start the scheduling chain.
   useEffect(() => {
+    cancelledRef.current = false;
     currentDelayRef.current = initialMs;
 
     // Fire immediately
@@ -77,6 +88,7 @@ export function usePollingInterval(
     scheduleNext();
 
     return () => {
+      cancelledRef.current = true;
       if (timerRef.current != null) {
         clearTimeout(timerRef.current);
         timerRef.current = null;

@@ -940,15 +940,47 @@ interface DockerStatsJson {
 /**
  * Fetch CPU/memory stats for the given container IDs (must be running).
  * Returns a Map keyed by container ID.
+ *
+ * @param signal - Optional AbortSignal. When aborted the underlying
+ *   `docker stats` process is killed and an empty map is returned.
  */
 export async function getContainerStats(
   containerIds: string[],
+  signal?: AbortSignal,
 ): Promise<Map<string, ContainerStats>> {
   const result = new Map<string, ContainerStats>();
-  if (containerIds.length === 0) return result;
+  if (containerIds.length === 0 || signal?.aborted) return result;
 
   try {
-    for await (const line of $`docker stats --no-stream --format ${'{{json .}}'} ${containerIds}`.lines()) {
+    const proc = Bun.spawn(
+      [
+        'docker',
+        'stats',
+        '--no-stream',
+        '--format',
+        '{{json .}}',
+        ...containerIds,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+
+    // Wire up abort: kill the process immediately.
+    if (signal) {
+      const onAbort = () => {
+        proc.kill();
+      };
+      if (signal.aborted) {
+        proc.kill();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+        proc.exited.finally(() => signal.removeEventListener('abort', onAbort));
+      }
+    }
+
+    const stdout = await new Response(proc.stdout).text();
+    if (signal?.aborted) return result;
+
+    for (const line of stdout.split('\n')) {
       if (!line) continue;
       try {
         const data: DockerStatsJson = JSON.parse(line);
@@ -968,7 +1000,9 @@ export async function getContainerStats(
       'Fetched container stats',
     );
   } catch (err) {
-    log.warn({ err }, 'Failed to fetch container stats');
+    if (!signal?.aborted) {
+      log.warn({ err }, 'Failed to fetch container stats');
+    }
   }
 
   return result;

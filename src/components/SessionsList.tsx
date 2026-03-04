@@ -121,7 +121,8 @@ export function SessionsList({
   );
   // Use sessionsRef so the callback identity is stable across polls.
   const getStats = useCallback(
-    (ids: string[]) => fetchDockerStats(ids, sessionsRef.current),
+    (ids: string[], signal: AbortSignal) =>
+      fetchDockerStats(ids, sessionsRef.current, signal),
     [],
   );
   const containerStats = useContainerStats(runningIds, getStats);

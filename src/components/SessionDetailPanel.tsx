@@ -78,7 +78,8 @@ export function SessionDetailPanel({
     [isRunning, providerType, session.id],
   );
   const getStats = useCallback(
-    (ids: string[]) => fetchDockerStats(ids, [session]),
+    (ids: string[], signal: AbortSignal) =>
+      fetchDockerStats(ids, [session], signal),
     [session],
   );
   const containerStats = useContainerStats(statsIds, getStats);

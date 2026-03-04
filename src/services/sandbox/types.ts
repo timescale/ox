@@ -145,5 +145,8 @@ export interface SandboxProvider {
   streamLogs(sessionId: string): LogStream;
 
   // Stats (optional -- cloud does not support CPU/mem stats)
-  getStats?(sessionIds: string[]): Promise<Map<string, SandboxStats>>;
+  getStats?(
+    sessionIds: string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, SandboxStats>>;
 }

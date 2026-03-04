@@ -68,10 +68,12 @@ export function getStatusColor(session: OxSession): string {
  * @param ids - Session IDs to fetch stats for
  * @param sessions - Full session list used to filter to running Docker sessions.
  *   When omitted the ids are assumed to already be running Docker container IDs.
+ * @param signal - Optional AbortSignal to cancel the underlying `docker stats` process.
  */
 export async function fetchDockerStats(
   ids: string[],
   sessions?: OxSession[],
+  signal?: AbortSignal,
 ): Promise<Map<string, SandboxStats>> {
   const dockerIds = sessions
     ? ids.filter((id) =>
@@ -91,7 +93,7 @@ export async function fetchDockerStats(
     return new Map();
   }
 
-  return dockerProvider.getStats(dockerIds);
+  return dockerProvider.getStats(dockerIds, signal);
 }
 
 /** Format a byte count as a compact human-readable string (e.g. 1.2G, 456M). */

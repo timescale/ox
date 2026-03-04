@@ -239,8 +239,11 @@ export class DockerSandboxProvider implements SandboxProvider {
     return streamContainerLogs(sessionId);
   }
 
-  async getStats(sessionIds: string[]): Promise<Map<string, SandboxStats>> {
-    const stats = await getContainerStats(sessionIds);
+  async getStats(
+    sessionIds: string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, SandboxStats>> {
+    const stats = await getContainerStats(sessionIds, signal);
     return mapDockerStats(stats);
   }
 }

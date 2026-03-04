@@ -12,10 +12,17 @@ const STATS_POLL_INTERVAL = 1000;
  *
  * Important: callers must pass a stable (memoized) array reference to avoid
  * restarting the polling interval on every render.
+ *
+ * @param getStats - Callback that fetches stats. Receives the container IDs and
+ *   an AbortSignal that is aborted when the effect cleans up, so in-flight
+ *   `docker stats` subprocesses are killed promptly on unmount.
  */
 export function useContainerStats(
   containerIds: string[],
-  getStats?: (ids: string[]) => Promise<Map<string, SandboxStats>>,
+  getStats?: (
+    ids: string[],
+    signal: AbortSignal,
+  ) => Promise<Map<string, SandboxStats>>,
 ): Map<string, SandboxStats> {
   const [stats, setStats] = useState<Map<string, SandboxStats>>(
     () => new Map(),
@@ -28,12 +35,12 @@ export function useContainerStats(
     }
 
     log.debug({ containerIds }, 'Starting container stats polling');
-    let cancelled = false;
+    const controller = new AbortController();
 
     const fetchStats = async () => {
-      if (cancelled) return;
-      const result = await getStats(containerIds);
-      if (!cancelled) {
+      if (controller.signal.aborted) return;
+      const result = await getStats(containerIds, controller.signal);
+      if (!controller.signal.aborted) {
         log.trace(
           { statsCount: result.size, containerCount: containerIds.length },
           'Container stats update',
@@ -48,8 +55,8 @@ export function useContainerStats(
 
     return () => {
       log.debug('Stopping container stats polling');
-      cancelled = true;
       clearInterval(interval);
+      controller.abort();
     };
   }, [containerIds, getStats]);
 
