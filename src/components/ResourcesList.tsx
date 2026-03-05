@@ -26,7 +26,7 @@ export interface ResourcesListProps {
   onBack: () => void;
 }
 
-type FilterMode = 'all' | 'snapshot' | 'volume' | 'image';
+type FilterMode = 'all' | 'container' | 'snapshot' | 'volume' | 'image';
 
 type ConfirmAction =
   | { type: 'delete'; resource: SandboxResource }
@@ -38,12 +38,19 @@ type ConfirmAction =
 
 const FILTER_LABELS: Record<FilterMode, string> = {
   all: 'All',
+  container: 'Containers',
   snapshot: 'Snapshots',
   volume: 'Volumes',
   image: 'Images',
 };
 
-const FILTER_ORDER: FilterMode[] = ['all', 'snapshot', 'volume', 'image'];
+const FILTER_ORDER: FilterMode[] = [
+  'all',
+  'container',
+  'snapshot',
+  'volume',
+  'image',
+];
 
 // ============================================================================
 // Helpers
@@ -622,7 +629,7 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
         <ConfirmModal
           title="Cleanup Resources"
           message={`Delete ${confirmAction.targets.length} old and orphaned resources?`}
-          detail="This will remove all old and orphaned snapshots, volumes, and images. This cannot be undone."
+          detail="This will remove all old and orphaned containers, snapshots, volumes, and images. This cannot be undone."
           confirmLabel="Delete All"
           confirmColor={theme.error}
           onConfirm={handleCleanupConfirm}

@@ -36,7 +36,7 @@ import type { OxSession } from './types.ts';
 // ============================================================================
 
 export type ResourceProvider = 'cloud' | 'docker';
-export type ResourceKind = 'snapshot' | 'volume' | 'image';
+export type ResourceKind = 'container' | 'snapshot' | 'volume' | 'image';
 export type ResourceStatus = 'current' | 'active' | 'old' | 'orphaned';
 
 export interface SandboxResource {
@@ -449,6 +449,81 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
   return resources;
 }
 
+/** Docker ps JSON output shape (subset of fields we use). */
+interface DockerPsJson {
+  ID: string;
+  Names: string;
+  Status: string;
+  CreatedAt: string;
+  Size: string;
+  Labels: string;
+}
+
+/**
+ * Categorize an orphaned container by its name prefix.
+ */
+function containerCategory(name: string): string {
+  if (name.startsWith('ox-anon-')) return 'Anonymous Container';
+  if (name.startsWith('ox-gh-auth-')) return 'Auth Container';
+  if (name.startsWith('ox-claude-auth-')) return 'Auth Container';
+  if (name.startsWith('ox-shell-')) return 'Shell Container';
+  return 'Stopped Container';
+}
+
+/**
+ * Discover stopped Docker containers with an `ox-` name prefix that are
+ * NOT managed sessions (i.e. missing the `ox.managed=true` label).
+ * These are typically ephemeral containers (gh commands, auth flows, etc.)
+ * that leaked due to unclean exits.
+ */
+async function discoverOrphanedDockerContainers(): Promise<SandboxResource[]> {
+  log.debug('Discovering orphaned Docker containers...');
+  try {
+    // Find all stopped ox-* containers that are NOT ox.managed.
+    // Note: the format string is interpolated so Bun's shell treats it as a
+    // single token — bare `{{json .}}` would be split on the space.
+    const jsonFmt = '{{json .}}';
+    const result =
+      await Bun.$`docker ps -a --filter name=ox- --filter status=exited --filter status=dead --filter status=created --format ${jsonFmt}`.quiet();
+    const output = result.stdout.toString().trim();
+    if (!output) {
+      log.debug('No stopped ox-* containers found');
+      return [];
+    }
+
+    // Each line is a separate JSON object
+    const entries: DockerPsJson[] = output
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as DockerPsJson);
+
+    const resources: SandboxResource[] = [];
+    for (const entry of entries) {
+      // Skip managed containers — those are tracked via the Sessions list
+      if (entry.Labels.includes('ox.managed=true')) continue;
+
+      resources.push({
+        id: entry.ID,
+        provider: 'docker',
+        kind: 'container',
+        name: entry.Names,
+        category: containerCategory(entry.Names),
+        status: 'orphaned',
+        createdAt: entry.CreatedAt,
+      });
+    }
+
+    log.debug(
+      { containerCount: resources.length },
+      'Orphaned Docker containers discovered',
+    );
+    return resources;
+  } catch (err) {
+    log.error({ err }, 'Failed to discover orphaned Docker containers');
+    return [];
+  }
+}
+
 /**
  * Discover and classify ALL sandbox-related resources across providers.
  * Uses Promise.allSettled so one provider's failure doesn't break the other.
@@ -465,6 +540,7 @@ export async function listAllResources(): Promise<SandboxResource[]> {
   const results = await Promise.allSettled([
     discoverCloudResources(lookups),
     discoverDockerResources(),
+    discoverOrphanedDockerContainers(),
   ]);
 
   const resources: SandboxResource[] = [];
@@ -489,9 +565,10 @@ export async function listAllResources(): Promise<SandboxResource[]> {
 
 /** Sort order for resource kinds during cleanup: snapshots first, then volumes, then images */
 const KIND_ORDER: Record<ResourceKind, number> = {
-  snapshot: 0,
-  volume: 1,
-  image: 2,
+  container: 0,
+  snapshot: 1,
+  volume: 2,
+  image: 3,
 };
 
 /**
@@ -536,7 +613,9 @@ export async function deleteResource(resource: SandboxResource): Promise<void> {
         await client.deleteVolume(resource.id);
       }
     } else if (resource.provider === 'docker') {
-      if (resource.kind === 'image') {
+      if (resource.kind === 'container') {
+        await Bun.$`docker rm -f ${resource.id}`.quiet();
+      } else if (resource.kind === 'image') {
         await Bun.$`docker rmi ${resource.name}`.quiet();
       }
     }
