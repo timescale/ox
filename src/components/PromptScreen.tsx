@@ -158,11 +158,30 @@ export function PromptScreen({
     usePromptHistoryStore.getState().initialize();
   }, []);
 
+  // Auto-select a model when models load for the current agent and the current
+  // modelId is null or doesn't match any loaded model.  This handles the
+  // quick-switch case: user presses Tab before OpenCode models have loaded,
+  // so modelId is null.  Once models arrive we pick the best match.
+  useEffect(() => {
+    if (!currentModels?.length) return;
+    if (modelId && currentModels.some((m) => m.id === modelId)) return;
+    const best =
+      findEquivalentModel(modelMem.current[agent] ?? null, currentModels) ??
+      currentModels[0]?.id ??
+      null;
+    if (best && best !== modelId) {
+      setModelId(best);
+      modelMem.current[agent] = best;
+    }
+  }, [agent, modelId, currentModels]);
+
   // Trigger credential check for the active agent when image becomes ready,
   // or when the selected model changes (different models may need different credentials).
+  // Skip if modelId is null — the auto-select effect above will set it, which
+  // will re-trigger this effect with the correct model.
   useEffect(() => {
-    if (!imageReady) return;
-    useReadinessStore.getState().checkAgentAuth(agent, modelId ?? undefined);
+    if (!imageReady || !modelId) return;
+    useReadinessStore.getState().checkAgentAuth(agent, modelId);
   }, [imageReady, agent, modelId]);
 
   // Handle agent switch with model matching (disabled when resuming)
