@@ -989,7 +989,7 @@ export function SessionsList({
         </box>
       ) : (
         <box
-          flexGrow={1}
+          flexGrow={0}
           flexShrink={0}
           flexDirection="row"
           justifyContent="flex-end"
