@@ -34,6 +34,10 @@ export interface ReadinessState {
   opencodeAuth: CheckStatus | 'invalid';
   ghAuth: CheckStatus | 'invalid';
 
+  // Track which model was used for each agent credential check
+  claudeAuthModel: string | undefined;
+  opencodeAuthModel: string | undefined;
+
   // Error details
   error: string | null;
 
@@ -60,6 +64,8 @@ const initialState: Omit<
   claudeAuth: 'unknown',
   opencodeAuth: 'unknown',
   ghAuth: 'unknown',
+  claudeAuthModel: undefined,
+  opencodeAuthModel: undefined,
   error: null,
 };
 
@@ -184,47 +190,40 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
         }
       }
 
-      // ---- Tier 3: Parallel checks (models + credentials) ----
+      // ---- Tier 3: Parallel checks (models + GH credentials) ----
       set({ models: 'ready' });
 
-      // Run credential checks in parallel (fire-and-forget, results cached)
+      // Only check GH credentials eagerly — agent-specific credential checks
+      // are deferred until the agent is actually selected (via checkAgentAuth),
+      // because they need a valid model to test against.
       const { checkGhCredentials } = await import('../services/gh.ts');
-      const { checkClaudeCredentials } = await import('../services/claude.ts');
-      const { checkOpencodeCredentials } = await import(
-        '../services/opencode.ts'
-      );
 
-      set({
-        ghAuth: 'checking',
-        claudeAuth: 'checking',
-        opencodeAuth: 'checking',
-      });
+      set({ ghAuth: 'checking' });
 
-      const [ghOk, claudeOk, opencodeOk] = await Promise.all([
-        checkGhCredentials().catch(() => false),
-        checkClaudeCredentials().catch(() => false),
-        checkOpencodeCredentials().catch(() => false),
-      ]);
+      const ghOk = await checkGhCredentials().catch(() => false);
 
-      set({
-        ghAuth: ghOk ? 'ready' : 'invalid',
-        claudeAuth: claudeOk ? 'ready' : 'invalid',
-        opencodeAuth: opencodeOk ? 'ready' : 'invalid',
-      });
+      set({ ghAuth: ghOk ? 'ready' : 'invalid' });
     } finally {
       checksRunning = false;
     }
   },
 
   checkAgentAuth: (agent: 'claude' | 'opencode', model?: string) => {
-    const key = agent === 'claude' ? 'claudeAuth' : 'opencodeAuth';
-    const current = useReadinessStore.getState()[key];
+    const state = useReadinessStore.getState();
+    const authKey = agent === 'claude' ? 'claudeAuth' : 'opencodeAuth';
+    const modelKey =
+      agent === 'claude' ? 'claudeAuthModel' : 'opencodeAuthModel';
+    const current = state[authKey];
+    const prevModel = state[modelKey];
 
-    // Only re-check if we haven't checked yet or if image isn't ready
-    if (current !== 'unknown') return;
-    if (useReadinessStore.getState().sandboxImage !== 'ready') return;
+    // Don't re-check if already checking
+    if (current === 'checking') return;
+    // Don't check if sandbox image isn't ready yet
+    if (state.sandboxImage !== 'ready') return;
+    // Re-check if: never checked ('unknown'), or model changed since last check
+    if (current !== 'unknown' && model === prevModel) return;
 
-    set({ [key]: 'checking' });
+    set({ [authKey]: 'checking', [modelKey]: model });
 
     // Fire-and-forget
     (async () => {
@@ -237,9 +236,9 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
             : await (
                 await import('../services/opencode.ts')
               ).checkOpencodeCredentials(model);
-        set({ [key]: ok ? 'ready' : 'invalid' });
+        set({ [authKey]: ok ? 'ready' : 'invalid' });
       } catch {
-        set({ [key]: 'error' });
+        set({ [authKey]: 'error' });
       }
     })();
   },

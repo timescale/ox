@@ -158,6 +158,13 @@ export function PromptScreen({
     usePromptHistoryStore.getState().initialize();
   }, []);
 
+  // Trigger credential check for the active agent when image becomes ready,
+  // or when the selected model changes (different models may need different credentials).
+  useEffect(() => {
+    if (!imageReady) return;
+    useReadinessStore.getState().checkAgentAuth(agent, modelId ?? undefined);
+  }, [imageReady, agent, modelId]);
+
   // Handle agent switch with model matching (disabled when resuming)
   const switchAgent = useCallback(() => {
     // Don't allow switching agents when resuming a session
@@ -175,11 +182,7 @@ export function PromptScreen({
       models[newAgent]?.[0]?.id ||
       null;
     setModelId(newModelId);
-
-    // Trigger lazy credential check for the new agent
-    useReadinessStore
-      .getState()
-      .checkAgentAuth(newAgent, newModelId ?? undefined);
+    // Credential re-check is handled by the useEffect on [imageReady, agent, modelId]
   }, [resumeSession, agent, defaultAgent, modelId]);
 
   // Suspend command keybind dispatch when sub-modals are open
