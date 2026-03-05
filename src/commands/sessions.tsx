@@ -826,7 +826,81 @@ function SessionsApp({
       } else if (targetView === 'starting' && prompt) {
         const agent = initialAgent ?? cfg.agent ?? 'opencode';
         const model = initialModel ?? cfg.model ?? '';
-        startSession(prompt, agent, model);
+
+        // Non-interactive path: wait for readiness before starting session
+        setView({
+          type: 'starting',
+          prompt,
+          agent,
+          model,
+          step: 'Preparing environment',
+          mode: 'async',
+        });
+
+        // Wait for Docker + image to be ready, then start
+        const waitAndStart = async () => {
+          const store = useReadinessStore.getState();
+
+          // If checks haven't completed, subscribe and wait
+          if (store.sandboxImage !== 'ready') {
+            await new Promise<void>((resolve, reject) => {
+              const unsub = useReadinessStore.subscribe((s) => {
+                // Update starting screen with progress
+                if (s.dockerRunning === 'starting') {
+                  setView((v) =>
+                    v.type === 'starting'
+                      ? { ...v, step: 'Starting Docker' }
+                      : v,
+                  );
+                } else if (
+                  s.sandboxImage === 'pulling' ||
+                  s.sandboxImage === 'checking'
+                ) {
+                  const layers = s.pullLayers;
+                  const done = layers.filter(
+                    (l) => l.state === 'complete' || l.state === 'exists',
+                  ).length;
+                  const total = layers.length;
+                  const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
+                  setView((v) =>
+                    v.type === 'starting'
+                      ? {
+                          ...v,
+                          step: `Pulling sandbox image${suffix}`,
+                          layers: s.pullLayers,
+                        }
+                      : v,
+                  );
+                } else if (s.sandboxImage === 'ready') {
+                  unsub();
+                  resolve();
+                } else if (
+                  s.sandboxImage === 'error' ||
+                  s.dockerRunning === 'not-running' ||
+                  s.dockerInstalled === 'not-installed'
+                ) {
+                  unsub();
+                  reject(
+                    new Error(s.error ?? 'Docker environment is not available'),
+                  );
+                }
+              });
+            });
+          }
+
+          startSession(prompt, agent, model);
+        };
+
+        waitAndStart().catch((err) => {
+          log.error({ err }, 'Failed to prepare environment');
+          useToastStore
+            .getState()
+            .show(
+              `Failed to prepare environment: ${err instanceof Error ? err.message : String(err)}`,
+              'error',
+            );
+          setView({ type: 'prompt' });
+        });
       } else if (targetView === 'prompt') {
         setView({ type: 'prompt' });
       } else if (targetView === 'resources') {
