@@ -4,24 +4,17 @@
 
 import type { SelectOption } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ensureDockerImage,
-  type ImageBuildProgress,
-  type PullLayer,
-} from '../services/docker';
+import { useEffect, useMemo, useState } from 'react';
 import {
   checkDockerStatus,
   type DockerProvider,
   type DockerStatus,
   installProvider,
-  startProvider,
 } from '../services/dockerSetup';
 import { createTui } from '../services/tui';
 import { useTheme } from '../stores/themeStore';
 import { CopyOnSelect } from './CopyOnSelect';
 import { Loading } from './Loading';
-import { PullProgress } from './PullProgress';
 import { Selector } from './Selector';
 
 // ============================================================================
@@ -48,11 +41,8 @@ export interface DockerSetupProps {
 
 type SetupState =
   | { type: 'checking' }
-  | { type: 'ready' }
-  | { type: 'starting'; provider: DockerProvider; message: string }
   | { type: 'select-provider'; status: DockerStatus }
   | { type: 'installing'; provider: DockerProvider }
-  | { type: 'building-image'; message: string; layers?: PullLayer[] }
   | { type: 'error'; message: string };
 
 // ============================================================================
@@ -102,11 +92,6 @@ export function DockerSetup({
   const { theme } = useTheme();
   const [state, setState] = useState<SetupState>({ type: 'checking' });
 
-  // Helper to start image building after Docker is ready
-  const startImageBuild = useCallback(() => {
-    setState({ type: 'building-image', message: 'Checking Docker image' });
-  }, []);
-
   // Check Docker status on mount
   const statusPromise = useMemo(() => checkDockerStatus(), []);
 
@@ -114,24 +99,13 @@ export function DockerSetup({
     statusPromise
       .then((status) => {
         if (status.isRunning) {
-          // Docker is already running - proceed to image building
-          startImageBuild();
-        } else if (status.orbstackInstalled && !status.dockerDesktopInstalled) {
-          // Only OrbStack installed - start it automatically
-          setState({
-            type: 'starting',
-            provider: 'orbstack',
-            message: 'Starting OrbStack',
-          });
-        } else if (status.dockerDesktopInstalled && !status.orbstackInstalled) {
-          // Only Docker Desktop installed - start it automatically
-          setState({
-            type: 'starting',
-            provider: 'docker-desktop',
-            message: 'Starting Docker Desktop',
-          });
+          // Docker is already running — nothing to install
+          onComplete({ type: 'ready' });
+        } else if (status.dockerDesktopInstalled || status.orbstackInstalled) {
+          // A provider is installed but not running — readiness store handles starting
+          onComplete({ type: 'ready' });
         } else {
-          // Neither or both installed - show selection UI
+          // Nothing installed — show provider selection / install UI
           setState({ type: 'select-provider', status });
         }
       })
@@ -141,27 +115,7 @@ export function DockerSetup({
           message: err instanceof Error ? err.message : String(err),
         });
       });
-  }, [statusPromise, startImageBuild]);
-
-  // Handle starting a provider
-  const startingProvider = state.type === 'starting' ? state.provider : null;
-  useEffect(() => {
-    if (!startingProvider) return;
-
-    startProvider(startingProvider, 600, (message) => {
-      setState((s) => (s.type === 'starting' ? { ...s, message } : s));
-    })
-      .then(() => {
-        // Docker is now running - proceed to image building
-        startImageBuild();
-      })
-      .catch((err) => {
-        setState({
-          type: 'error',
-          message: err instanceof Error ? err.message : String(err),
-        });
-      });
-  }, [startingProvider, startImageBuild]);
+  }, [statusPromise, onComplete]);
 
   // Handle installing a provider
   const installingProvider =
@@ -171,12 +125,8 @@ export function DockerSetup({
 
     installProvider(installingProvider)
       .then(() => {
-        // After installation, start the provider
-        setState({
-          type: 'starting',
-          provider: installingProvider,
-          message: `Starting ${installingProvider === 'orbstack' ? 'OrbStack' : 'Docker Desktop'}`,
-        });
+        // Installation done — return to caller; readiness store handles starting
+        onComplete({ type: 'ready' });
       })
       .catch((err) => {
         setState({
@@ -184,86 +134,7 @@ export function DockerSetup({
           message: err instanceof Error ? err.message : String(err),
         });
       });
-  }, [installingProvider]);
-
-  // Track if we're currently building (to avoid restarting on state changes)
-  const buildingRef = useRef(false);
-  // Track if the component is unmounted (use ref so it persists across effect runs)
-  const unmountedRef = useRef(false);
-
-  // Handle building Docker image
-  const isBuildingImage = state.type === 'building-image';
-  useEffect(() => {
-    if (!isBuildingImage) return;
-    if (buildingRef.current) return; // Already building, don't restart
-
-    buildingRef.current = true;
-    unmountedRef.current = false;
-
-    const handleProgress = (progress: ImageBuildProgress) => {
-      switch (progress.type) {
-        case 'checking':
-          setState({
-            type: 'building-image',
-            message: 'Checking Docker image',
-          });
-          break;
-        case 'exists':
-          // Image already exists - we're done!
-          buildingRef.current = false;
-          setState({ type: 'ready' });
-          if (!unmountedRef.current) {
-            setTimeout(() => {
-              onComplete({ type: 'ready' });
-            }, 500);
-          }
-          break;
-        case 'pulling':
-        case 'pulling-cache':
-          setState({
-            type: 'building-image',
-            message: progress.message,
-            layers: progress.layers,
-          });
-          break;
-        case 'building':
-          setState({
-            type: 'building-image',
-            message: progress.message,
-          });
-          break;
-        case 'done':
-          buildingRef.current = false;
-          setState({ type: 'ready' });
-          if (!unmountedRef.current) {
-            setTimeout(() => {
-              onComplete({ type: 'ready' });
-            }, 500);
-          }
-          break;
-      }
-    };
-
-    ensureDockerImage({
-      onProgress: handleProgress,
-    }).catch((err) => {
-      if (unmountedRef.current) return;
-      buildingRef.current = false;
-      setState({
-        type: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    });
-
-    // No cleanup needed here - we handle unmount separately
-  }, [isBuildingImage, onComplete]);
-
-  // Separate effect for component unmount only
-  useEffect(() => {
-    return () => {
-      unmountedRef.current = true;
-    };
-  }, []);
+  }, [installingProvider, onComplete]);
 
   const handleCancel = () => {
     onComplete({ type: 'cancelled' });
@@ -286,43 +157,6 @@ export function DockerSetup({
     );
   }
 
-  // ---- Ready State ----
-  if (state.type === 'ready') {
-    return (
-      <box flexDirection="column" padding={1} flexGrow={1}>
-        <box
-          title={title}
-          border
-          borderStyle="single"
-          padding={1}
-          flexDirection="column"
-          flexGrow={1}
-          alignItems="center"
-          justifyContent="center"
-        >
-          <text fg={theme.success}>Docker is running!</text>
-          <text fg={theme.textMuted} marginTop={1}>
-            Press Esc to exit
-          </text>
-        </box>
-      </box>
-    );
-  }
-
-  // ---- Starting State ----
-  if (state.type === 'starting') {
-    const providerName =
-      state.provider === 'orbstack' ? 'OrbStack' : 'Docker Desktop';
-    return (
-      <Loading
-        title={title}
-        message={state.message}
-        detail={`This may take a minute while ${providerName} initializes`}
-        onCancel={handleCancel}
-      />
-    );
-  }
-
   // ---- Installing State ----
   if (state.type === 'installing') {
     const providerName =
@@ -332,28 +166,6 @@ export function DockerSetup({
         title={title}
         message={`Installing ${providerName}`}
         detail="This may take a few minutes."
-        onCancel={handleCancel}
-      />
-    );
-  }
-
-  // ---- Building Image State ----
-  if (state.type === 'building-image') {
-    if (state.layers && state.layers.length > 0) {
-      return (
-        <PullProgress
-          title={title}
-          message={state.message}
-          layers={state.layers}
-          onCancel={handleCancel}
-        />
-      );
-    }
-    return (
-      <Loading
-        title={title}
-        message={state.message}
-        detail="This may take a few minutes on first run"
         onCancel={handleCancel}
       />
     );
@@ -412,12 +224,8 @@ export function DockerSetup({
             : status.dockerDesktopInstalled;
 
         if (isInstalled) {
-          // Provider is installed, just start it
-          setState({
-            type: 'starting',
-            provider,
-            message: `Starting ${provider === 'orbstack' ? 'OrbStack' : 'Docker Desktop'}`,
-          });
+          // Provider is installed — readiness store will handle starting
+          onComplete({ type: 'ready' });
         } else {
           // Provider needs to be installed first
           setState({ type: 'installing', provider });

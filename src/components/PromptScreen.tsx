@@ -26,12 +26,14 @@ import type {
 } from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { usePromptHistoryStore } from '../stores/promptHistoryStore.ts';
+import { useReadinessStore } from '../stores/readinessStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
 import { FilterableSelector } from './FilterableSelector';
 import { HotkeysBar } from './HotkeysBar';
 import { Modal } from './Modal';
 import { OxTitle } from './OxTitle';
+import { ReadinessStatus } from './ReadinessStatus.tsx';
 import { Selector } from './Selector';
 import { SlashCommandPopover } from './SlashCommandPopover.tsx';
 import { ThemePicker } from './ThemePicker.tsx';
@@ -71,7 +73,8 @@ interface ToastState {
 
 /**
  * Find an equivalent model when switching agents.
- * Tries to match by model family name (opus, sonnet, haiku).
+ * Tries to match by model family name (opus, sonnet, haiku, gpt).
+ * Returns null if no family match is found (does NOT fall back to first).
  */
 function findEquivalentModel(
   currentModel: string | null,
@@ -84,7 +87,7 @@ function findEquivalentModel(
   const lower = currentModel.toLowerCase();
 
   // Try to match by model family name
-  const families = ['opus', 'sonnet', 'haiku'];
+  const families = ['opus', 'sonnet', 'haiku', 'gpt'];
   for (const family of families) {
     if (lower.includes(family)) {
       const match = targetModels.findLast((m) =>
@@ -94,8 +97,36 @@ function findEquivalentModel(
     }
   }
 
-  // No match found, use first available
-  return targetModels[0]?.id || null;
+  return null;
+}
+
+/**
+ * Check if a model ID exists in the target list (exact match).
+ */
+function findExactModel(
+  modelId: string | null,
+  targetModels: null | readonly Model[],
+): string | null {
+  if (!modelId || !targetModels?.length) return null;
+  const match = targetModels.find((m) => m.id === modelId);
+  return match?.id ?? null;
+}
+
+/** Well-known fallback model ID fragments, in priority order. */
+const PREFERRED_FALLBACKS = ['opus', 'gpt'];
+
+/**
+ * Find the first model matching any preferred fallback family.
+ * Avoids landing on niche/unknown models when no equivalent is found.
+ */
+function findPreferredFallback(targetModels: readonly Model[]): string | null {
+  for (const family of PREFERRED_FALLBACKS) {
+    const match = targetModels.findLast((m) =>
+      m.id.toLowerCase().includes(family),
+    );
+    if (match) return match.id;
+  }
+  return null;
 }
 
 export function PromptScreen({
@@ -119,10 +150,18 @@ export function PromptScreen({
     defaultSandboxProvider ?? 'docker',
   );
   const [modelId, setModelId] = useState<string | null>(defaultModel);
-  const modelMem = useRef({
+  const modelMem = useRef<Partial<Record<AgentType, string | null>>>({
     [defaultAgent]: defaultModel,
   });
-  modelMem.current[agent] = modelId;
+  // Track the last non-null model across any agent, used for cross-agent
+  // equivalent matching when models load asynchronously.
+  const lastModelRef = useRef<string | null>(defaultModel);
+  // Only remember non-null selections so the memo always holds the
+  // last *good* model per agent (null means "nothing chosen yet").
+  if (modelId) {
+    modelMem.current[agent] = modelId;
+    lastModelRef.current = modelId;
+  }
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
@@ -139,7 +178,8 @@ export function PromptScreen({
   const [mountDir, setMountDir] = useState<string | null>(
     initialMountDir ?? (forceMountMode ? process.cwd() : null),
   );
-  const modelsMap = useAgentModels();
+  const imageReady = useReadinessStore((s) => s.sandboxImage === 'ready');
+  const modelsMap = useAgentModels(null, imageReady);
   // Ref so callbacks can read the latest modelsMap without depending on the
   // object reference (which changes when models finish loading).
   const modelsMapRef = useRef(modelsMap);
@@ -155,6 +195,46 @@ export function PromptScreen({
     usePromptHistoryStore.getState().initialize();
   }, []);
 
+  // Auto-select a model when models load for the current agent and the current
+  // modelId is null or doesn't match any loaded model.  This handles the
+  // quick-switch case: user presses Tab before OpenCode models have loaded,
+  // so modelId is null.  Once models arrive we pick the best match.
+  //
+  // Priority chain:
+  //  1. Remembered model for this agent (modelMem)
+  //  2. Equivalent of the last model from any agent (cross-agent matching)
+  //  3. Equivalent of the configured default model
+  //  4. Well-known fallbacks (opus, gpt) — avoids landing on niche models
+  //  5. First model in the list (last resort)
+  useEffect(() => {
+    if (!currentModels?.length) return;
+    if (modelId && currentModels.some((m) => m.id === modelId)) return;
+    const best =
+      // 1. Exact match for a previously-remembered model on this agent
+      findExactModel(modelMem.current[agent] ?? null, currentModels) ??
+      // 2. Equivalent of the last model the user had selected (any agent)
+      findEquivalentModel(lastModelRef.current, currentModels) ??
+      // 3. Equivalent of the configured default model
+      findEquivalentModel(defaultModel, currentModels) ??
+      // 4. Well-known fallbacks
+      findPreferredFallback(currentModels) ??
+      // 5. First available
+      currentModels[0]?.id ??
+      null;
+    if (best && best !== modelId) {
+      setModelId(best);
+    }
+  }, [agent, modelId, defaultModel, currentModels]);
+
+  // Trigger credential check for the active agent when image becomes ready,
+  // or when the selected model changes (different models may need different credentials).
+  // Skip if modelId is null — the auto-select effect above will set it, which
+  // will re-trigger this effect with the correct model.
+  useEffect(() => {
+    if (!imageReady || !modelId) return;
+    useReadinessStore.getState().checkAgentAuth(agent, modelId);
+  }, [imageReady, agent, modelId]);
+
   // Handle agent switch with model matching (disabled when resuming)
   const switchAgent = useCallback(() => {
     // Don't allow switching agents when resuming a session
@@ -166,12 +246,13 @@ export function PromptScreen({
       DEFAULT_AGENT;
     setAgent(newAgent);
     const models = modelsMapRef.current;
-    setModelId(
+    const newModelId =
       modelMem.current[newAgent] ||
-        findEquivalentModel(modelId, models[newAgent]) ||
-        models[newAgent]?.[0]?.id ||
-        null,
-    );
+      findEquivalentModel(modelId, models[newAgent]) ||
+      models[newAgent]?.[0]?.id ||
+      null;
+    setModelId(newModelId);
+    // Credential re-check is handled by the useEffect on [imageReady, agent, modelId]
   }, [resumeSession, agent, defaultAgent, modelId]);
 
   // Suspend command keybind dispatch when sub-modals are open
@@ -865,6 +946,7 @@ export function PromptScreen({
               }}
             />
           </box>
+          <ReadinessStatus agent={agent} />
           <HotkeysBar
             keyList={[
               ['tab', 'agent'],

@@ -4,7 +4,6 @@
 
 import { mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { dockerIsRunning } from 'build-strap';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
 import packageJson from '../../package.json' with { type: 'json' };
@@ -488,9 +487,18 @@ export async function dockerImageExists(): Promise<boolean> {
 }
 
 export const ensureDockerSandbox = async (): Promise<void> => {
-  // Check if Docker is running and image exists
-  // If either is false, run the setup screen which handles both
-  if (!(await dockerIsRunning()) || !(await dockerImageExists())) {
+  const { useReadinessStore } = await import('../stores/readinessStore.ts');
+  const state = useReadinessStore.getState();
+
+  // If checks haven't run yet, run them now
+  if (state.dockerInstalled === 'unknown') {
+    await state.runChecks();
+  }
+
+  const afterChecks = useReadinessStore.getState();
+
+  // If Docker is not installed, show the install TUI
+  if (afterChecks.dockerInstalled === 'not-installed') {
     const dockerResult = await runDockerSetupScreen();
     log.debug({ dockerResult }, 'ensureDockerSandbox');
     if (dockerResult.type === 'cancelled') {
@@ -499,6 +507,17 @@ export const ensureDockerSandbox = async (): Promise<void> => {
     if (dockerResult.type === 'error') {
       throw new Error(`Docker setup failed: ${dockerResult.error}`);
     }
+    // Re-run checks after installation
+    useReadinessStore.getState().reset();
+    await useReadinessStore.getState().runChecks();
+  }
+
+  const finalState = useReadinessStore.getState();
+  if (finalState.dockerRunning !== 'running') {
+    throw new Error('Docker is not running');
+  }
+  if (finalState.sandboxImage !== 'ready') {
+    throw new Error('Docker sandbox image is not available');
   }
 };
 

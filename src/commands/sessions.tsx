@@ -63,6 +63,7 @@ import {
   performUpdate,
 } from '../services/updater';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
+import { useReadinessStore } from '../stores/readinessStore.ts';
 import { useToastStore } from '../stores/toastStore';
 import {
   CLI_SUBPROCESS_OPTS,
@@ -460,15 +461,26 @@ function SessionsApp({
         }
 
         // Check agent credentials before starting container
-        setView((v) =>
-          v.type === 'starting'
-            ? { ...v, step: `Checking ${agent} credentials` }
-            : v,
-        );
-        const agentAuthValid =
-          agent === 'claude'
-            ? await checkClaudeCredentials(model || undefined)
-            : await checkOpencodeCredentials(model || undefined);
+        // Use cached result from readiness store if available
+        const readiness = useReadinessStore.getState();
+        const cachedAgentAuth =
+          agent === 'claude' ? readiness.claudeAuth : readiness.opencodeAuth;
+        let agentAuthValid: boolean;
+        if (cachedAgentAuth === 'ready') {
+          agentAuthValid = true;
+        } else if (cachedAgentAuth === 'invalid') {
+          agentAuthValid = false;
+        } else {
+          setView((v) =>
+            v.type === 'starting'
+              ? { ...v, step: `Checking ${agent} credentials` }
+              : v,
+          );
+          agentAuthValid =
+            agent === 'claude'
+              ? await checkClaudeCredentials(model || undefined)
+              : await checkOpencodeCredentials(model || undefined);
+        }
 
         const { isGitRepo: inGitRepo } = propsRef.current;
 
@@ -551,7 +563,15 @@ function SessionsApp({
         }
 
         // Only check GitHub credentials if in a git repo
-        if (inGitRepo && !(await checkGhCredentials())) {
+        // Use cached result from readiness store if available
+        const cachedGhAuth = useReadinessStore.getState().ghAuth;
+        const ghAuthValid =
+          cachedGhAuth === 'ready'
+            ? true
+            : cachedGhAuth === 'invalid'
+              ? false
+              : await checkGhCredentials();
+        if (inGitRepo && !ghAuthValid) {
           onComplete({
             type: 'needs-gh-auth',
             ghAuthInfo: {
@@ -790,9 +810,111 @@ function SessionsApp({
     [onComplete, provider],
   );
 
-  // Handle docker setup completion
+  // Navigate to the appropriate view based on initialView and config
+  const navigateToTargetView = useCallback(
+    (cfg: OxConfig) => {
+      const {
+        initialView: targetView,
+        initialPrompt: prompt,
+        initialAgent,
+        initialModel,
+        initialSession: session,
+      } = propsRef.current;
+
+      if (targetView === 'detail' && session) {
+        setView({ type: 'detail', session });
+      } else if (targetView === 'starting' && prompt) {
+        const agent = initialAgent ?? cfg.agent ?? 'opencode';
+        const model = initialModel ?? cfg.model ?? '';
+
+        // Non-interactive path: wait for readiness before starting session
+        setView({
+          type: 'starting',
+          prompt,
+          agent,
+          model,
+          step: 'Preparing environment',
+          mode: 'async',
+        });
+
+        // Wait for Docker + image to be ready, then start
+        const waitAndStart = async () => {
+          const store = useReadinessStore.getState();
+
+          // If checks haven't completed, subscribe and wait
+          if (store.sandboxImage !== 'ready') {
+            await new Promise<void>((resolve, reject) => {
+              const unsub = useReadinessStore.subscribe((s) => {
+                // Update starting screen with progress
+                if (s.dockerRunning === 'starting') {
+                  setView((v) =>
+                    v.type === 'starting'
+                      ? { ...v, step: 'Starting Docker' }
+                      : v,
+                  );
+                } else if (
+                  s.sandboxImage === 'pulling' ||
+                  s.sandboxImage === 'checking'
+                ) {
+                  const layers = s.pullLayers;
+                  const done = layers.filter(
+                    (l) => l.state === 'complete' || l.state === 'exists',
+                  ).length;
+                  const total = layers.length;
+                  const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
+                  setView((v) =>
+                    v.type === 'starting'
+                      ? {
+                          ...v,
+                          step: `Pulling sandbox image${suffix}`,
+                          layers: s.pullLayers,
+                        }
+                      : v,
+                  );
+                } else if (s.sandboxImage === 'ready') {
+                  unsub();
+                  resolve();
+                } else if (
+                  s.sandboxImage === 'error' ||
+                  s.dockerRunning === 'not-running' ||
+                  s.dockerInstalled === 'not-installed'
+                ) {
+                  unsub();
+                  reject(
+                    new Error(s.error ?? 'Docker environment is not available'),
+                  );
+                }
+              });
+            });
+          }
+
+          startSession(prompt, agent, model);
+        };
+
+        waitAndStart().catch((err) => {
+          log.error({ err }, 'Failed to prepare environment');
+          useToastStore
+            .getState()
+            .show(
+              `Failed to prepare environment: ${err instanceof Error ? err.message : String(err)}`,
+              'error',
+            );
+          setView({ type: 'prompt' });
+        });
+      } else if (targetView === 'prompt') {
+        setView({ type: 'prompt' });
+      } else if (targetView === 'resources') {
+        setView({ type: 'resources' });
+      } else {
+        setView({ type: 'list' });
+      }
+    },
+    [startSession],
+  );
+
+  // Handle docker setup completion (install-only in phase 2)
   const handleDockerComplete = useCallback(
-    async (result: DockerSetupResult) => {
+    (result: DockerSetupResult) => {
       if (result.type === 'cancelled') {
         onComplete({ type: 'quit' });
         return;
@@ -805,48 +927,45 @@ function SessionsApp({
         return;
       }
 
-      // Docker is ready, now check config
-      // Check if project config exists (we need it to run the wizard if not)
+      // Docker was installed — go back to prompt and re-run checks
+      setPromptKey((k) => k + 1);
+      setView({ type: 'prompt' });
+      useReadinessStore.getState().reset();
+      useReadinessStore.getState().runChecks();
+    },
+    [onComplete],
+  );
+
+  // Init: navigate to target view immediately, then kick off readiness checks
+  useEffect(() => {
+    if (view.type !== 'init') return;
+
+    (async () => {
+      // Check if project config exists
       if (!(await projectConfig.exists())) {
         setView({ type: 'config' });
         return;
       }
 
-      // Use merged config for runtime values
+      // Read merged config
       const existingConfig = await readConfig();
       setConfig(existingConfig);
 
-      // Go to target view
-      const {
-        initialView: targetView,
-        initialPrompt: prompt,
-        initialAgent,
-        initialModel,
-        initialSession: session,
-      } = propsRef.current;
+      // Navigate to target view immediately (prompt screen renders fast)
+      navigateToTargetView(existingConfig);
 
-      if (targetView === 'detail' && session) {
-        setView({ type: 'detail', session });
-      } else if (targetView === 'starting' && prompt) {
-        const agent = initialAgent ?? existingConfig.agent ?? 'opencode';
-        const model = initialModel ?? existingConfig.model ?? '';
-        startSession(prompt, agent, model);
-      } else if (targetView === 'prompt') {
-        setView({ type: 'prompt' });
-      } else if (targetView === 'resources') {
-        setView({ type: 'resources' });
-      } else {
-        setView({ type: 'list' });
-      }
-    },
-    [onComplete, startSession],
-  );
+      // Kick off readiness checks in the background
+      useReadinessStore.getState().runChecks();
+    })();
+  }, [view.type, navigateToTargetView]);
 
+  // Watch readiness store: transition to docker setup if not installed
+  const dockerInstalled = useReadinessStore((s) => s.dockerInstalled);
   useEffect(() => {
-    if (view.type === 'init') {
-      handleDockerComplete({ type: 'ready' });
+    if (dockerInstalled === 'not-installed') {
+      setView({ type: 'docker' });
     }
-  }, [view.type, handleDockerComplete]);
+  }, [dockerInstalled]);
 
   // Handle config wizard completion
   const handleConfigComplete = useCallback(
@@ -868,30 +987,11 @@ function SessionsApp({
       const mergedConfig = await readConfig();
       setConfig(mergedConfig);
 
-      // Go to target view
-      const {
-        initialView: targetView,
-        initialPrompt: prompt,
-        initialAgent,
-        initialModel,
-        initialSession: session,
-      } = propsRef.current;
-
-      if (targetView === 'detail' && session) {
-        setView({ type: 'detail', session });
-      } else if (targetView === 'starting' && prompt) {
-        const agent = initialAgent ?? result.config.agent ?? 'opencode';
-        const model = initialModel ?? result.config.model ?? '';
-        startSession(prompt, agent, model);
-      } else if (targetView === 'prompt') {
-        setView({ type: 'prompt' });
-      } else if (targetView === 'resources') {
-        setView({ type: 'resources' });
-      } else {
-        setView({ type: 'list' });
-      }
+      // Navigate to target view and kick off readiness checks
+      navigateToTargetView(mergedConfig);
+      useReadinessStore.getState().runChecks();
     },
-    [onComplete, startSession],
+    [onComplete, navigateToTargetView],
   );
 
   // Handle resume from session detail

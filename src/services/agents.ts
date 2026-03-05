@@ -115,6 +115,7 @@ export async function getModelsForAgent(
 // hook for models
 export const useAgentModels = (
   refreshKey: number | string | null = null,
+  enabled = true,
 ): Record<AgentType, null | readonly Model[]> => {
   const [map, setMap] = useState<Record<AgentType, null | readonly Model[]>>({
     claude: CLAUDE_MODELS,
@@ -122,6 +123,7 @@ export const useAgentModels = (
   });
 
   useEffect(() => {
+    if (!enabled) return;
     // Reset opencode models to null to show loading state during refresh
     // refreshKey is used to trigger re-fetching models after adding a provider
     if (refreshKey) {
@@ -136,7 +138,7 @@ export const useAgentModels = (
         opencode: models,
       }));
     });
-  }, [refreshKey]);
+  }, [refreshKey, enabled]);
 
   return map;
 };
