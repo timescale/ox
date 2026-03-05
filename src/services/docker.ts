@@ -199,23 +199,27 @@ const escapePrompt = (
   prompt?: string | null,
   interactive?: boolean,
 ): string => {
-  // Build the inner command (agent invocation with optional prompt arg)
-  let inner: string;
-  if (prompt) {
-    inner = `OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"; ${cmd} "$OX_PROMPT"`;
-  } else {
-    inner = cmd;
-  }
-
   if (interactive) {
     // Wrap in tmux: start a detached session running the agent, then attach.
     // PID 1 becomes `tmux attach`, keeping the container alive while the
     // agent runs inside the tmux session.
     // -u forces UTF-8 mode so block/box-drawing characters render correctly
     // (matches the Deno cloud sandbox's tmux invocation).
+    // The inner command is a single string passed to tmux (which runs it via
+    // sh -c), so semicolons work fine as separators.
+    const inner = prompt
+      ? `OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"; ${cmd} "$OX_PROMPT"`
+      : cmd;
     return `tmux -u new-session -d -s main ${shellEscape(inner)}\nexec tmux -u attach -t main`;
   }
-  return `exec ${inner}`;
+
+  // Non-interactive (async/detached): exec the agent directly.
+  // The variable assignment MUST be on its own line so `exec` applies to the
+  // agent command, not to the assignment.
+  if (prompt) {
+    return `OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"\nexec ${cmd} "$OX_PROMPT"`;
+  }
+  return `exec ${cmd}`;
 };
 
 // ============================================================================
