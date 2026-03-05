@@ -84,6 +84,9 @@ RUN ln -s /home/${USER_NAME}/.opencode/bin/opencode /home/${USER_NAME}/.local/bi
 
 ENV HOME="/home/${USER_NAME}"
 ENV PATH="/home/${USER_NAME}/.local/bin:$PATH"
+# UTF-8 locale — required for tmux and TUI apps to render Unicode correctly
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 # Prevent Claude Code from auto-updating past the pinned version
 ENV DISABLE_AUTOUPDATER=1
 

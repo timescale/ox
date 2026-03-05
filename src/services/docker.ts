@@ -211,7 +211,9 @@ const escapePrompt = (
     // Wrap in tmux: start a detached session running the agent, then attach.
     // PID 1 becomes `tmux attach`, keeping the container alive while the
     // agent runs inside the tmux session.
-    return `tmux new-session -d -s main ${shellEscape(inner)}\nexec tmux attach -t main`;
+    // -u forces UTF-8 mode so block/box-drawing characters render correctly
+    // (matches the Deno cloud sandbox's tmux invocation).
+    return `tmux -u new-session -d -s main ${shellEscape(inner)}\nexec tmux -u attach -t main`;
   }
   return `exec ${inner}`;
 };
