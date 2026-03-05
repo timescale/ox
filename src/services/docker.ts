@@ -510,17 +510,66 @@ export const ensureDockerSandbox = async (): Promise<void> => {
  * Try to pull a specific image tag
  * Returns true if successful, false otherwise
  */
-async function tryPullImage(imageTag: string): Promise<boolean> {
-  try {
-    await $`docker pull ${imageTag}`.quiet();
+async function tryPullImage(
+  imageTag: string,
+  onProgress?: (layers: PullLayer[]) => void,
+): Promise<boolean> {
+  const proc = Bun.spawn(['docker', 'pull', imageTag], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+
+  const layers = new Map<string, PullLayerState>();
+  const reader = proc.stdout.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value);
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const match = line.trim().match(/^([a-f0-9]+): (.+)$/);
+      if (match) {
+        const id = match[1];
+        const status = match[2];
+        if (!id || !status) continue;
+        if (status.startsWith('Pulling') || status.startsWith('Waiting')) {
+          layers.set(id, 'waiting');
+        } else if (
+          status.startsWith('Downloading') ||
+          status.startsWith('Verifying')
+        ) {
+          layers.set(id, 'downloading');
+        } else if (
+          status.startsWith('Pull complete') ||
+          status.startsWith('Download complete')
+        ) {
+          layers.set(id, 'complete');
+        } else if (status.startsWith('Already exists')) {
+          layers.set(id, 'exists');
+        }
+        onProgress?.(
+          [...layers.entries()].map(([layerId, state]) => ({
+            id: layerId,
+            state,
+          })),
+        );
+      }
+    }
+  }
+
+  const exitCode = await proc.exited;
+  if (exitCode === 0) {
     await recordPullTime(imageTag);
     return true;
-  } catch {
-    return false;
   }
+  return false;
 }
 
-type ProgressCallback = (message: string) => void;
+type ProgressCallback = (message: string, layers?: PullLayer[]) => void;
 
 /**
  * Pull GHCR image for use as build cache.
@@ -533,7 +582,11 @@ async function pullGhcrImageForCache(
 ): Promise<string | null> {
   // Try version-tagged image first (closer cache match)
   onProgress?.('Pulling versioned sandbox image');
-  if (await tryPullImage(ghcrTags.version)) {
+  if (
+    await tryPullImage(ghcrTags.version, (layers) =>
+      onProgress?.('Pulling versioned sandbox image', layers),
+    )
+  ) {
     return ghcrTags.version;
   }
   log.warn(
@@ -543,7 +596,11 @@ async function pullGhcrImageForCache(
 
   // Fall back to latest
   onProgress?.('Pulling latest sandbox image');
-  if (await tryPullImage(ghcrTags.latest)) {
+  if (
+    await tryPullImage(ghcrTags.latest, (layers) =>
+      onProgress?.('Pulling latest sandbox image', layers),
+    )
+  ) {
     return ghcrTags.latest;
   }
   log.error({ image: ghcrTags.latest }, 'Latest GHCR image not found');
@@ -587,11 +644,17 @@ async function buildDockerImage(
   }
 }
 
+export type PullLayerState = 'waiting' | 'downloading' | 'complete' | 'exists';
+export interface PullLayer {
+  id: string;
+  state: PullLayerState;
+}
+
 export type ImageBuildProgress =
   | { type: 'checking' }
   | { type: 'exists' }
-  | { type: 'pulling'; message: string }
-  | { type: 'pulling-cache'; message: string }
+  | { type: 'pulling'; message: string; layers?: PullLayer[] }
+  | { type: 'pulling-cache'; message: string; layers?: PullLayer[] }
   | { type: 'building'; message: string }
   | { type: 'done' };
 
@@ -632,8 +695,10 @@ export async function ensureDockerImage(
         message: 'Pulling sandbox image for cache',
       });
       const ghcrTags = getGhcrImageTags(imageConfig.cacheVariant);
-      const cacheImage = await pullGhcrImageForCache(ghcrTags, (message) =>
-        onProgress?.({ type: 'pulling-cache', message }),
+      const cacheImage = await pullGhcrImageForCache(
+        ghcrTags,
+        (message, layers) =>
+          onProgress?.({ type: 'pulling-cache', message, layers }),
       );
 
       // Build from Dockerfile
@@ -666,7 +731,13 @@ export async function ensureDockerImage(
         type: 'pulling',
         message: `Pulling ${imageConfig.image}`,
       });
-      const pulled = await tryPullImage(imageConfig.image);
+      const pulled = await tryPullImage(imageConfig.image, (layers) =>
+        onProgress?.({
+          type: 'pulling',
+          message: `Pulling ${imageConfig.image}`,
+          layers,
+        }),
+      );
       if (!pulled) {
         throw new Error(
           `Failed to pull configured sandbox image: ${imageConfig.image}`,
@@ -690,7 +761,15 @@ export async function ensureDockerImage(
       type: 'pulling',
       message: 'Pulling versioned sandbox image',
     });
-    if (await tryPullImage(ghcrTags.version)) {
+    if (
+      await tryPullImage(ghcrTags.version, (layers) =>
+        onProgress?.({
+          type: 'pulling',
+          message: 'Pulling versioned sandbox image',
+          layers,
+        }),
+      )
+    ) {
       onProgress?.({ type: 'done' });
       return ghcrTags.version;
     }
@@ -703,7 +782,13 @@ export async function ensureDockerImage(
         type: 'pulling',
         message: 'Refreshing latest sandbox image',
       });
-      await tryPullImage(ghcrTags.latest);
+      await tryPullImage(ghcrTags.latest, (layers) =>
+        onProgress?.({
+          type: 'pulling',
+          message: 'Refreshing latest sandbox image',
+          layers,
+        }),
+      );
       // Use the local image regardless of whether the refresh pull succeeded
       onProgress?.({ type: 'done' });
       return ghcrTags.latest;
@@ -719,7 +804,15 @@ export async function ensureDockerImage(
       type: 'pulling',
       message: 'Pulling latest sandbox image',
     });
-    if (await tryPullImage(ghcrTags.latest)) {
+    if (
+      await tryPullImage(ghcrTags.latest, (layers) =>
+        onProgress?.({
+          type: 'pulling',
+          message: 'Pulling latest sandbox image',
+          layers,
+        }),
+      )
+    ) {
       onProgress?.({ type: 'done' });
       return ghcrTags.latest;
     }
