@@ -40,7 +40,7 @@ export async function sendNativeNotification(
  */
 export function notifySessionComplete(name: string, success: boolean): void {
   sendBell();
-  const title = success ? 'Task Complete' : 'Task Failed';
+  const title = `Ox session ${success ? 'completed' : 'failed'}`;
   const body = `"${name}" ${success ? 'completed successfully' : 'failed'}`;
   sendNativeNotification(title, body).catch(() => {});
 }

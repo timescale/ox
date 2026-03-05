@@ -209,6 +209,7 @@ export function SessionsList({
       if (prevStatuses !== null) {
         for (const session of filtered) {
           if (
+            !session.interactive &&
             prevStatuses.get(session.id) === 'running' &&
             session.status === 'exited'
           ) {

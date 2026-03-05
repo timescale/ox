@@ -168,8 +168,13 @@ export function SessionDetailPanel({
     if (!poll) return;
     const updated = await sessionProvider.get(session.id);
     if (updated) {
-      // Notify when session transitions from running to exited.
-      if (prevStatusRef.current === 'running' && updated.status === 'exited') {
+      // Notify when an async session transitions from running to exited.
+      // Interactive sessions are attached by the user, so a notification is not useful.
+      if (
+        !updated.interactive &&
+        prevStatusRef.current === 'running' &&
+        updated.status === 'exited'
+      ) {
         notifySessionComplete(updated.name, updated.exitCode === 0);
       }
       prevStatusRef.current = updated.status;
