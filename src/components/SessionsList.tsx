@@ -25,6 +25,7 @@ import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
+import { notifySessionComplete } from '../utils/notify.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { ActionButton } from './ActionButton.tsx';
 import { ConfirmModal } from './ConfirmModal';
@@ -90,6 +91,9 @@ export function SessionsList({
   // without depending on the array reference (which changes on every poll).
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  // Track previous session statuses to detect running → exited transitions.
+  // Null until the first load completes (avoids false notifications on startup).
+  const prevSessionStatusesRef = useRef<Map<string, string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [filterText, setFilterText] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -196,7 +200,28 @@ export function SessionsList({
     try {
       const loaded = await listAllSessions();
       const { pendingDeletes } = useSessionStore.getState();
-      setSessions(loaded.filter((s) => !pendingDeletes.has(s.id)));
+      const filtered = loaded.filter((s) => !pendingDeletes.has(s.id));
+
+      // Detect running → exited transitions and notify.
+      // Skip on the first load (prevSessionStatusesRef is null) to avoid
+      // notifying for sessions that already completed before the app started.
+      const prevStatuses = prevSessionStatusesRef.current;
+      if (prevStatuses !== null) {
+        for (const session of filtered) {
+          if (
+            !session.interactive &&
+            prevStatuses.get(session.id) === 'running' &&
+            session.status === 'exited'
+          ) {
+            notifySessionComplete(session.name, session.exitCode === 0);
+          }
+        }
+      }
+      prevSessionStatusesRef.current = new Map(
+        filtered.map((s) => [s.id, s.status]),
+      );
+
+      setSessions(filtered);
     } catch (err) {
       log.error({ err }, 'Failed to load sessions');
       useToastStore.getState().show(`Failed to load sessions: ${err}`, 'error');

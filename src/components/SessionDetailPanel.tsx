@@ -20,6 +20,7 @@ import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
+import { notifySessionComplete } from '../utils/notify.ts';
 import { ActionButton, type ActionButtonProps } from './ActionButton.tsx';
 import { ConfirmModal } from './ConfirmModal';
 import { EmptyBorder } from './PromptScreen.tsx';
@@ -69,6 +70,8 @@ export function SessionDetailPanel({
   sessionRef.current = session;
   const onSessionUpdatedRef = useRef(onSessionUpdated);
   onSessionUpdatedRef.current = onSessionUpdated;
+  // Track the previous status to detect running → exited transitions for notifications.
+  const prevStatusRef = useRef(initialSession.status);
   // Support controlled (external) or uncontrolled (internal) modal state.
   const [internalModal, setInternalModal] = useState<ModalType>(null);
   const modal = controlledModal !== undefined ? controlledModal : internalModal;
@@ -80,6 +83,7 @@ export function SessionDetailPanel({
   // Sync session when the prop changes (e.g. highlighted session changes in list)
   useEffect(() => {
     setSession(initialSession);
+    prevStatusRef.current = initialSession.status;
   }, [initialSession]);
 
   const isRunning = session.status === 'running';
@@ -164,6 +168,16 @@ export function SessionDetailPanel({
     if (!poll) return;
     const updated = await sessionProvider.get(session.id);
     if (updated) {
+      // Notify when an async session transitions from running to exited.
+      // Interactive sessions are attached by the user, so a notification is not useful.
+      if (
+        !updated.interactive &&
+        prevStatusRef.current === 'running' &&
+        updated.status === 'exited'
+      ) {
+        notifySessionComplete(updated.name, updated.exitCode === 0);
+      }
+      prevStatusRef.current = updated.status;
       setSession(updated);
       onSessionUpdatedRef.current?.(updated);
     } else {
