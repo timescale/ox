@@ -26,12 +26,14 @@ import type {
 } from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { usePromptHistoryStore } from '../stores/promptHistoryStore.ts';
+import { useReadinessStore } from '../stores/readinessStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
 import { FilterableSelector } from './FilterableSelector';
 import { HotkeysBar } from './HotkeysBar';
 import { Modal } from './Modal';
 import { OxTitle } from './OxTitle';
+import { ReadinessStatus } from './ReadinessStatus.tsx';
 import { Selector } from './Selector';
 import { SlashCommandPopover } from './SlashCommandPopover.tsx';
 import { ThemePicker } from './ThemePicker.tsx';
@@ -139,7 +141,8 @@ export function PromptScreen({
   const [mountDir, setMountDir] = useState<string | null>(
     initialMountDir ?? (forceMountMode ? process.cwd() : null),
   );
-  const modelsMap = useAgentModels();
+  const imageReady = useReadinessStore((s) => s.sandboxImage === 'ready');
+  const modelsMap = useAgentModels(null, imageReady);
   // Ref so callbacks can read the latest modelsMap without depending on the
   // object reference (which changes when models finish loading).
   const modelsMapRef = useRef(modelsMap);
@@ -865,6 +868,7 @@ export function PromptScreen({
               }}
             />
           </box>
+          <ReadinessStatus />
           <HotkeysBar
             keyList={[
               ['tab', 'agent'],
