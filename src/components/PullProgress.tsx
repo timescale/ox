@@ -15,9 +15,7 @@ const BAR_WIDTH = 24;
 function renderBar(done: number, total: number): string {
   if (total === 0) return '';
   const filled = Math.round((done / total) * BAR_WIDTH);
-  return (
-    '[' + '\u2588'.repeat(filled) + '\u2591'.repeat(BAR_WIDTH - filled) + ']'
-  );
+  return `[${'\u2588'.repeat(filled)}${'\u2591'.repeat(BAR_WIDTH - filled)}]`;
 }
 
 export function PullProgress({
