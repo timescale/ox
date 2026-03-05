@@ -5,7 +5,11 @@
 import type { SelectOption } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ensureDockerImage, type ImageBuildProgress } from '../services/docker';
+import {
+  ensureDockerImage,
+  type ImageBuildProgress,
+  type PullLayer,
+} from '../services/docker';
 import {
   checkDockerStatus,
   type DockerProvider,
@@ -17,6 +21,7 @@ import { createTui } from '../services/tui';
 import { useTheme } from '../stores/themeStore';
 import { CopyOnSelect } from './CopyOnSelect';
 import { Loading } from './Loading';
+import { PullProgress } from './PullProgress';
 import { Selector } from './Selector';
 
 // ============================================================================
@@ -47,7 +52,7 @@ type SetupState =
   | { type: 'starting'; provider: DockerProvider; message: string }
   | { type: 'select-provider'; status: DockerStatus }
   | { type: 'installing'; provider: DockerProvider }
-  | { type: 'building-image'; message: string }
+  | { type: 'building-image'; message: string; layers?: PullLayer[] }
   | { type: 'error'; message: string };
 
 // ============================================================================
@@ -215,6 +220,12 @@ export function DockerSetup({
           break;
         case 'pulling':
         case 'pulling-cache':
+          setState({
+            type: 'building-image',
+            message: progress.message,
+            layers: progress.layers,
+          });
+          break;
         case 'building':
           setState({
             type: 'building-image',
@@ -328,6 +339,16 @@ export function DockerSetup({
 
   // ---- Building Image State ----
   if (state.type === 'building-image') {
+    if (state.layers && state.layers.length > 0) {
+      return (
+        <PullProgress
+          title={title}
+          message={state.message}
+          layers={state.layers}
+          onCancel={handleCancel}
+        />
+      );
+    }
     return (
       <Loading
         title={title}

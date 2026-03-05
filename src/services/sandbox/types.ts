@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { AgentType } from '../config.ts';
+import type { PullLayer } from '../docker.ts';
 import type { RepoInfo } from '../git.ts';
 
 export type SandboxProviderType = 'docker' | 'cloud';
@@ -113,8 +114,8 @@ export interface LogStream {
 export type SandboxBuildProgress =
   | { type: 'checking' }
   | { type: 'exists' }
-  | { type: 'pulling'; message: string }
-  | { type: 'pulling-cache'; message: string }
+  | { type: 'pulling'; message: string; layers?: PullLayer[] }
+  | { type: 'pulling-cache'; message: string; layers?: PullLayer[] }
   | { type: 'building'; message: string }
   | { type: 'done' };
 

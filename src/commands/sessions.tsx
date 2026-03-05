@@ -15,6 +15,7 @@ import { DockerSetup, type DockerSetupResult } from '../components/DockerSetup';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { GlobalToast } from '../components/GlobalToast';
 import { PromptScreen } from '../components/PromptScreen';
+import { PullProgress } from '../components/PullProgress';
 import { ResourcesList } from '../components/ResourcesList';
 import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
@@ -30,7 +31,7 @@ import {
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { getDenoToken } from '../services/deno';
-import { ensureDockerImage } from '../services/docker';
+import { ensureDockerImage, type PullLayer } from '../services/docker';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -104,6 +105,7 @@ type SessionsView =
       model: string;
       step: string;
       mode: SubmitMode;
+      layers?: PullLayer[];
     }
   | {
       type: 'resuming';
@@ -179,7 +181,19 @@ export async function handleNeedsGhAuth(
 
   const { agent, model, prompt } = result.ghAuthInfo;
 
-  await ensureDockerImage();
+  await ensureDockerImage({
+    onProgress: (progress) => {
+      if (progress.type === 'pulling' || progress.type === 'pulling-cache') {
+        const layers = progress.layers ?? [];
+        const done = layers.filter(
+          (l) => l.state === 'complete' || l.state === 'exists',
+        ).length;
+        const total = layers.length;
+        const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
+        process.stdout.write(`\r${progress.message}${suffix}`);
+      }
+    },
+  });
   await ensureGhAuth();
 
   return {
@@ -401,13 +415,20 @@ function SessionsApp({
         });
         await activeProvider.ensureImage({
           onProgress: (progress) => {
-            if (progress.type === 'pulling-cache') {
+            if (
+              progress.type === 'pulling' ||
+              progress.type === 'pulling-cache'
+            ) {
               setView((v) =>
-                v.type === 'starting' ? { ...v, step: progress.message } : v,
+                v.type === 'starting'
+                  ? { ...v, step: progress.message, layers: progress.layers }
+                  : v,
               );
             } else if (progress.type === 'building') {
               setView((v) =>
-                v.type === 'starting' ? { ...v, step: progress.message } : v,
+                v.type === 'starting'
+                  ? { ...v, step: progress.message, layers: undefined }
+                  : v,
               );
             }
           },
@@ -419,12 +440,19 @@ function SessionsApp({
           await ensureDockerImage({
             onProgress: (progress) => {
               if (
-                progress.type === 'pulling-cache' ||
-                progress.type === 'building' ||
-                progress.type === 'pulling'
+                progress.type === 'pulling' ||
+                progress.type === 'pulling-cache'
               ) {
                 setView((v) =>
-                  v.type === 'starting' ? { ...v, step: progress.message } : v,
+                  v.type === 'starting'
+                    ? { ...v, step: progress.message, layers: progress.layers }
+                    : v,
+                );
+              } else if (progress.type === 'building') {
+                setView((v) =>
+                  v.type === 'starting'
+                    ? { ...v, step: progress.message, layers: undefined }
+                    : v,
                 );
               }
             },
@@ -1063,9 +1091,14 @@ function SessionsApp({
       view.mode === 'interactive' || view.mode === 'plan'
         ? 'Hint: press ctrl+\\ to detach an interactive session'
         : undefined;
+    const layers = view.type === 'starting' ? view.layers : undefined;
     return (
       <>
-        <StartingScreen step={view.step} hint={hint} />
+        {layers && layers.length > 0 ? (
+          <PullProgress message={view.step} layers={layers} />
+        ) : (
+          <StartingScreen step={view.step} hint={hint} />
+        )}
         <GlobalToast />
         <BackgroundTaskIndicator />
         <ShutdownOverlay />
@@ -1366,7 +1399,22 @@ export async function runSessionsTui({
       // Auth flows run inside Docker containers, so ensure the image is
       // available before attempting login.
       try {
-        await ensureDockerImage();
+        await ensureDockerImage({
+          onProgress: (progress) => {
+            if (
+              progress.type === 'pulling' ||
+              progress.type === 'pulling-cache'
+            ) {
+              const layers = progress.layers ?? [];
+              const done = layers.filter(
+                (l) => l.state === 'complete' || l.state === 'exists',
+              ).length;
+              const total = layers.length;
+              const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
+              process.stdout.write(`\r${progress.message}${suffix}`);
+            }
+          },
+        });
       } catch (err) {
         console.error(
           `\nFailed to prepare Docker sandbox: ${err instanceof Error ? err.message : String(err)}`,
