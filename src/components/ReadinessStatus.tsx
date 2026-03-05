@@ -13,7 +13,7 @@ export interface ReadinessStatusProps {
  * Shows the highest-priority active status. Renders nothing when all checks
  * are complete and successful.
  */
-export function ReadinessStatus({ agent }: ReadinessStatusProps) {
+function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
   const { theme } = useTheme();
   const dockerRunning = useReadinessStore((s) => s.dockerRunning);
   const sandboxImage = useReadinessStore((s) => s.sandboxImage);
@@ -26,23 +26,19 @@ export function ReadinessStatus({ agent }: ReadinessStatusProps) {
   // Error state
   if (error && (dockerRunning === 'not-running' || sandboxImage === 'error')) {
     return (
-      <box height={1}>
-        <text fg={theme.error}>
-          {'\u2717'} {error}
-        </text>
-      </box>
+      <text fg={theme.error}>
+        {'\u2717 '} {error}
+      </text>
     );
   }
 
   // Docker starting
   if (dockerRunning === 'starting' || dockerRunning === 'checking') {
     return (
-      <box height={1}>
-        <text fg={theme.warning}>
-          {'\u27F3'} Starting Docker
-          <Dots />
-        </text>
-      </box>
+      <text fg={theme.warning}>
+        {'\u27F3 '} Starting Docker
+        <Dots />
+      </text>
     );
   }
 
@@ -54,24 +50,20 @@ export function ReadinessStatus({ agent }: ReadinessStatusProps) {
     const total = pullLayers.length;
     const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
     return (
-      <box height={1}>
-        <text fg={theme.warning}>
-          {'\u27F3'} Pulling sandbox image{suffix}
-          <Dots />
-        </text>
-      </box>
+      <text fg={theme.warning}>
+        {'\u27F3 '} Pulling sandbox image{suffix}
+        <Dots />
+      </text>
     );
   }
 
   // Image checking
   if (sandboxImage === 'checking') {
     return (
-      <box height={1}>
-        <text fg={theme.textMuted}>
-          {'\u27F3'} Checking sandbox image
-          <Dots />
-        </text>
-      </box>
+      <text fg={theme.textMuted}>
+        {'\u27F3 '} Checking sandbox image
+        <Dots />
+      </text>
     );
   }
 
@@ -79,12 +71,10 @@ export function ReadinessStatus({ agent }: ReadinessStatusProps) {
   const agentAuth = agent === 'claude' ? claudeAuth : opencodeAuth;
   if (agentAuth === 'checking' || ghAuth === 'checking') {
     return (
-      <box height={1}>
-        <text fg={theme.textMuted}>
-          {'\u27F3'} Checking credentials
-          <Dots />
-        </text>
-      </box>
+      <text fg={theme.textMuted}>
+        {'\u27F3 '} Checking credentials
+        <Dots />
+      </text>
     );
   }
 
@@ -99,14 +89,20 @@ export function ReadinessStatus({ agent }: ReadinessStatusProps) {
   }
   if (warnings.length > 0) {
     return (
-      <box height={1}>
-        <text fg={theme.warning}>
-          {'\u26A0'} {warnings.join(' \u2022 ')} (will prompt on submit)
-        </text>
-      </box>
+      <text fg={theme.warning}>
+        {'\u26A0 '} {warnings.join(' \u2022 ')} (will prompt on submit)
+      </text>
     );
   }
 
   // All clear — render nothing
   return null;
+}
+
+export function ReadinessStatus({ agent }: ReadinessStatusProps) {
+  return (
+    <box height={1} paddingLeft={1} paddingRight={1}>
+      <ReadinessStatusInner agent={agent} />
+    </box>
+  );
 }
