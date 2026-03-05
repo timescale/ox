@@ -1255,7 +1255,11 @@ function SessionsApp({
   if (view.type === 'resources') {
     return (
       <>
-        <ResourcesList onBack={() => setView({ type: 'list' })} />
+        <ResourcesList
+          onBack={() => setView({ type: 'list' })}
+          onNewTask={() => setView({ type: 'prompt' })}
+          onSessionsList={() => setView({ type: 'list' })}
+        />
         <GlobalToast />
         <BackgroundTaskIndicator />
         <ShutdownOverlay />
