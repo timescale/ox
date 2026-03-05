@@ -22,6 +22,7 @@ import {
   formatShellError,
   resetTerminal,
   type ShellError,
+  shellEscape,
 } from '../utils/shell.ts';
 import { buildAgentCommand } from './agentCommand';
 import { getClaudeConfigFiles } from './claude';
@@ -183,13 +184,39 @@ async function cleanupOverlayDirs(containerName: string): Promise<void> {
   }
 }
 
-const escapePrompt = (cmd: string, prompt?: string | null): string =>
-  prompt
-    ? `
-OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"
-exec ${cmd} "$OX_PROMPT"
-`.trim()
-    : `exec ${cmd}`;
+/**
+ * Build the final command line for agent startup scripts.
+ *
+ * For interactive sessions, wraps the agent in a tmux session so that
+ * `docker attach` connects to tmux (which provides uniform mouse support,
+ * true-color, and detach behavior across all agents).  PID 1 becomes
+ * `tmux attach`, keeping the container alive.
+ *
+ * Non-interactive (async/detached) sessions skip tmux and exec directly.
+ */
+const escapePrompt = (
+  cmd: string,
+  prompt?: string | null,
+  interactive?: boolean,
+): string => {
+  // Build the inner command (agent invocation with optional prompt arg)
+  let inner: string;
+  if (prompt) {
+    inner = `OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"; ${cmd} "$OX_PROMPT"`;
+  } else {
+    inner = cmd;
+  }
+
+  if (interactive) {
+    // Wrap in tmux: start a detached session running the agent, then attach.
+    // PID 1 becomes `tmux attach`, keeping the container alive while the
+    // agent runs inside the tmux session.
+    // -u forces UTF-8 mode so block/box-drawing characters render correctly
+    // (matches the Deno cloud sandbox's tmux invocation).
+    return `tmux -u new-session -d -s main ${shellEscape(inner)}\nexec tmux -u attach -t main`;
+  }
+  return `exec ${inner}`;
+};
 
 // ============================================================================
 // Sandbox Image Configuration
@@ -1290,16 +1317,14 @@ export function streamContainerLogs(nameOrId: string): LogStream {
  */
 export async function attachToContainer(
   nameOrId: string,
-  options?: AttachOptions,
+  _options?: AttachOptions,
 ): Promise<void> {
   // Enter alternate screen so all container output is isolated from the
   // user's main screen buffer / scrollback history.
-  // Only enable mouse tracking for agents with a TUI that handles mouse
-  // events (opencode). Claude Code is a CLI and prints garbled escape
-  // sequences when it receives mouse reports.
+  // Mouse tracking is handled uniformly by tmux inside the container
+  // (set -g mouse on in .tmux.conf) — no per-agent conditional needed.
   enterSubprocessScreen({
     alternateScreen: true,
-    mouse: options?.agent === 'opencode',
   });
 
   const proc = Bun.spawn(
@@ -1473,7 +1498,7 @@ exec bash
 set -e
 cd /work/app
 ${config.initScript || ''}
-${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached' : 'interactive', model, agentArgs: options.agentArgs, continue: true }), prompt)}
+${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached' : 'interactive', model, agentArgs: options.agentArgs, continue: true }), prompt, mode === 'interactive')}
 `.trim();
 
   const oxLabels = buildOxLabels({
@@ -1702,7 +1727,7 @@ if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
   git switch -c "ox/${branchName}"
 fi
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt)}
+${escapePrompt(agentCommand, fullPrompt, interactive)}
 `.trim();
     } else {
       // Mount mode outside a git repo - skip all git/gh operations
@@ -1710,7 +1735,7 @@ ${escapePrompt(agentCommand, fullPrompt)}
 set -e
 cd /work/app
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt)}
+${escapePrompt(agentCommand, fullPrompt, interactive)}
 `.trim();
     }
   } else {
@@ -1726,7 +1751,7 @@ gh repo clone ${repoInfo.fullName} app
 cd app
 git switch -c "ox/${branchName}"
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt)}
+${escapePrompt(agentCommand, fullPrompt, interactive)}
 `.trim();
   }
 

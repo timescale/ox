@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   tar \
   gzip \
   jq \
+  tmux \
   && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI
@@ -55,6 +56,20 @@ RUN groupadd --gid ${USER_GID} ${USER_NAME} \
   && mkdir -p /home/${USER_NAME}/.claude \
   && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}
 
+# tmux config for agent sessions — mouse support, true-color, ctrl+\ detach
+COPY --chown=${USER_UID}:${USER_GID} <<'TMUX_EOF' /home/${USER_NAME}/.tmux.conf
+# Detach with ctrl+\ (no prefix needed) — matches Docker detach keys.
+bind -n C-\\ detach-client -E true
+# Keep default prefix (ctrl+b) for other tmux commands
+set -g mouse on
+# Hide status bar — ox manages the session, no need for tmux chrome
+set -g status off
+# True-color support — xterm-256color + Tc flag enables 24-bit RGB
+# passthrough so TUI apps (OpenCode, Claude) render correctly
+set -g default-terminal "xterm-256color"
+set -ga terminal-overrides ",xterm-256color:Tc"
+TMUX_EOF
+
 # Install claude code as non-root user
 USER ${USER_NAME}
 RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}
@@ -69,6 +84,9 @@ RUN ln -s /home/${USER_NAME}/.opencode/bin/opencode /home/${USER_NAME}/.local/bi
 
 ENV HOME="/home/${USER_NAME}"
 ENV PATH="/home/${USER_NAME}/.local/bin:$PATH"
+# UTF-8 locale — required for tmux and TUI apps to render Unicode correctly
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 # Prevent Claude Code from auto-updating past the pinned version
 ENV DISABLE_AUTOUPDATER=1
 
