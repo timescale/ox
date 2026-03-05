@@ -73,7 +73,8 @@ interface ToastState {
 
 /**
  * Find an equivalent model when switching agents.
- * Tries to match by model family name (opus, sonnet, haiku).
+ * Tries to match by model family name (opus, sonnet, haiku, gpt).
+ * Returns null if no family match is found (does NOT fall back to first).
  */
 function findEquivalentModel(
   currentModel: string | null,
@@ -86,7 +87,7 @@ function findEquivalentModel(
   const lower = currentModel.toLowerCase();
 
   // Try to match by model family name
-  const families = ['opus', 'sonnet', 'haiku'];
+  const families = ['opus', 'sonnet', 'haiku', 'gpt'];
   for (const family of families) {
     if (lower.includes(family)) {
       const match = targetModels.findLast((m) =>
@@ -96,8 +97,36 @@ function findEquivalentModel(
     }
   }
 
-  // No match found, use first available
-  return targetModels[0]?.id || null;
+  return null;
+}
+
+/**
+ * Check if a model ID exists in the target list (exact match).
+ */
+function findExactModel(
+  modelId: string | null,
+  targetModels: null | readonly Model[],
+): string | null {
+  if (!modelId || !targetModels?.length) return null;
+  const match = targetModels.find((m) => m.id === modelId);
+  return match?.id ?? null;
+}
+
+/** Well-known fallback model ID fragments, in priority order. */
+const PREFERRED_FALLBACKS = ['opus', 'gpt'];
+
+/**
+ * Find the first model matching any preferred fallback family.
+ * Avoids landing on niche/unknown models when no equivalent is found.
+ */
+function findPreferredFallback(targetModels: readonly Model[]): string | null {
+  for (const family of PREFERRED_FALLBACKS) {
+    const match = targetModels.findLast((m) =>
+      m.id.toLowerCase().includes(family),
+    );
+    if (match) return match.id;
+  }
+  return null;
 }
 
 export function PromptScreen({
@@ -121,10 +150,18 @@ export function PromptScreen({
     defaultSandboxProvider ?? 'docker',
   );
   const [modelId, setModelId] = useState<string | null>(defaultModel);
-  const modelMem = useRef({
+  const modelMem = useRef<Partial<Record<AgentType, string | null>>>({
     [defaultAgent]: defaultModel,
   });
-  modelMem.current[agent] = modelId;
+  // Track the last non-null model across any agent, used for cross-agent
+  // equivalent matching when models load asynchronously.
+  const lastModelRef = useRef<string | null>(defaultModel);
+  // Only remember non-null selections so the memo always holds the
+  // last *good* model per agent (null means "nothing chosen yet").
+  if (modelId) {
+    modelMem.current[agent] = modelId;
+    lastModelRef.current = modelId;
+  }
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
@@ -162,18 +199,32 @@ export function PromptScreen({
   // modelId is null or doesn't match any loaded model.  This handles the
   // quick-switch case: user presses Tab before OpenCode models have loaded,
   // so modelId is null.  Once models arrive we pick the best match.
+  //
+  // Priority chain:
+  //  1. Remembered model for this agent (modelMem)
+  //  2. Equivalent of the last model from any agent (cross-agent matching)
+  //  3. Equivalent of the configured default model
+  //  4. Well-known fallbacks (opus, gpt) — avoids landing on niche models
+  //  5. First model in the list (last resort)
   useEffect(() => {
     if (!currentModels?.length) return;
     if (modelId && currentModels.some((m) => m.id === modelId)) return;
     const best =
-      findEquivalentModel(modelMem.current[agent] ?? null, currentModels) ??
+      // 1. Exact match for a previously-remembered model on this agent
+      findExactModel(modelMem.current[agent] ?? null, currentModels) ??
+      // 2. Equivalent of the last model the user had selected (any agent)
+      findEquivalentModel(lastModelRef.current, currentModels) ??
+      // 3. Equivalent of the configured default model
+      findEquivalentModel(defaultModel, currentModels) ??
+      // 4. Well-known fallbacks
+      findPreferredFallback(currentModels) ??
+      // 5. First available
       currentModels[0]?.id ??
       null;
     if (best && best !== modelId) {
       setModelId(best);
-      modelMem.current[agent] = best;
     }
-  }, [agent, modelId, currentModels]);
+  }, [agent, modelId, defaultModel, currentModels]);
 
   // Trigger credential check for the active agent when image becomes ready,
   // or when the selected model changes (different models may need different credentials).
