@@ -461,15 +461,26 @@ function SessionsApp({
         }
 
         // Check agent credentials before starting container
-        setView((v) =>
-          v.type === 'starting'
-            ? { ...v, step: `Checking ${agent} credentials` }
-            : v,
-        );
-        const agentAuthValid =
-          agent === 'claude'
-            ? await checkClaudeCredentials(model || undefined)
-            : await checkOpencodeCredentials(model || undefined);
+        // Use cached result from readiness store if available
+        const readiness = useReadinessStore.getState();
+        const cachedAgentAuth =
+          agent === 'claude' ? readiness.claudeAuth : readiness.opencodeAuth;
+        let agentAuthValid: boolean;
+        if (cachedAgentAuth === 'ready') {
+          agentAuthValid = true;
+        } else if (cachedAgentAuth === 'invalid') {
+          agentAuthValid = false;
+        } else {
+          setView((v) =>
+            v.type === 'starting'
+              ? { ...v, step: `Checking ${agent} credentials` }
+              : v,
+          );
+          agentAuthValid =
+            agent === 'claude'
+              ? await checkClaudeCredentials(model || undefined)
+              : await checkOpencodeCredentials(model || undefined);
+        }
 
         const { isGitRepo: inGitRepo } = propsRef.current;
 
@@ -552,7 +563,15 @@ function SessionsApp({
         }
 
         // Only check GitHub credentials if in a git repo
-        if (inGitRepo && !(await checkGhCredentials())) {
+        // Use cached result from readiness store if available
+        const cachedGhAuth = useReadinessStore.getState().ghAuth;
+        const ghAuthValid =
+          cachedGhAuth === 'ready'
+            ? true
+            : cachedGhAuth === 'invalid'
+              ? false
+              : await checkGhCredentials();
+        if (inGitRepo && !ghAuthValid) {
           onComplete({
             type: 'needs-gh-auth',
             ghAuthInfo: {

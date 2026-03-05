@@ -169,12 +169,17 @@ export function PromptScreen({
       DEFAULT_AGENT;
     setAgent(newAgent);
     const models = modelsMapRef.current;
-    setModelId(
+    const newModelId =
       modelMem.current[newAgent] ||
-        findEquivalentModel(modelId, models[newAgent]) ||
-        models[newAgent]?.[0]?.id ||
-        null,
-    );
+      findEquivalentModel(modelId, models[newAgent]) ||
+      models[newAgent]?.[0]?.id ||
+      null;
+    setModelId(newModelId);
+
+    // Trigger lazy credential check for the new agent
+    useReadinessStore
+      .getState()
+      .checkAgentAuth(newAgent, newModelId ?? undefined);
   }, [resumeSession, agent, defaultAgent, modelId]);
 
   // Suspend command keybind dispatch when sub-modals are open
@@ -868,7 +873,7 @@ export function PromptScreen({
               }}
             />
           </box>
-          <ReadinessStatus />
+          <ReadinessStatus agent={agent} />
           <HotkeysBar
             keyList={[
               ['tab', 'agent'],
