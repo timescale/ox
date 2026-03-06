@@ -27,6 +27,7 @@ import type {
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { usePromptHistoryStore } from '../stores/promptHistoryStore.ts';
 import { useReadinessStore } from '../stores/readinessStore.ts';
+import { useRouterStore } from '../stores/routerStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
 import { FilterableSelector } from './FilterableSelector';
@@ -60,10 +61,6 @@ export interface PromptScreenProps {
     sandboxProvider: SandboxProviderType;
   }) => void;
   onShell: (mountDir?: string, sandboxProvider?: SandboxProviderType) => void; // Launch bash shell
-  onCancel: () => void;
-  onViewSessions?: () => void;
-  /** Reset to a fresh new-prompt screen (clears resume state + all settings) */
-  onNewPrompt?: () => void;
 }
 
 interface ToastState {
@@ -139,8 +136,6 @@ export function PromptScreen({
   forceMountMode = false,
   onSubmit,
   onShell,
-  onViewSessions,
-  onNewPrompt,
 }: PromptScreenProps) {
   const { theme } = useTheme();
   const textareaRef = useRef<TextareaRenderable>(null);
@@ -315,9 +310,9 @@ export function PromptScreen({
         id: 'sessions.view',
         title: 'View sessions list',
         description: 'Browse and manage existing sessions',
-        category: 'Session',
+        category: 'Navigation',
         keybind: { key: 'l', ctrl: true },
-        onSelect: () => onViewSessions?.(),
+        onSelect: () => useRouterStore.getState().goToList(),
       },
       {
         id: 'mount.toggle',
@@ -386,13 +381,19 @@ export function PromptScreen({
         },
       },
       {
+        id: 'navigate-resources',
+        title: 'Manage Resources',
+        description: 'View and manage sandbox images, volumes, and snapshots',
+        category: 'Navigation',
+        onSelect: () => useRouterStore.getState().goToResources(),
+      },
+      {
         id: 'task.new',
         title: 'New task',
         description: 'Reset to a fresh new prompt',
         category: 'Navigation',
         keybind: { key: 'n', ctrl: true },
-        enabled: !!onNewPrompt,
-        onSelect: () => onNewPrompt?.(),
+        onSelect: () => useRouterStore.getState().goToNewPrompt(),
       },
       {
         id: 'theme.select',
@@ -412,8 +413,6 @@ export function PromptScreen({
       mountDir,
       sandboxProvider,
       onShell,
-      onViewSessions,
-      onNewPrompt,
     ],
   );
 
@@ -469,7 +468,19 @@ export function PromptScreen({
           if (textareaRef.current) {
             textareaRef.current.clear();
           }
-          onViewSessions?.();
+          useRouterStore.getState().goToList();
+        },
+      },
+      {
+        name: 'resources',
+        description: 'Manage sandbox resources',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          useRouterStore.getState().goToResources();
         },
       },
       {
@@ -642,7 +653,6 @@ export function PromptScreen({
     [
       resumeSession,
       currentModels,
-      onViewSessions,
       switchAgent,
       mountMode,
       forceMountMode,

@@ -22,6 +22,7 @@ import {
   getStatusText,
 } from '../services/sessionDisplay';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
+import { useRouterStore } from '../stores/routerStore.ts';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
@@ -38,13 +39,7 @@ export type FilterMode = 'all' | 'running' | 'completed';
 export type ScopeMode = 'local' | 'global';
 
 export interface SessionsListProps {
-  onSelect: (session: OxSession) => void;
-  onQuit: () => void;
-  onNewTask?: () => void;
-  onAttach?: (session: OxSession) => void;
-  onShell?: (session: OxSession) => void;
   onResume?: (session: OxSession) => void;
-  onResources?: () => void;
   /** Current repo fullName (e.g., "owner/repo") if in a git repo, undefined otherwise */
   currentRepo?: string;
 }
@@ -64,16 +59,7 @@ const SCOPE_LABELS: Record<ScopeMode, string> = {
 
 const SCOPE_ORDER: ScopeMode[] = ['local', 'global'];
 
-export function SessionsList({
-  onSelect,
-  onQuit,
-  onNewTask,
-  onAttach,
-  onShell,
-  onResume,
-  onResources,
-  currentRepo,
-}: SessionsListProps) {
+export function SessionsList({ onResume, currentRepo }: SessionsListProps) {
   const { theme } = useTheme();
   const { rows, columns } = useWindowSize();
   const isBig = rows >= 30 && columns >= 61;
@@ -231,12 +217,9 @@ export function SessionsList({
   }, []);
 
   // Mouse handlers for session rows
-  const handleRowClick = useCallback(
-    (session: OxSession) => {
-      onSelect(session);
-    },
-    [onSelect],
-  );
+  const handleRowClick = useCallback((session: OxSession) => {
+    useRouterStore.getState().goToDetail(session);
+  }, []);
 
   const handleRowHover = useCallback((index: number) => {
     setHoveredIndex(index);
@@ -464,7 +447,7 @@ export function SessionsList({
         enabled: hasSessions,
         onSelect: () => {
           const s = getSelectedSession();
-          if (s) onSelect(s);
+          if (s) useRouterStore.getState().goToDetail(s);
         },
       },
       {
@@ -473,8 +456,7 @@ export function SessionsList({
         description: 'Start a new ox session',
         category: 'Navigation',
         keybind: { key: 'n', ctrl: true },
-        enabled: !!onNewTask,
-        onSelect: () => onNewTask?.(),
+        onSelect: () => useRouterStore.getState().goToPrompt(),
       },
       {
         id: 'navigate-resources',
@@ -482,8 +464,7 @@ export function SessionsList({
         description: 'View and manage sandbox images, volumes, and snapshots',
         category: 'Navigation',
         keybind: { key: 'e', ctrl: true, display: 'ctrl+e' },
-        enabled: !!onResources,
-        onSelect: () => onResources?.(),
+        onSelect: () => useRouterStore.getState().goToResources(),
       },
       {
         id: 'filter.cycle',
@@ -536,10 +517,10 @@ export function SessionsList({
         description: 'Connect to the selected running container interactively',
         category: 'Session',
         keybind: { key: 'a', ctrl: true },
-        enabled: isRunning && !!onAttach,
+        enabled: isRunning,
         onSelect: () => {
           const s = getSelectedSession();
-          if (s) onAttach?.(s);
+          if (s) useRouterStore.getState().attach(s.id, s);
         },
       },
       {
@@ -560,10 +541,10 @@ export function SessionsList({
         description: 'Open a bash shell inside the selected container',
         category: 'Session',
         keybind: { key: 's', ctrl: true },
-        enabled: isRunning && !!onShell,
+        enabled: isRunning,
         onSelect: () => {
           const s = getSelectedSession();
-          if (s) onShell?.(s);
+          if (s) useRouterStore.getState().execShell(s.id, s);
         },
       },
       {
@@ -624,12 +605,7 @@ export function SessionsList({
     // that change the set of commands.  Handlers read dynamic state at invocation
     // time via refs / store.getState() so they don't need to be deps.
   }, [
-    onSelect,
-    onNewTask,
-    onAttach,
-    onShell,
     onResume,
-    onResources,
     cycleFilter,
     toggleScope,
     currentRepo,
@@ -650,7 +626,7 @@ export function SessionsList({
     // Escape returns to prompt screen (but not if the command palette is open)
     if (key.name === 'escape') {
       if (!isOpen) {
-        onNewTask ? onNewTask() : onQuit();
+        useRouterStore.getState().goToPrompt();
       }
       return;
     }
@@ -971,14 +947,6 @@ export function SessionsList({
           <SessionDetailPanel
             key={selectedSession.id}
             session={selectedSession}
-            onAttach={(id) => {
-              const s = filteredSessions.find((sess) => sess.id === id);
-              if (s) onAttach?.(s);
-            }}
-            onShell={(id) => {
-              const s = filteredSessions.find((sess) => sess.id === id);
-              if (s) onShell?.(s);
-            }}
             onResume={(s) => onResume?.(s)}
             onSessionDeleted={handlePanelSessionDeleted}
             poll={false}

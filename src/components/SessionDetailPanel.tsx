@@ -17,6 +17,7 @@ import {
   getStatusText,
 } from '../services/sessionDisplay';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
+import { useRouterStore } from '../stores/routerStore.ts';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
@@ -30,12 +31,10 @@ const PR_CACHE_TTL = 60_000;
 
 export interface SessionDetailPanelProps {
   session: OxSession;
-  onAttach: (sessionId: string) => void;
-  onShell: (sessionId: string) => void;
   onResume: (session: OxSession) => void;
   onSessionDeleted: () => void;
-  /** Optional back button handler. When provided, a "back" button is shown. */
-  onBack?: () => void;
+  /** Optional: show a back button that navigates to the list view */
+  showBack?: boolean;
   /** If true, polls for session updates and PR info. Defaults to true. */
   poll?: boolean;
   /** Called when the session metadata is refreshed via polling. */
@@ -50,11 +49,9 @@ export type ModalType = 'stop' | 'delete' | null;
 
 export function SessionDetailPanel({
   session: initialSession,
-  onAttach,
-  onShell,
   onResume,
   onSessionDeleted,
-  onBack,
+  showBack = false,
   poll = true,
   onSessionUpdated,
   modal: controlledModal,
@@ -285,14 +282,20 @@ export function SessionDetailPanel({
               keybind: session.interactive ? '^a' : '^r',
               color: theme.primary,
               onPress: session.interactive
-                ? () => onAttach(sessionRef.current.id)
+                ? () =>
+                    useRouterStore
+                      .getState()
+                      .attach(sessionRef.current.id, sessionRef.current)
                 : () => onResume(sessionRef.current),
             },
             {
               label: 'shell',
               keybind: '^s',
               color: theme.accent,
-              onPress: () => onShell(sessionRef.current.id),
+              onPress: () =>
+                useRouterStore
+                  .getState()
+                  .execShell(sessionRef.current.id, sessionRef.current),
             },
             {
               label: 'stop',
@@ -322,8 +325,6 @@ export function SessionDetailPanel({
       isStopped,
       session.interactive,
       theme,
-      onAttach,
-      onShell,
       onResume,
       handleResume,
       setModal,
@@ -544,8 +545,12 @@ export function SessionDetailPanel({
           <ActionButton key={btn.label} {...btn} />
         ))}
         <box flexGrow={1} />
-        {onBack && (
-          <ActionButton label="back" color={theme.textMuted} onPress={onBack} />
+        {showBack && (
+          <ActionButton
+            label="back"
+            color={theme.textMuted}
+            onPress={() => useRouterStore.getState().goToList()}
+          />
         )}
         <ActionButton
           label="commands"
