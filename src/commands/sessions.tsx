@@ -1221,7 +1221,7 @@ function SessionsApp({
   // ---- Session Detail View ----
   if (view.type === 'detail') {
     return (
-      <>
+      <box flexDirection="column" width="100%" height="100%">
         <SessionDetail
           session={view.session}
           onBack={() => setView({ type: 'list' })}
@@ -1244,10 +1244,10 @@ function SessionsApp({
           onNewPrompt={() => setView({ type: 'prompt' })}
         />
         <GlobalToast />
-        <BackgroundTaskIndicator />
+        <BackgroundTaskIndicator bottom={1} />
         <ShutdownOverlay />
         <CommandPaletteHost />
-      </>
+      </box>
     );
   }
 

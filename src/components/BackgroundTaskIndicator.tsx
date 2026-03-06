@@ -10,8 +10,8 @@ export interface BackgroundTaskIndicatorProps {
 }
 
 export function BackgroundTaskIndicator({
-  bottom = 1,
-  left = 2,
+  bottom,
+  left,
   top,
   right,
 }: BackgroundTaskIndicatorProps = {}) {
@@ -19,6 +19,14 @@ export function BackgroundTaskIndicator({
   const { theme } = useTheme();
 
   if (pendingCount === 0) return null;
+
+  if (bottom == null && top == null) {
+    top = 1;
+  }
+  if (left == null && right == null) {
+    left = 2;
+    right = 2;
+  }
 
   const label = pendingCount === 1 ? '1 task' : `${pendingCount} tasks`;
 
@@ -29,11 +37,13 @@ export function BackgroundTaskIndicator({
       left={left}
       top={top}
       right={right}
-      backgroundColor={theme.backgroundPanel}
+      flexDirection="row"
+      justifyContent="center"
+      alignItems="center"
     >
-      <text fg={theme.textMuted}>
-        <span fg={theme.primary}>⟳</span> {label}
-        <Dots />
+      <text fg={theme.textMuted} bg={theme.background}>
+        <span fg={theme.primary}> ⟳ </span> {label}
+        <Dots />{' '}
       </text>
     </box>
   );

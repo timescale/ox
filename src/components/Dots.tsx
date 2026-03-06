@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 // Animated ... indicator
 export function Dots() {
   const count = useRef(0);
-  const [dots, setDots] = useState('');
+  const [dots, setDots] = useState('   ');
 
   useEffect(() => {
     const interval = setInterval(() => {

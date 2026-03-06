@@ -1034,7 +1034,7 @@ export function PromptScreen({
         />
       )}
 
-      <BackgroundTaskIndicator bottom={3} />
+      <BackgroundTaskIndicator />
     </box>
   );
 }
