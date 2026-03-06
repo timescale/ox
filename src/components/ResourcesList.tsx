@@ -1,6 +1,7 @@
 import type { ScrollBoxRenderable } from '@opentui/core';
 import { flushSync, useKeyboard } from '@opentui/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useWindowSize } from '../hooks/useWindowSize.ts';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import { log } from '../services/logger.ts';
 import {
@@ -14,9 +15,9 @@ import { formatSize } from '../services/sessionDisplay.ts';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { useToastStore } from '../stores/toastStore.ts';
+import { ActionButton } from './ActionButton.tsx';
 import { ConfirmModal } from './ConfirmModal.tsx';
-import { Frame } from './Frame.tsx';
-import { HotkeysBar } from './HotkeysBar.tsx';
+import { ResourceDetailPanel } from './ResourceDetailPanel.tsx';
 
 // ============================================================================
 // Types
@@ -24,6 +25,8 @@ import { HotkeysBar } from './HotkeysBar.tsx';
 
 export interface ResourcesListProps {
   onBack: () => void;
+  onNewTask?: () => void;
+  onSessionsList?: () => void;
 }
 
 type FilterMode = 'all' | 'container' | 'snapshot' | 'volume' | 'image';
@@ -85,8 +88,14 @@ function statusLabel(status: SandboxResource['status']): string {
 // Component
 // ============================================================================
 
-export function ResourcesList({ onBack }: ResourcesListProps) {
+export function ResourcesList({
+  onBack,
+  onNewTask,
+  onSessionsList,
+}: ResourcesListProps) {
   const { theme } = useTheme();
+  const { rows, columns } = useWindowSize();
+  const isBig = rows >= 30 && columns >= 61;
 
   const [resources, setResources] = useState<SandboxResource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,6 +117,9 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
     if (filterMode === 'all') return resources;
     return resources.filter((r) => r.kind === filterMode);
   }, [resources, filterMode]);
+
+  // The currently highlighted resource (for split-view detail panel)
+  const selectedResource = filteredResources[selectedIndex];
 
   // Cleanup targets summary
   const cleanupTargets = useMemo(
@@ -175,6 +187,17 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
   const handleMouseOut = useCallback(() => {
     setHoveredIndex(null);
   }, []);
+
+  // Clickable filter toggle handler
+  const cycleFilter = useCallback(() => {
+    const currentIdx = FILTER_ORDER.indexOf(filterMode);
+    const nextIdx = (currentIdx + 1) % FILTER_ORDER.length;
+    const nextMode = FILTER_ORDER[nextIdx];
+    if (nextMode) setFilterMode(nextMode);
+  }, [filterMode]);
+
+  // Hover state for clickable filter chip
+  const [filterHovered, setFilterHovered] = useState(false);
 
   // Add a resource ID to pending deletes
   const addPendingDelete = useCallback((id: string) => {
@@ -323,6 +346,7 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
   // Suspend command keybind dispatch when modal is open
   const suspend = useCommandStore((s) => s.suspend);
   const isOpen = useCommandStore((s) => s.isOpen);
+  const showCommands = useCommandStore((s) => s.show);
   useEffect(() => {
     if (confirmAction) {
       return suspend();
@@ -369,15 +393,11 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
       {
         id: 'resources.filter',
         title: 'Cycle filter',
-        description: 'Cycle between All, Snapshots, Volumes, and Images',
+        description:
+          'Cycle between All, Containers, Snapshots, Volumes, and Images',
         category: 'View',
         keybind: { key: 'tab', display: 'tab' },
-        onSelect: () => {
-          const currentIdx = FILTER_ORDER.indexOf(filterMode);
-          const nextIdx = (currentIdx + 1) % FILTER_ORDER.length;
-          const nextMode = FILTER_ORDER[nextIdx];
-          if (nextMode) setFilterMode(nextMode);
-        },
+        onSelect: cycleFilter,
       },
       {
         id: 'resources.refresh',
@@ -391,6 +411,24 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
             useToastStore.getState().show('Refreshed', 'info');
           });
         },
+      },
+      {
+        id: 'task.new',
+        title: 'New task',
+        description: 'Start a new ox session',
+        category: 'Navigation',
+        keybind: { key: 'n', ctrl: true },
+        enabled: !!onNewTask,
+        onSelect: () => onNewTask?.(),
+      },
+      {
+        id: 'nav.sessionsList',
+        title: 'Sessions list',
+        description: 'Go to the sessions list',
+        category: 'Navigation',
+        keybind: { key: 'l', ctrl: true },
+        enabled: !!onSessionsList,
+        onSelect: () => onSessionsList?.(),
       },
       {
         id: 'resources.back',
@@ -407,11 +445,14 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
   }, [
     filterMode,
     cleanupTargets,
+    cycleFilter,
     loadResources,
     filteredResources,
     selectedIndex,
     isOpen,
     onBack,
+    onNewTask,
+    onSessionsList,
   ]);
 
   // Keyboard handling — navigation keys only
@@ -453,9 +494,9 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
   // Loading state
   if (loading && resources.length === 0) {
     return (
-      <Frame title="Resources" centered>
+      <box flexGrow={1} flexDirection="column" padding={1}>
         <text fg={theme.textMuted}>Loading resources...</text>
-      </Frame>
+      </box>
     );
   }
 
@@ -478,17 +519,28 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
   };
 
   return (
-    <Frame title="Resources">
+    <box flexGrow={1} flexDirection="column" padding={1}>
       {/* Filter bar */}
       <box height={1} marginBottom={1} flexDirection="row">
         <text height={1}>
-          Filter: <span fg={theme.primary}>{filterLabel}</span>
+          Resources: <span fg={theme.primary}>{filterLabel}</span>
         </text>
-        <text height={1} flexGrow={1} />
-        <text height={1} fg={theme.textMuted}>
-          [{filterLabel}] {countText}
-          {cleanupCount > 0 ? ` | ${cleanupCount} cleanable` : ''}
-        </text>
+        <box height={1} flexGrow={1} />
+        <box height={1} flexDirection="row" gap={1}>
+          <box
+            onMouseDown={cycleFilter}
+            onMouseOver={() => setFilterHovered(true)}
+            onMouseOut={() => setFilterHovered(false)}
+          >
+            <text fg={filterHovered ? theme.primary : theme.textMuted}>
+              [{filterLabel}]
+            </text>
+          </box>
+          <text fg={theme.textMuted}>
+            {countText}
+            {cleanupCount > 0 ? ` | ${cleanupCount} cleanable` : ''}
+          </text>
+        </box>
       </box>
 
       {/* Column headers */}
@@ -531,6 +583,7 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
           ref={scrollboxRef}
           flexGrow={1}
           flexShrink={1}
+          verticalScrollbarOptions={{ visible: false }}
           onMouseOut={handleMouseOut}
         >
           {filteredResources.map((resource, index) => {
@@ -600,16 +653,44 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
         </scrollbox>
       )}
 
-      <HotkeysBar
-        keyList={[
-          ['ctrl+d', 'delete'],
-          ['ctrl+x', 'cleanup'],
-          ['tab', 'filter'],
-          ['f2', 'refresh'],
-          ['esc', 'back'],
-          ['ctrl+p', 'commands'],
-        ]}
-      />
+      {/* Split-view detail panel for the highlighted resource (tall terminals only) */}
+      {isBig && selectedResource ? (
+        <box
+          flexGrow={1}
+          flexShrink={0}
+          flexDirection="column"
+          borderStyle="single"
+          border={['top']}
+          borderColor={theme.border}
+          paddingTop={1}
+        >
+          <ResourceDetailPanel
+            key={selectedResource.id}
+            resource={selectedResource}
+            onDelete={(r) => setConfirmAction({ type: 'delete', resource: r })}
+            cleanupCount={cleanupCount}
+            onCleanup={() => {
+              if (cleanupTargets.length > 0) {
+                setConfirmAction({ type: 'cleanup', targets: cleanupTargets });
+              }
+            }}
+          />
+        </box>
+      ) : (
+        <box
+          flexGrow={0}
+          flexShrink={0}
+          flexDirection="row"
+          justifyContent="flex-end"
+        >
+          <ActionButton
+            label="commands"
+            keybind="^p"
+            color={theme.text}
+            onPress={showCommands}
+          />
+        </box>
+      )}
 
       {/* Delete confirmation modal */}
       {confirmAction?.type === 'delete' && (
@@ -636,6 +717,6 @@ export function ResourcesList({ onBack }: ResourcesListProps) {
           onCancel={() => setConfirmAction(null)}
         />
       )}
-    </Frame>
+    </box>
   );
 }
