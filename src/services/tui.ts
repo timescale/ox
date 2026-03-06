@@ -3,7 +3,11 @@ import type { Root } from '@opentui/react';
 import { createRoot } from '@opentui/react';
 import type { ReactNode } from 'react';
 import { useTheme } from '../stores/themeStore';
-import { ensureSaneTerminal, restoreConsole } from '../utils/shell.ts';
+import {
+  ensureSaneTerminal,
+  markTerminalDirty,
+  restoreConsole,
+} from '../utils/shell.ts';
 import { supportsTrueColor } from './theme';
 
 interface TuiResult {
@@ -34,6 +38,7 @@ export const createTui = async (): Promise<TuiResult> => {
   await warnIfNoTrueColor();
   await useTheme.getState().initialize();
   const renderer = await createCliRenderer({ exitOnCtrlC: false });
+  markTerminalDirty();
   const root = createRoot(renderer);
 
   const render = (node: ReactNode) => {

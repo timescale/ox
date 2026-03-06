@@ -41,6 +41,26 @@ export function printErr(msg: string): void {
 // ============================================================================
 
 /**
+ * Tracks whether this process has changed terminal state (alternate screen,
+ * mouse tracking, raw mode, etc.) and therefore needs to reset it on exit.
+ *
+ * Set to `true` by {@link markTerminalDirty} (called from
+ * {@link enterSubprocessScreen} and TUI startup).  Checked by
+ * {@link resetTerminal} so that simple non-TUI commands (e.g.
+ * `ox complete zsh`, `ox logs`) don't emit spurious escape sequences.
+ */
+let _terminalDirty = false;
+
+/**
+ * Mark the terminal as having been modified (alternate screen, mouse
+ * tracking, raw mode, etc.) so that {@link resetTerminal} knows it
+ * actually needs to emit cleanup sequences on exit.
+ */
+export function markTerminalDirty(): void {
+  _terminalDirty = true;
+}
+
+/**
  * Ensure the local terminal's line discipline is in cooked mode with
  * standard output processing (in particular `onlcr` — translate `\n` to
  * `\r\n`).
@@ -114,6 +134,7 @@ export function enterSubprocessScreen(
     );
   }
   if (sequences.length > 0) {
+    markTerminalDirty();
     process.stdout.write(sequences.join(''));
   }
 }
@@ -121,27 +142,38 @@ export function enterSubprocessScreen(
 /**
  * Reset terminal to a clean state.
  *
- * Unconditionally disables mouse tracking, exits the alternate screen
- * buffer, restores cursor visibility, and resets text attributes.  All of
- * these sequences are idempotent — sending them when the corresponding
- * mode is already off is a harmless no-op.
+ * Disables mouse tracking, exits the alternate screen buffer, restores
+ * cursor visibility, and resets text attributes.
+ *
+ * Only emits escape sequences when something in this process actually
+ * modified terminal state (see {@link markTerminalDirty}).  This prevents
+ * simple non-TUI commands like `ox complete zsh` and `ox logs` from
+ * writing spurious sequences that confuse the shell or hide output.
+ *
+ * Sequences are written to **stderr** so they never pollute stdout.
+ * This is important when stdout is captured (e.g. `source <(ox complete
+ * zsh)`) — the terminal still interprets stderr escape sequences for
+ * visual effect, but they don't end up in the captured output.
  *
  * Called after subprocess exits and as a last-chance cleanup on
  * process exit / crash to ensure the user's terminal isn't left in a
  * broken state.
  */
 export function resetTerminal(): void {
-  process.stdout.write(
-    [
-      '\x1b[?1003l', // Disable any-event mouse tracking
-      '\x1b[?1002l', // Disable button-event mouse tracking
-      '\x1b[?1000l', // Disable X11 mouse button tracking
-      '\x1b[?1006l', // Disable SGR extended mouse mode
-      '\x1b[?1049l', // Exit alternate screen buffer → restores main screen
-      '\x1b[?25h', // Show cursor (if subprocess hid it)
-      '\x1b[0m', // Reset text attributes (colors, bold, etc.)
-    ].join(''),
-  );
+  if (_terminalDirty) {
+    _terminalDirty = false;
+    process.stderr.write(
+      [
+        '\x1b[?1003l', // Disable any-event mouse tracking
+        '\x1b[?1002l', // Disable button-event mouse tracking
+        '\x1b[?1000l', // Disable X11 mouse button tracking
+        '\x1b[?1006l', // Disable SGR extended mouse mode
+        '\x1b[?1049l', // Exit alternate screen buffer → restores main screen
+        '\x1b[?25h', // Show cursor (if subprocess hid it)
+        '\x1b[0m', // Reset text attributes (colors, bold, etc.)
+      ].join(''),
+    );
+  }
 
   // Force a fresh ioctl(TIOCGWINSZ) to update cached terminal dimensions.
   // While attached to a Docker subprocess, SIGWINCH signals go to Docker
