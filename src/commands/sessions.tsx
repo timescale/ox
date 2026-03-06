@@ -1287,9 +1287,13 @@ export async function runSessionsTui({
           { err, sessionId: result.sessionId },
           'Failed to attach to session',
         );
-        console.error(
-          `Failed to attach: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        useToastStore
+          .getState()
+          .show(
+            `SSH connection dropped: ${err instanceof Error ? err.message : String(err)}`,
+            'error',
+            5000,
+          );
       }
       // Return to the session detail view after detaching (or on error)
       if (result.session) {
@@ -1334,9 +1338,13 @@ export async function runSessionsTui({
           { err, sessionId: result.sessionId },
           'Failed to attach to new session',
         );
-        console.error(
-          `Failed to attach: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        useToastStore
+          .getState()
+          .show(
+            `SSH connection dropped: ${err instanceof Error ? err.message : String(err)}`,
+            'error',
+            5000,
+          );
       }
       // Return to the session detail view after detaching (or on error)
       if (result.session) {

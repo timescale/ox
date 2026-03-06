@@ -394,15 +394,46 @@ async function sshIntoSandbox(
   }
 
   try {
+    const startTime = Date.now();
     const proc = Bun.spawn(sshArgs, {
       stdio: ['inherit', 'inherit', 'inherit'],
     });
     const exitCode = await proc.exited;
+    const elapsedMs = Date.now() - startTime;
+
     if (exitCode !== 0) {
-      log.warn({ exitCode }, 'SSH process exited with non-zero status');
+      log.warn(
+        { exitCode, elapsedMs },
+        'SSH process exited with non-zero status',
+      );
+
+      // Exit code 255 = SSH connection failure. If this happened quickly
+      // (within 10s of starting), it's likely a transient startup issue
+      // (sshd not ready yet). Throw so the caller can retry.
+      if (exitCode === 255 && elapsedMs < 10_000) {
+        throw new SshEarlyExitError(exitCode, elapsedMs);
+      }
     }
   } finally {
     resetTerminal();
+  }
+}
+
+/**
+ * Error thrown when SSH exits with code 255 shortly after starting,
+ * indicating a transient connection failure (e.g. sshd not ready).
+ * Callers can catch this to retry the SSH connection.
+ */
+export class SshEarlyExitError extends Error {
+  readonly exitCode: number;
+  readonly elapsedMs: number;
+  constructor(exitCode: number, elapsedMs: number) {
+    super(
+      `SSH connection failed (exit ${exitCode}) after ${elapsedMs}ms — sandbox may not be ready yet`,
+    );
+    this.name = 'SshEarlyExitError';
+    this.exitCode = exitCode;
+    this.elapsedMs = elapsedMs;
   }
 }
 
