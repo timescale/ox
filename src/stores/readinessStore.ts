@@ -32,18 +32,23 @@ export interface ReadinessState {
   // Tier 3: Credentials (per-agent, cached independently)
   claudeAuth: CheckStatus | 'invalid';
   opencodeAuth: CheckStatus | 'invalid';
+  codexAuth: CheckStatus | 'invalid';
   ghAuth: CheckStatus | 'invalid';
 
   // Track which model was used for each agent credential check
   claudeAuthModel: string | undefined;
   opencodeAuthModel: string | undefined;
+  codexAuthModel: string | undefined;
 
   // Error details
   error: string | null;
 
   // Actions
   runChecks: () => Promise<void>;
-  checkAgentAuth: (agent: 'claude' | 'opencode', model?: string) => void;
+  checkAgentAuth: (
+    agent: 'claude' | 'opencode' | 'codex',
+    model?: string,
+  ) => void;
   reset: () => void;
 }
 
@@ -63,9 +68,11 @@ const initialState: Omit<
   models: 'unknown',
   claudeAuth: 'unknown',
   opencodeAuth: 'unknown',
+  codexAuth: 'unknown',
   ghAuth: 'unknown',
   claudeAuthModel: undefined,
   opencodeAuthModel: undefined,
+  codexAuthModel: undefined,
   error: null,
 };
 
@@ -208,11 +215,20 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
     }
   },
 
-  checkAgentAuth: (agent: 'claude' | 'opencode', model?: string) => {
+  checkAgentAuth: (agent: 'claude' | 'opencode' | 'codex', model?: string) => {
     const state = useReadinessStore.getState();
-    const authKey = agent === 'claude' ? 'claudeAuth' : 'opencodeAuth';
+    const authKey =
+      agent === 'claude'
+        ? 'claudeAuth'
+        : agent === 'codex'
+          ? 'codexAuth'
+          : 'opencodeAuth';
     const modelKey =
-      agent === 'claude' ? 'claudeAuthModel' : 'opencodeAuthModel';
+      agent === 'claude'
+        ? 'claudeAuthModel'
+        : agent === 'codex'
+          ? 'codexAuthModel'
+          : 'opencodeAuthModel';
     const current = state[authKey];
     const prevModel = state[modelKey];
 
@@ -228,14 +244,24 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
     // Fire-and-forget
     (async () => {
       try {
-        const ok =
-          agent === 'claude'
-            ? await (
-                await import('../services/claude.ts')
-              ).checkClaudeCredentials(model)
-            : await (
-                await import('../services/opencode.ts')
-              ).checkOpencodeCredentials(model);
+        let ok: boolean;
+        switch (agent) {
+          case 'claude':
+            ok = await (
+              await import('../services/claude.ts')
+            ).checkClaudeCredentials(model);
+            break;
+          case 'codex':
+            ok = await (
+              await import('../services/codex.ts')
+            ).checkCodexCredentials();
+            break;
+          default:
+            ok = await (
+              await import('../services/opencode.ts')
+            ).checkOpencodeCredentials(model);
+            break;
+        }
         set({ [authKey]: ok ? 'ready' : 'invalid' });
       } catch {
         set({ [authKey]: 'error' });
