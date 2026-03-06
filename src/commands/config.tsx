@@ -319,6 +319,7 @@ export function ConfigWizard({
 
     return (
       <Selector
+        key="sandbox-provider"
         title={`Step ${stepNumber('sandbox-provider')}/${steps.length}: Sandbox Provider`}
         description="Choose where to run sandbox containers."
         options={providerOptions}
@@ -367,6 +368,7 @@ export function ConfigWizard({
 
     return (
       <Selector
+        key="cloud-region"
         title={`Step ${stepNumber('cloud-region')}/${steps.length}: Cloud Region`}
         description="Choose the default cloud region for sandbox sessions."
         options={regionOptions}
@@ -440,6 +442,7 @@ export function ConfigWizard({
 
     return (
       <Selector
+        key="service"
         title={`Step ${stepNumber('service')}/${steps.length}: Database Service`}
         description="Select a Tiger service to use as the default parent for database forks."
         options={serviceOptions}
@@ -463,6 +466,7 @@ export function ConfigWizard({
 
     return (
       <Selector
+        key="agent"
         title={`Step ${stepNumber('agent')}/${steps.length}: Default Agent`}
         description="Select the default coding agent to use."
         options={AGENT_SELECT_OPTIONS}
@@ -497,6 +501,7 @@ export function ConfigWizard({
     if (currentModels.length === 0) {
       return (
         <Selector
+          key="model-skip"
           title={`Step ${stepNumber('model')}/${steps.length}: Default Model (${config?.agent})`}
           description="Could not load models. You can skip and specify a model later with --model."
           options={[
@@ -538,6 +543,7 @@ export function ConfigWizard({
     if (config?.agent === 'opencode') {
       return (
         <FilterableSelector
+          key="model"
           title={`Step ${stepNumber('model')}/${steps.length}: Default Model (${config.agent})`}
           description={`Select the default model for ${config.agent}.`}
           options={modelOptions}
@@ -565,6 +571,7 @@ export function ConfigWizard({
 
     return (
       <Selector
+        key="model"
         title={`Step ${stepNumber('model')}/${steps.length}: Default Model (${config?.agent})`}
         description={`Select the default model for ${config?.agent}.`}
         options={modelOptions}
