@@ -25,6 +25,7 @@ const homePaths = {
 
 const containerPaths = {
   authJson: join(CONTAINER_HOME, '.codex', 'auth.json'),
+  configToml: join(CONTAINER_HOME, '.codex', 'config.toml'),
 };
 
 const codexCredsValid = (creds?: CodexAuthJson | null): boolean => {
@@ -157,6 +158,15 @@ const captureCodexCredentialsFromContainer = async (
 };
 
 /**
+ * Codex config.toml that pre-trusts the /work/app directory so that
+ * interactive sessions are not blocked by the "Do you trust this directory?"
+ * prompt.
+ */
+const CODEX_CONFIG_TOML = `[projects."/work/app"]
+trust_level = "trusted"
+`;
+
+/**
  * Get the codex auth config as VirtualFile(s) to write into containers.
  */
 export const getCodexConfigFiles = async (): Promise<VirtualFile[]> => {
@@ -165,6 +175,10 @@ export const getCodexConfigFiles = async (): Promise<VirtualFile[]> => {
     {
       path: containerPaths.authJson,
       value: JSON.stringify(creds),
+    },
+    {
+      path: containerPaths.configToml,
+      value: CODEX_CONFIG_TOML,
     },
   ];
 };
