@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { SelectOption } from '@opentui/core';
+import { useKeyboard } from '@opentui/react';
 import { YAML } from 'bun';
 import { Command } from 'commander';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -277,6 +278,13 @@ export function ConfigWizard({
     ghAuthProcess?.cancel();
     onComplete({ type: 'cancelled' });
   };
+
+  // Handle Ctrl+C to exit the wizard
+  useKeyboard((key) => {
+    if (key.name === 'c' && key.ctrl) {
+      handleCancel();
+    }
+  });
 
   // ---- Step 1: Docker Setup ----
   if (step === 'docker') {

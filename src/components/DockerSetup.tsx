@@ -4,7 +4,7 @@
 
 import type { SelectOption } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   checkDockerStatus,
   type DockerProvider,
@@ -92,17 +92,25 @@ export function DockerSetup({
   const { theme } = useTheme();
   const [state, setState] = useState<SetupState>({ type: 'checking' });
 
+  // Guard to prevent onComplete from firing multiple times when the parent
+  // re-renders and provides a new onComplete reference, causing the effect
+  // to re-run with the already-resolved statusPromise.
+  const completedRef = useRef(false);
+
   // Check Docker status on mount
   const statusPromise = useMemo(() => checkDockerStatus(), []);
 
   useEffect(() => {
     statusPromise
       .then((status) => {
+        if (completedRef.current) return;
         if (status.isRunning) {
           // Docker is already running — nothing to install
+          completedRef.current = true;
           onComplete({ type: 'ready' });
         } else if (status.dockerDesktopInstalled || status.orbstackInstalled) {
           // A provider is installed but not running — readiness store handles starting
+          completedRef.current = true;
           onComplete({ type: 'ready' });
         } else {
           // Nothing installed — show provider selection / install UI
