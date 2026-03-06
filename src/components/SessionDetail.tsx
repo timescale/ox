@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import { log } from '../services/logger';
 import { getSandboxProvider, type OxSession } from '../services/sandbox';
+import { useRouterStore } from '../stores/routerStore.ts';
 import { useSessionStore } from '../stores/sessionStore';
 import { useToastStore } from '../stores/toastStore';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
@@ -12,25 +13,10 @@ import { type ModalType, SessionDetailPanel } from './SessionDetailPanel.tsx';
 
 export interface SessionDetailProps {
   session: OxSession;
-  onBack: () => void;
-  onAttach: (sessionId: string) => void;
-  onShell: (sessionId: string) => void;
   onResume: (session: OxSession) => void;
-  onSessionDeleted: () => void;
-  onNewPrompt?: () => void;
-  onResources?: () => void;
 }
 
-export function SessionDetail({
-  session,
-  onBack,
-  onAttach,
-  onShell,
-  onResume,
-  onSessionDeleted,
-  onNewPrompt,
-  onResources,
-}: SessionDetailProps) {
+export function SessionDetail({ session, onResume }: SessionDetailProps) {
   // Track the live session (updated by SessionDetailPanel polling).
   // The prop `session` is set once when navigating to the detail view and
   // doesn't update, so we maintain our own copy for derived state.
@@ -94,7 +80,7 @@ export function SessionDetail({
         description: 'Go back to the sessions list',
         category: 'Navigation',
         keybind: { key: 'l', ctrl: true },
-        onSelect: () => onBack(),
+        onSelect: () => useRouterStore.getState().goToList(),
       },
       {
         id: 'task.new',
@@ -102,8 +88,7 @@ export function SessionDetail({
         description: 'Start a new ox session',
         category: 'Navigation',
         keybind: { key: 'n', ctrl: true },
-        enabled: !!onNewPrompt,
-        onSelect: () => onNewPrompt?.(),
+        onSelect: () => useRouterStore.getState().goToPrompt(),
       },
       {
         id: 'navigate-resources',
@@ -111,8 +96,7 @@ export function SessionDetail({
         description: 'View and manage sandbox images, volumes, and snapshots',
         category: 'Navigation',
         keybind: { key: 'e', ctrl: true, display: 'ctrl+e' },
-        enabled: !!onResources,
-        onSelect: () => onResources?.(),
+        onSelect: () => useRouterStore.getState().goToResources(),
       },
       {
         id: 'session.attach',
@@ -121,7 +105,10 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 'a', ctrl: true },
         enabled: isRunning,
-        onSelect: () => onAttach(sessionRef.current.id),
+        onSelect: () =>
+          useRouterStore
+            .getState()
+            .attach(sessionRef.current.id, sessionRef.current),
       },
       {
         id: 'session.shell',
@@ -130,7 +117,10 @@ export function SessionDetail({
         category: 'Session',
         keybind: { key: 's', ctrl: true },
         enabled: isRunning,
-        onSelect: () => onShell(sessionRef.current.id),
+        onSelect: () =>
+          useRouterStore
+            .getState()
+            .execShell(sessionRef.current.id, sessionRef.current),
       },
       {
         id: 'session.stop',
@@ -175,18 +165,7 @@ export function SessionDetail({
         onSelect: handleGitSwitch,
       },
     ],
-    [
-      onBack,
-      onNewPrompt,
-      onResources,
-      isRunning,
-      isStopped,
-      onAttach,
-      onShell,
-      onResume,
-      handlePrOpen,
-      handleGitSwitch,
-    ],
+    [isRunning, isStopped, onResume, handlePrOpen, handleGitSwitch],
   );
 
   // Read palette open state so escape doesn't go back when closing the palette
@@ -199,7 +178,7 @@ export function SessionDetail({
   // Keyboard shortcuts — escape to go back
   useKeyboard((key) => {
     if (key.name === 'escape') {
-      if (!isOpen) onBack();
+      if (!isOpen) useRouterStore.getState().goToList();
     }
   });
 
@@ -207,11 +186,9 @@ export function SessionDetail({
     <box flexGrow={1} flexDirection="column" padding={1}>
       <SessionDetailPanel
         session={session}
-        onAttach={onAttach}
-        onShell={onShell}
         onResume={onResume}
-        onSessionDeleted={onSessionDeleted}
-        onBack={onBack}
+        onSessionDeleted={() => useRouterStore.getState().goToList()}
+        showBack
         onSessionUpdated={setLiveSession}
         modal={modal}
         onModalChange={setModal}

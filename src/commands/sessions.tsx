@@ -31,7 +31,7 @@ import {
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { getDenoToken } from '../services/deno';
-import { ensureDockerImage, type PullLayer } from '../services/docker';
+import { ensureDockerImage } from '../services/docker';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -52,7 +52,6 @@ import {
   type OxSession,
   type SandboxProvider,
   type SandboxProviderType,
-  type ShellSession,
   type SubmitMode,
 } from '../services/sandbox';
 import { formatRelativeTime } from '../services/sessionDisplay';
@@ -64,105 +63,15 @@ import {
 } from '../services/updater';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useReadinessStore } from '../stores/readinessStore.ts';
+import { type SessionsResult, useRouterStore } from '../stores/routerStore.ts';
 import { useToastStore } from '../stores/toastStore';
+import { Deferred } from '../types/deferred.ts';
 import {
   CLI_SUBPROCESS_OPTS,
   ensureGitignore,
   enterSubprocessScreen,
   resetTerminal,
 } from '../utils/shell.ts';
-
-// ============================================================================
-// Types
-// ============================================================================
-
-type SessionsView =
-  | { type: 'init' } // Initial loading state
-  | { type: 'docker' }
-  | { type: 'config' }
-  | {
-      type: 'cloud-setup';
-      // Store the pending action so we can resume after setup completes
-      pendingStart?: {
-        prompt: string;
-        agent: AgentType;
-        model: string;
-        mode: SubmitMode;
-        mountDir?: string;
-      };
-      pendingResume?: {
-        session: OxSession;
-        prompt: string;
-        model: string;
-        mode: SubmitMode;
-        mountDir?: string;
-      };
-    }
-  | { type: 'prompt'; resumeSession?: OxSession }
-  | {
-      type: 'starting';
-      prompt: string;
-      agent: AgentType;
-      model: string;
-      step: string;
-      mode: SubmitMode;
-      layers?: PullLayer[];
-    }
-  | {
-      type: 'resuming';
-      session: OxSession;
-      model: string;
-      step: string;
-      mode: SubmitMode;
-    }
-  | { type: 'starting-shell'; step: string }
-  | { type: 'detail'; session: OxSession }
-  | { type: 'list' }
-  | { type: 'resources' };
-
-interface SessionsResult {
-  type:
-    | 'quit'
-    | 'attach'
-    | 'attach-session'
-    | 'exec-shell'
-    | 'shell'
-    | 'connect-shell'
-    | 'needs-agent-auth'
-    | 'needs-gh-auth';
-  sessionId?: string;
-  // For attach/exec-shell: the session to return to after detaching
-  session?: OxSession;
-  // For attach-session: the provider type to use
-  attachProvider?: SandboxProviderType;
-  // For shell: session ID if resuming, undefined if fresh shell
-  resumeSessionId?: string;
-  // Provider to use when resuming an existing session
-  resumeProvider?: SandboxProviderType;
-  // For shell: optional mount directory for fresh shell
-  shellMountDir?: string;
-  // For shell: whether running from a git repo
-  shellIsGitRepo?: boolean;
-  // For shell: provider to use
-  shellProvider?: SandboxProviderType;
-  // For connect-shell: prepared shell session ready to connect
-  shellSession?: ShellSession;
-  // For needs-agent-auth: info needed to retry after login
-  authInfo?: {
-    agent: AgentType;
-    model: string;
-    prompt: string;
-    mountDir?: string;
-    isGitRepo?: boolean;
-  };
-  ghAuthInfo?: {
-    agent: AgentType;
-    model: string;
-    prompt: string;
-    mountDir?: string;
-    isGitRepo?: boolean;
-  };
-}
 
 interface GhAuthRetryState {
   nextView: SessionsAppProps['initialView'];
@@ -245,7 +154,6 @@ interface SessionsAppProps {
   currentRepoInfo: RepoInfo | null;
   /** Whether running from a git repository (affects git/gh operations) */
   isGitRepo: boolean;
-  onComplete: (result: SessionsResult) => void;
 }
 
 function SessionsApp({
@@ -260,12 +168,10 @@ function SessionsApp({
   initialMountDir,
   currentRepoInfo,
   isGitRepo,
-  onComplete,
 }: SessionsAppProps) {
-  const [view, setView] = useState<SessionsView>({ type: 'init' });
+  const view = useRouterStore((s) => s.view);
+  const promptKey = useRouterStore((s) => s.promptKey);
   const [config, setConfig] = useState<OxConfig | null>(null);
-  // Counter to force PromptScreen remount (resets all state to defaults)
-  const [promptKey, setPromptKey] = useState(0);
 
   // Use refs to store props/config that we need in async functions
   // This avoids dependency issues with useCallback/useEffect
@@ -314,7 +220,7 @@ function SessionsApp({
         key.preventDefault();
       } else {
         // No pending tasks: exit immediately
-        onComplete({ type: 'quit' });
+        useRouterStore.getState().quit();
       }
     }
   });
@@ -322,9 +228,9 @@ function SessionsApp({
   // Auto-quit when shutting down and all tasks complete
   useEffect(() => {
     if (shuttingDown && pendingCount === 0) {
-      onComplete({ type: 'quit' });
+      useRouterStore.getState().quit();
     }
-  }, [shuttingDown, pendingCount, onComplete]);
+  }, [shuttingDown, pendingCount]);
 
   // Background auto-update check (fire-and-forget on mount)
   useEffect(() => {
@@ -367,6 +273,13 @@ function SessionsApp({
       passedMountDir?: string,
       selectedProvider?: SandboxProviderType,
     ) => {
+      const {
+        updateView,
+        goToCloudSetup,
+        goToStarting,
+        goToPrompt,
+        goToDetail,
+      } = useRouterStore.getState();
       try {
         // Use selected provider or fall back to the default provider prop
         const activeProvider = selectedProvider
@@ -392,8 +305,7 @@ function SessionsApp({
           const token = await getDenoToken();
           if (!token) {
             // Transition to cloud setup view, storing the pending action
-            setView({
-              type: 'cloud-setup',
+            goToCloudSetup({
               pendingStart: {
                 prompt,
                 agent,
@@ -406,8 +318,7 @@ function SessionsApp({
           }
         }
 
-        setView({
-          type: 'starting',
+        goToStarting({
           prompt,
           agent,
           model,
@@ -420,13 +331,13 @@ function SessionsApp({
               progress.type === 'pulling' ||
               progress.type === 'pulling-cache'
             ) {
-              setView((v) =>
+              updateView((v) =>
                 v.type === 'starting'
                   ? { ...v, step: progress.message, layers: progress.layers }
                   : v,
               );
             } else if (progress.type === 'building') {
-              setView((v) =>
+              updateView((v) =>
                 v.type === 'starting'
                   ? { ...v, step: progress.message, layers: undefined }
                   : v,
@@ -444,13 +355,13 @@ function SessionsApp({
                 progress.type === 'pulling' ||
                 progress.type === 'pulling-cache'
               ) {
-                setView((v) =>
+                updateView((v) =>
                   v.type === 'starting'
                     ? { ...v, step: progress.message, layers: progress.layers }
                     : v,
                 );
               } else if (progress.type === 'building') {
-                setView((v) =>
+                updateView((v) =>
                   v.type === 'starting'
                     ? { ...v, step: progress.message, layers: undefined }
                     : v,
@@ -471,7 +382,7 @@ function SessionsApp({
         } else if (cachedAgentAuth === 'invalid') {
           agentAuthValid = false;
         } else {
-          setView((v) =>
+          updateView((v) =>
             v.type === 'starting'
               ? { ...v, step: `Checking ${agent} credentials` }
               : v,
@@ -499,21 +410,18 @@ function SessionsApp({
               'Cloud sandboxes require a git remote. Use Docker for non-git directories.',
               'error',
             );
-          setView({ type: 'prompt' });
+          goToPrompt();
           return;
         }
 
         if (!agentAuthValid) {
           // Exit TUI to run interactive login, then retry
-          onComplete({
-            type: 'needs-agent-auth',
-            authInfo: {
-              agent,
-              model,
-              prompt,
-              mountDir,
-              isGitRepo: inGitRepo,
-            },
+          useRouterStore.getState().needsAgentAuth({
+            agent,
+            model,
+            prompt,
+            mountDir,
+            isGitRepo: inGitRepo,
           });
           return;
         }
@@ -521,7 +429,7 @@ function SessionsApp({
         // Get repo info only if in a git repo
         let repoInfo: RepoInfo | null = null;
         if (inGitRepo) {
-          setView((v) =>
+          updateView((v) =>
             v.type === 'starting'
               ? { ...v, step: 'Getting repository info' }
               : v,
@@ -532,7 +440,7 @@ function SessionsApp({
         // Generate branch name: LLM-generated if we have a prompt, fallback otherwise
         let branchName: string;
         if (prompt) {
-          setView((v) =>
+          updateView((v) =>
             v.type === 'starting'
               ? { ...v, step: 'Generating branch name' }
               : v,
@@ -556,7 +464,7 @@ function SessionsApp({
         const effectiveServiceId = svcId ?? configRef.current?.tigerServiceId;
         let forkResult: ForkResult | null = null;
         if (!isPlan && doFork && effectiveServiceId) {
-          setView((v) =>
+          updateView((v) =>
             v.type === 'starting' ? { ...v, step: 'Forking database' } : v,
           );
           forkResult = await forkDatabase(branchName, effectiveServiceId);
@@ -572,15 +480,12 @@ function SessionsApp({
               ? false
               : await checkGhCredentials();
         if (inGitRepo && !ghAuthValid) {
-          onComplete({
-            type: 'needs-gh-auth',
-            ghAuthInfo: {
-              agent,
-              model,
-              prompt,
-              mountDir,
-              isGitRepo: inGitRepo,
-            },
+          useRouterStore.getState().needsGhAuth({
+            agent,
+            model,
+            prompt,
+            mountDir,
+            isGitRepo: inGitRepo,
           });
           return;
         }
@@ -592,7 +497,7 @@ function SessionsApp({
             : ['--agent', 'plan']
           : undefined;
 
-        setView((v) =>
+        updateView((v) =>
           v.type === 'starting'
             ? {
                 ...v,
@@ -617,20 +522,17 @@ function SessionsApp({
           agentArgs,
           submitMode: mode,
           onProgress: (step) => {
-            setView((v) => (v.type === 'starting' ? { ...v, step } : v));
+            updateView((v) => (v.type === 'starting' ? { ...v, step } : v));
           },
         });
 
         if (isInteractive) {
           // Exit TUI so the caller can attach to the interactive session
-          onComplete({
-            type: 'attach-session',
-            sessionId: session.id,
-            session,
-            attachProvider: activeProvider.type,
-          });
+          useRouterStore
+            .getState()
+            .attachSession(session.id, session, activeProvider.type);
         } else {
-          setView({ type: 'detail', session });
+          goToDetail(session);
         }
       } catch (err) {
         log.error({ err }, 'Failed to start session');
@@ -640,10 +542,10 @@ function SessionsApp({
             `Failed to start: ${err instanceof Error ? err.message : String(err)}`,
             'error',
           );
-        setView({ type: 'prompt' });
+        useRouterStore.getState().goToPrompt();
       }
     },
-    [onComplete, provider],
+    [provider],
   );
 
   // Resume session function - handles the full flow of resuming an agent
@@ -656,6 +558,13 @@ function SessionsApp({
       mountDir?: string,
       selectedProvider?: SandboxProviderType,
     ) => {
+      const {
+        updateView,
+        goToCloudSetup,
+        goToResuming,
+        goToDetail,
+        goToPrompt,
+      } = useRouterStore.getState();
       try {
         // Use selected provider or fall back to the default provider prop
         const activeProvider = selectedProvider
@@ -680,16 +589,14 @@ function SessionsApp({
         if (activeProvider.type === 'cloud') {
           const token = await getDenoToken();
           if (!token) {
-            setView({
-              type: 'cloud-setup',
+            goToCloudSetup({
               pendingResume: { session, prompt, model, mode, mountDir },
             });
             return;
           }
         }
 
-        setView({
-          type: 'resuming',
+        goToResuming({
           session,
           model,
           step: 'Preparing to resume session',
@@ -707,7 +614,7 @@ function SessionsApp({
 
         const resumeMode = isInteractive ? 'interactive' : 'detached';
 
-        setView((v) =>
+        updateView((v) =>
           v.type === 'resuming' ? { ...v, step: 'Resuming session' } : v,
         );
 
@@ -719,20 +626,17 @@ function SessionsApp({
           agentArgs,
           submitMode: mode,
           onProgress: (step) => {
-            setView((v) => (v.type === 'resuming' ? { ...v, step } : v));
+            updateView((v) => (v.type === 'resuming' ? { ...v, step } : v));
           },
         });
 
         if (isInteractive) {
           // Exit TUI so the caller can attach to the interactive session
-          onComplete({
-            type: 'attach-session',
-            sessionId: newSession.id,
-            session: newSession,
-            attachProvider: activeProvider.type,
-          });
+          useRouterStore
+            .getState()
+            .attachSession(newSession.id, newSession, activeProvider.type);
         } else {
-          setView({ type: 'detail', session: newSession });
+          goToDetail(newSession);
         }
       } catch (err) {
         log.error({ err }, 'Failed to resume session');
@@ -742,10 +646,10 @@ function SessionsApp({
             `Failed to resume: ${err instanceof Error ? err.message : String(err)}`,
             'error',
           );
-        setView({ type: 'prompt', resumeSession: session });
+        goToPrompt(session);
       }
     },
-    [onComplete, provider],
+    [provider],
   );
 
   // Start shell session - prepare the shell sandbox and hand off to connect
@@ -755,15 +659,14 @@ function SessionsApp({
       shellIsGitRepo?: boolean,
       selectedProvider?: SandboxProviderType,
     ) => {
+      const { updateView, goToStartingShell, goToPrompt, connectShell } =
+        useRouterStore.getState();
       try {
         const activeProvider = selectedProvider
           ? getSandboxProvider(selectedProvider)
           : provider;
 
-        setView({
-          type: 'starting-shell',
-          step: 'Preparing sandbox environment',
-        });
+        goToStartingShell('Preparing sandbox environment');
 
         await activeProvider.ensureImage({
           onProgress: (progress) => {
@@ -771,7 +674,7 @@ function SessionsApp({
               progress.type === 'pulling-cache' ||
               progress.type === 'building'
             ) {
-              setView((v) =>
+              updateView((v) =>
                 v.type === 'starting-shell'
                   ? { ...v, step: progress.message }
                   : v,
@@ -787,15 +690,14 @@ function SessionsApp({
           mountDir: shellMountDir,
           isGitRepo: shellIsGitRepo,
           onProgress: (step) => {
-            setView((v) => (v.type === 'starting-shell' ? { ...v, step } : v));
+            updateView((v) =>
+              v.type === 'starting-shell' ? { ...v, step } : v,
+            );
           },
         });
 
         // Shell is prepared — exit TUI so the outer loop can connect
-        onComplete({
-          type: 'connect-shell',
-          shellSession: shell,
-        });
+        connectShell(shell);
       } catch (err) {
         log.error({ err }, 'Failed to start shell');
         useToastStore
@@ -804,10 +706,10 @@ function SessionsApp({
             `Failed to start shell: ${err instanceof Error ? err.message : String(err)}`,
             'error',
           );
-        setView({ type: 'prompt' });
+        goToPrompt();
       }
     },
-    [onComplete, provider],
+    [provider],
   );
 
   // Navigate to the appropriate view based on initialView and config
@@ -820,16 +722,23 @@ function SessionsApp({
         initialModel,
         initialSession: session,
       } = propsRef.current;
+      const {
+        goToDetail,
+        goToStarting,
+        goToPrompt,
+        goToResources,
+        goToList,
+        updateView,
+      } = useRouterStore.getState();
 
       if (targetView === 'detail' && session) {
-        setView({ type: 'detail', session });
+        goToDetail(session);
       } else if (targetView === 'starting' && prompt) {
         const agent = initialAgent ?? cfg.agent ?? 'opencode';
         const model = initialModel ?? cfg.model ?? '';
 
         // Non-interactive path: wait for readiness before starting session
-        setView({
-          type: 'starting',
+        goToStarting({
           prompt,
           agent,
           model,
@@ -847,7 +756,7 @@ function SessionsApp({
               const unsub = useReadinessStore.subscribe((s) => {
                 // Update starting screen with progress
                 if (s.dockerRunning === 'starting') {
-                  setView((v) =>
+                  updateView((v) =>
                     v.type === 'starting'
                       ? { ...v, step: 'Starting Docker' }
                       : v,
@@ -862,7 +771,7 @@ function SessionsApp({
                   ).length;
                   const total = layers.length;
                   const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
-                  setView((v) =>
+                  updateView((v) =>
                     v.type === 'starting'
                       ? {
                           ...v,
@@ -899,42 +808,38 @@ function SessionsApp({
               `Failed to prepare environment: ${err instanceof Error ? err.message : String(err)}`,
               'error',
             );
-          setView({ type: 'prompt' });
+          goToPrompt();
         });
       } else if (targetView === 'prompt') {
-        setView({ type: 'prompt' });
+        goToPrompt();
       } else if (targetView === 'resources') {
-        setView({ type: 'resources' });
+        goToResources();
       } else {
-        setView({ type: 'list' });
+        goToList();
       }
     },
     [startSession],
   );
 
   // Handle docker setup completion (install-only in phase 2)
-  const handleDockerComplete = useCallback(
-    (result: DockerSetupResult) => {
-      if (result.type === 'cancelled') {
-        onComplete({ type: 'quit' });
-        return;
-      }
-      if (result.type === 'error') {
-        useToastStore
-          .getState()
-          .show(result.error ?? 'Docker setup failed', 'error');
-        onComplete({ type: 'quit' });
-        return;
-      }
+  const handleDockerComplete = useCallback((result: DockerSetupResult) => {
+    if (result.type === 'cancelled') {
+      useRouterStore.getState().quit();
+      return;
+    }
+    if (result.type === 'error') {
+      useToastStore
+        .getState()
+        .show(result.error ?? 'Docker setup failed', 'error');
+      useRouterStore.getState().quit();
+      return;
+    }
 
-      // Docker was installed — go back to prompt and re-run checks
-      setPromptKey((k) => k + 1);
-      setView({ type: 'prompt' });
-      useReadinessStore.getState().reset();
-      useReadinessStore.getState().runChecks();
-    },
-    [onComplete],
-  );
+    // Docker was installed — go back to prompt and re-run checks
+    useRouterStore.getState().goToNewPrompt();
+    useReadinessStore.getState().reset();
+    useReadinessStore.getState().runChecks();
+  }, []);
 
   // Init: navigate to target view immediately, then kick off readiness checks
   useEffect(() => {
@@ -943,7 +848,7 @@ function SessionsApp({
     (async () => {
       // Check if project config exists
       if (!(await projectConfig.exists())) {
-        setView({ type: 'config' });
+        useRouterStore.getState().goToConfig();
         return;
       }
 
@@ -963,7 +868,7 @@ function SessionsApp({
   const dockerInstalled = useReadinessStore((s) => s.dockerInstalled);
   useEffect(() => {
     if (dockerInstalled === 'not-installed') {
-      setView({ type: 'docker' });
+      useRouterStore.getState().goToDocker();
     }
   }, [dockerInstalled]);
 
@@ -971,12 +876,12 @@ function SessionsApp({
   const handleConfigComplete = useCallback(
     async (result: ConfigWizardResult) => {
       if (result.type === 'cancelled') {
-        onComplete({ type: 'quit' });
+        useRouterStore.getState().quit();
         return;
       }
       if (result.type === 'error') {
         useToastStore.getState().show(result.message, 'error');
-        onComplete({ type: 'quit' });
+        useRouterStore.getState().quit();
         return;
       }
 
@@ -991,7 +896,7 @@ function SessionsApp({
       navigateToTargetView(mergedConfig);
       useReadinessStore.getState().runChecks();
     },
-    [onComplete, navigateToTargetView],
+    [navigateToTargetView],
   );
 
   // Handle resume from session detail
@@ -1010,7 +915,7 @@ function SessionsApp({
         );
       } else {
         // Detached sessions: show prompt screen for new prompt entry
-        setView({ type: 'prompt', resumeSession: session });
+        useRouterStore.getState().goToPrompt(session);
       }
     },
     [resumeSessionFlow],
@@ -1020,14 +925,14 @@ function SessionsApp({
   const handleCloudSetupComplete = useCallback(
     (result: CloudSetupResult) => {
       if (result.type === 'cancelled') {
-        setView({ type: 'prompt' });
+        useRouterStore.getState().goToPrompt();
         return;
       }
       if (result.type === 'error') {
         useToastStore
           .getState()
           .show(result.error ?? 'Cloud setup failed', 'error');
-        setView({ type: 'prompt' });
+        useRouterStore.getState().goToPrompt();
         return;
       }
 
@@ -1040,10 +945,10 @@ function SessionsApp({
           const { session, prompt, model, mode, mountDir } = view.pendingResume;
           resumeSessionFlow(session, prompt, model, mode, mountDir, 'cloud');
         } else {
-          setView({ type: 'prompt' });
+          useRouterStore.getState().goToPrompt();
         }
       } else {
-        setView({ type: 'prompt' });
+        useRouterStore.getState().goToPrompt();
       }
     },
     [view, startSession, resumeSessionFlow],
@@ -1085,7 +990,7 @@ function SessionsApp({
           title="Cloud Setup"
           onComplete={handleCloudSetupComplete}
           showBack
-          onBack={() => setView({ type: 'prompt' })}
+          onBack={() => useRouterStore.getState().goToPrompt()}
         />
         <GlobalToast />
         <BackgroundTaskIndicator />
@@ -1124,10 +1029,6 @@ function SessionsApp({
           resumeSession={resumeSess}
           initialMountDir={resumeSess?.mountDir ?? initialMountDir}
           forceMountMode={!isGitRepo}
-          onNewPrompt={() => {
-            setPromptKey((k) => k + 1);
-            setView({ type: 'prompt' });
-          }}
           onSubmit={({
             prompt,
             agent,
@@ -1161,11 +1062,9 @@ function SessionsApp({
           onShell={(shellMountDir, selectedProvider) => {
             if (resumeSess) {
               // Shell on resumed container — still needs outer loop for resume + shell
-              onComplete({
-                type: 'shell',
-                resumeSessionId: resumeSess.id,
-                resumeProvider: resumeSess.provider,
-              });
+              useRouterStore
+                .getState()
+                .exitShell(resumeSess.id, resumeSess.provider);
             } else {
               // Fresh shell container — prepare in TUI with loading screen
               startShellSession(
@@ -1175,8 +1074,6 @@ function SessionsApp({
               );
             }
           }}
-          onCancel={() => onComplete({ type: 'quit' })}
-          onViewSessions={() => setView({ type: 'list' })}
         />
         <GlobalToast />
         <ShutdownOverlay />
@@ -1222,28 +1119,7 @@ function SessionsApp({
   if (view.type === 'detail') {
     return (
       <box flexDirection="column" width="100%" height="100%">
-        <SessionDetail
-          session={view.session}
-          onBack={() => setView({ type: 'list' })}
-          onAttach={(sessionId) =>
-            onComplete({
-              type: 'attach',
-              sessionId,
-              session: view.session,
-            })
-          }
-          onShell={(sessionId) =>
-            onComplete({
-              type: 'exec-shell',
-              sessionId,
-              session: view.session,
-            })
-          }
-          onResume={handleResume}
-          onSessionDeleted={() => setView({ type: 'list' })}
-          onNewPrompt={() => setView({ type: 'prompt' })}
-          onResources={() => setView({ type: 'resources' })}
-        />
+        <SessionDetail session={view.session} onResume={handleResume} />
         <GlobalToast />
         <BackgroundTaskIndicator bottom={1} />
         <ShutdownOverlay />
@@ -1256,11 +1132,7 @@ function SessionsApp({
   if (view.type === 'resources') {
     return (
       <>
-        <ResourcesList
-          onBack={() => setView({ type: 'list' })}
-          onNewTask={() => setView({ type: 'prompt' })}
-          onSessionsList={() => setView({ type: 'list' })}
-        />
+        <ResourcesList />
         <GlobalToast />
         <BackgroundTaskIndicator />
         <ShutdownOverlay />
@@ -1273,25 +1145,7 @@ function SessionsApp({
   return (
     <>
       <SessionsList
-        onSelect={(session) => setView({ type: 'detail', session })}
-        onQuit={() => onComplete({ type: 'quit' })}
-        onNewTask={() => setView({ type: 'prompt' })}
-        onAttach={(session) =>
-          onComplete({
-            type: 'attach',
-            sessionId: session.id,
-            session,
-          })
-        }
-        onShell={(session) =>
-          onComplete({
-            type: 'exec-shell',
-            sessionId: session.id,
-            session,
-          })
-        }
         onResume={handleResume}
-        onResources={() => setView({ type: 'resources' })}
         currentRepo={currentRepoInfo?.fullName}
       />
       <GlobalToast />
@@ -1337,10 +1191,11 @@ export async function runSessionsTui({
   let nextIsGitRepo = isGitRepo;
 
   while (true) {
-    let resolveResult: (result: SessionsResult) => void;
-    const resultPromise = new Promise<SessionsResult>((resolve) => {
-      resolveResult = resolve;
-    });
+    const deferredResult = new Deferred<SessionsResult>();
+
+    // Initialize router store before rendering — this registers the
+    // onComplete callback so exit actions can resolve the promise.
+    useRouterStore.getState().init((result) => deferredResult.resolve(result));
 
     const { render, destroy } = await createTui();
 
@@ -1358,12 +1213,11 @@ export async function runSessionsTui({
           initialMountDir={nextMountDir}
           currentRepoInfo={currentRepoInfo}
           isGitRepo={nextIsGitRepo ?? effectiveIsGitRepo}
-          onComplete={(result) => resolveResult(result)}
         />
       </CopyOnSelect>,
     );
 
-    const result = await resultPromise;
+    const result = await deferredResult.promise;
 
     await destroy();
 

@@ -13,6 +13,7 @@ import {
 } from '../services/sandbox/resources.ts';
 import { formatSize } from '../services/sessionDisplay.ts';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore.ts';
+import { useRouterStore } from '../stores/routerStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { useToastStore } from '../stores/toastStore.ts';
 import { ActionButton } from './ActionButton.tsx';
@@ -22,12 +23,6 @@ import { ResourceDetailPanel } from './ResourceDetailPanel.tsx';
 // ============================================================================
 // Types
 // ============================================================================
-
-export interface ResourcesListProps {
-  onBack: () => void;
-  onNewTask?: () => void;
-  onSessionsList?: () => void;
-}
 
 type FilterMode = 'all' | 'container' | 'snapshot' | 'volume' | 'image';
 
@@ -88,11 +83,7 @@ function statusLabel(status: SandboxResource['status']): string {
 // Component
 // ============================================================================
 
-export function ResourcesList({
-  onBack,
-  onNewTask,
-  onSessionsList,
-}: ResourcesListProps) {
+export function ResourcesList() {
   const { theme } = useTheme();
   const { rows, columns } = useWindowSize();
   const isBig = rows >= 30 && columns >= 61;
@@ -414,8 +405,7 @@ export function ResourcesList({
         description: 'Start a new ox session',
         category: 'Navigation',
         keybind: { key: 'n', ctrl: true },
-        enabled: !!onNewTask,
-        onSelect: () => onNewTask?.(),
+        onSelect: () => useRouterStore.getState().goToPrompt(),
       },
       {
         id: 'nav.sessionsList',
@@ -423,8 +413,7 @@ export function ResourcesList({
         description: 'Go to the sessions list',
         category: 'Navigation',
         keybind: { key: 'l', ctrl: true },
-        enabled: !!onSessionsList,
-        onSelect: () => onSessionsList?.(),
+        onSelect: () => useRouterStore.getState().goToList(),
       },
       {
         id: 'resources.back',
@@ -434,7 +423,7 @@ export function ResourcesList({
         keybind: { key: 'escape', display: 'esc' },
         hidden: true,
         onSelect: () => {
-          if (!isOpen) onBack();
+          if (!isOpen) useRouterStore.getState().goToList();
         },
       },
     ];
@@ -446,9 +435,6 @@ export function ResourcesList({
     filteredResources,
     selectedIndex,
     isOpen,
-    onBack,
-    onNewTask,
-    onSessionsList,
   ]);
 
   // Keyboard handling — navigation keys only
@@ -458,7 +444,7 @@ export function ResourcesList({
 
     // Escape returns to previous screen (but not if command palette is open)
     if (key.name === 'escape') {
-      if (!isOpen) onBack();
+      if (!isOpen) useRouterStore.getState().goToList();
       return;
     }
 
