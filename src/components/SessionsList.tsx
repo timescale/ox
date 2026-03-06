@@ -547,10 +547,7 @@ export function SessionsList({
         title: 'Delete session',
         description: 'Remove the selected session container',
         category: 'Session',
-        keybind: [
-          { key: 'delete', display: 'delete' },
-          { key: 'd', ctrl: true },
-        ],
+        keybind: [{ key: 'd', ctrl: true }, { key: 'delete' }],
         enabled: !!selected,
         onSelect: () => {
           const s = getSelectedSession();

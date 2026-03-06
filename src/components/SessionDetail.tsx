@@ -18,6 +18,7 @@ export interface SessionDetailProps {
   onResume: (session: OxSession) => void;
   onSessionDeleted: () => void;
   onNewPrompt?: () => void;
+  onResources?: () => void;
 }
 
 export function SessionDetail({
@@ -28,6 +29,7 @@ export function SessionDetail({
   onResume,
   onSessionDeleted,
   onNewPrompt,
+  onResources,
 }: SessionDetailProps) {
   // Track the live session (updated by SessionDetailPanel polling).
   // The prop `session` is set once when navigating to the detail view and
@@ -104,6 +106,15 @@ export function SessionDetail({
         onSelect: () => onNewPrompt?.(),
       },
       {
+        id: 'navigate-resources',
+        title: 'Manage Resources',
+        description: 'View and manage sandbox images, volumes, and snapshots',
+        category: 'Navigation',
+        keybind: { key: 'e', ctrl: true, display: 'ctrl+e' },
+        enabled: !!onResources,
+        onSelect: () => onResources?.(),
+      },
+      {
         id: 'session.attach',
         title: 'Attach',
         description: 'Connect to the running agent container interactively',
@@ -144,8 +155,7 @@ export function SessionDetail({
         title: 'Delete',
         description: 'Remove the stopped container permanently',
         category: 'Session',
-        keybind: { key: 'd', ctrl: true },
-        enabled: isStopped,
+        keybind: [{ key: 'd', ctrl: true }, { key: 'delete' }],
         onSelect: () => setModal('delete'),
       },
       {
@@ -168,6 +178,7 @@ export function SessionDetail({
     [
       onBack,
       onNewPrompt,
+      onResources,
       isRunning,
       isStopped,
       onAttach,

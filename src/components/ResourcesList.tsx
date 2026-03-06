@@ -366,11 +366,7 @@ export function ResourcesList({
         title: 'Delete selected resource',
         description: 'Remove the selected resource permanently',
         category: 'Resources',
-        keybind: [
-          { key: 'delete', display: 'delete' },
-          { key: 'backspace', display: 'backspace' },
-          { key: 'd', ctrl: true },
-        ],
+        keybind: [{ key: 'd', ctrl: true }, { key: 'delete' }],
         enabled: !!selected,
         onSelect: () => {
           const r = getSelectedResource();

@@ -1242,6 +1242,7 @@ function SessionsApp({
           onResume={handleResume}
           onSessionDeleted={() => setView({ type: 'list' })}
           onNewPrompt={() => setView({ type: 'prompt' })}
+          onResources={() => setView({ type: 'resources' })}
         />
         <GlobalToast />
         <BackgroundTaskIndicator bottom={1} />
