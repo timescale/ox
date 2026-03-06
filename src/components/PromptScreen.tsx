@@ -448,6 +448,18 @@ export function PromptScreen({
         },
       },
       {
+        name: 'config',
+        description: 'Run the configuration wizard',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          useRouterStore.getState().goToConfig({ resumeSession });
+        },
+      },
+      {
         name: 'theme',
         description: 'Change UI theme',
         onSelect: () => {

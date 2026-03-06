@@ -15,7 +15,7 @@ import type {
 export type SessionsView =
   | { type: 'init' } // Initial loading state
   | { type: 'docker' }
-  | { type: 'config' }
+  | { type: 'config'; returnToPrompt?: { resumeSession?: OxSession } }
   | {
       type: 'cloud-setup';
       // Store the pending action so we can resume after setup completes
@@ -159,7 +159,7 @@ interface RouterState {
   }) => void;
   goToStartingShell: (step: string) => void;
   goToDocker: () => void;
-  goToConfig: () => void;
+  goToConfig: (returnToPrompt?: { resumeSession?: OxSession }) => void;
 
   // Low-level: for async workflows that do conditional/functional updates
   updateView: (updater: (prev: SessionsView) => SessionsView) => void;
@@ -246,8 +246,8 @@ export const useRouterStore = create<RouterState>()((set, get) => ({
     set({ view: { type: 'docker' } });
   },
 
-  goToConfig: () => {
-    set({ view: { type: 'config' } });
+  goToConfig: (returnToPrompt) => {
+    set({ view: { type: 'config', returnToPrompt } });
   },
 
   updateView: (updater) => {
