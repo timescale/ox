@@ -37,7 +37,7 @@ import {
   type ShellError,
   shellEscape,
 } from '../utils/shell.ts';
-import { buildAgentCommand } from './agentCommand';
+import { buildAgentCommand, wrapWithPrompt } from './agentCommand';
 import { getClaudeConfigFiles } from './claude';
 import { getCodexConfigFiles } from './codex';
 import {
@@ -54,15 +54,6 @@ import { log } from './logger';
 import { getOpencodeConfigFiles } from './opencode';
 import { runInDocker, type VirtualFile } from './runInDocker';
 import type { AttachOptions, SubmitMode } from './sandbox/types';
-
-/**
- * Escape a string for safe use in shell commands using base64 encoding.
- * This approach avoids any shell interpretation of special characters
- * by encoding the entire string and decoding it at runtime.
- */
-function base64Encode(text: string): string {
-  return Buffer.from(text, 'utf8').toString('base64');
-}
 
 export const toVolumeArgs = (volumes: string[]): string[] =>
   volumes.flatMap((v) => ['-v', v]);
@@ -208,12 +199,18 @@ async function cleanupOverlayDirs(containerName: string): Promise<void> {
  * `tmux attach`, keeping the container alive.
  *
  * Non-interactive (async/detached) sessions skip tmux and exec directly.
+ *
+ * Prompt injection is delegated to {@link wrapWithPrompt} which uses a
+ * shell variable (`$OX_PROMPT`) so stdin stays connected to the terminal.
  */
 const escapePrompt = (
   cmd: string,
+  agent: AgentType,
   prompt?: string | null,
   interactive?: boolean,
 ): string => {
+  const wrapped = wrapWithPrompt(cmd, agent, prompt);
+
   if (interactive) {
     // Wrap in tmux: start a detached session running the agent, then attach.
     // PID 1 becomes `tmux attach`, keeping the container alive while the
@@ -222,19 +219,20 @@ const escapePrompt = (
     // (matches the Deno cloud sandbox's tmux invocation).
     // The inner command is a single string passed to tmux (which runs it via
     // sh -c), so semicolons work fine as separators.
-    const inner = prompt
-      ? `OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"; ${cmd} "$OX_PROMPT"`
-      : cmd;
-    return `tmux -u new-session -d -s main ${shellEscape(inner)}\nexec tmux -u attach -t main`;
+    return `tmux -u new-session -d -s main ${shellEscape(wrapped)}\nexec tmux -u attach -t main`;
   }
 
   // Non-interactive (async/detached): exec the agent directly.
-  // The variable assignment MUST be on its own line so `exec` applies to the
-  // agent command, not to the assignment.
-  if (prompt) {
-    return `OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"\nexec ${cmd} "$OX_PROMPT"`;
+  // When there's a prompt, wrapWithPrompt produces a single line:
+  //   OX_PROMPT="$(...)"; cmd "$OX_PROMPT"
+  // We need the variable assignment on its own line so `exec` applies to
+  // the agent command, not to the assignment.  Replace the first "; "
+  // (which separates the assignment from the command) with a newline+exec.
+  if (prompt && prompt.trim().length > 0) {
+    const sep = wrapped.indexOf('; ');
+    return `${wrapped.slice(0, sep)}\nexec ${wrapped.slice(sep + 2)}`;
   }
-  return `exec ${cmd}`;
+  return `exec ${wrapped}`;
 };
 
 // ============================================================================
@@ -1657,7 +1655,7 @@ exec bash
 set -e
 cd /work/app
 ${config.initScript || ''}
-${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached' : 'interactive', model, agentArgs: options.agentArgs, continue: true }), prompt, mode === 'interactive')}
+${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached' : 'interactive', model, agentArgs: options.agentArgs, continue: true }), agent, prompt, mode === 'interactive')}
 `.trim();
 
   const oxLabels = buildOxLabels({
@@ -1858,20 +1856,15 @@ export async function startContainer(
   const volumeArgs = toVolumeArgs(volumes);
 
   // Build the agent command based on the selected agent type, model, and mode.
-  // Prompt is NOT passed to the builder — Docker injects it via escapePrompt()
-  // which appends it as a positional arg (exec <cmd> "$OX_PROMPT").
+  // Prompt injection is handled by escapePrompt() → wrapWithPrompt(), which
+  // uses a shell variable ($OX_PROMPT) so stdin stays free for the TUI.
   const hasPrompt = prompt.trim().length > 0;
-  let agentCommand = buildAgentCommand({
+  const agentCommand = buildAgentCommand({
     agent,
     mode: interactive ? 'interactive' : 'detached',
     model,
     agentArgs,
   });
-  // For interactive opencode with a prompt, append --prompt so that
-  // escapePrompt() produces: exec opencode --prompt "$OX_PROMPT"
-  if (agent === 'opencode' && interactive && hasPrompt) {
-    agentCommand += ' --prompt';
-  }
 
   // Only add PR instructions in async mode (detached) with a git repo
   const fullPrompt =
@@ -1899,7 +1892,7 @@ if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
   git switch -c "ox/${branchName}"
 fi
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt, interactive)}
+${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
     } else {
       // Mount mode outside a git repo - skip all git/gh operations
@@ -1907,7 +1900,7 @@ ${escapePrompt(agentCommand, fullPrompt, interactive)}
 set -e
 cd /work/app
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt, interactive)}
+${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
     }
   } else {
@@ -1923,7 +1916,7 @@ gh repo clone ${repoInfo.fullName} app
 cd app
 git switch -c "ox/${branchName}"
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt, interactive)}
+${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
   }
 

@@ -12,7 +12,11 @@ import {
   shellEscape,
   TUI_SUBPROCESS_OPTS,
 } from '../../utils/shell.ts';
-import { buildAgentCommand, buildContinueCommand } from '../agentCommand.ts';
+import {
+  buildAgentCommand,
+  buildContinueCommand,
+  wrapWithPrompt,
+} from '../agentCommand.ts';
 import type { AgentType } from '../config.ts';
 import { readConfig } from '../config.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
@@ -51,14 +55,6 @@ import type {
 
 /** Name of the tmux session used for agent processes inside cloud sandboxes. */
 const TMUX_SESSION = 'ox';
-
-/**
- * Base64-encode a string for safe shell transport.
- * Decoded at runtime via `echo '<b64>' | base64 -d`.
- */
-function base64Encode(text: string): string {
-  return Buffer.from(text, 'utf8').toString('base64');
-}
 
 /** Check whether an error message indicates a concurrency/quota limit. */
 function isConcurrencyLimitError(message: string): boolean {
@@ -222,43 +218,27 @@ async function provisionSandbox(
     // Start agent process
     onProgress?.('Starting agent');
     await logToSandbox(sandbox, 'Starting agent...');
-    const hasPrompt =
-      options.prompt != null && options.prompt.trim().length > 0;
-    if (options.interactive) {
-      // For interactive sessions, do NOT pass the prompt to
-      // buildAgentCommand() — that would pipe it via stdin, stealing the
-      // TTY from the agent's interactive TUI.  Instead we inject the prompt
-      // as a positional argument (or --prompt for opencode), matching
-      // Docker's escapePrompt() approach.
-      let agentCommand = buildAgentCommand({
+    const agentCommand = wrapWithPrompt(
+      buildAgentCommand({
         agent: options.agent,
-        mode: 'interactive',
+        mode: options.interactive ? 'interactive' : 'detached',
         model: options.model,
         agentArgs: options.agentArgs,
-      });
-      if (options.agent === 'opencode' && hasPrompt) {
-        agentCommand += ' --prompt';
-      }
-      const inner =
-        hasPrompt && options.prompt
-          ? `OX_PROMPT="$(echo '${base64Encode(options.prompt)}' | base64 -d)"; ${agentCommand} "$OX_PROMPT"`
-          : agentCommand;
+      }),
+      options.agent,
+      options.prompt,
+    );
+    if (options.interactive) {
       await sandboxExec(
         sandbox,
-        `tmux new-session -d -s ${TMUX_SESSION} -c /work/app ${shellEscape(inner)}`,
+        `tmux new-session -d -s ${TMUX_SESSION} -c /work/app ${shellEscape(agentCommand)}`,
       );
     } else {
-      // Non-interactive (detached): piping prompt via stdin is fine.
-      const agentCommand = buildAgentCommand({
-        agent: options.agent,
-        mode: 'detached',
-        model: options.model,
-        agentArgs: options.agentArgs,
-        prompt: options.prompt,
-      });
+      // Wrap in bash -c so that the semicolons in the wrapWithPrompt output
+      // (variable assignment + command) are treated as a single unit by nohup.
       await sandboxExec(
         sandbox,
-        `cd /work/app && nohup ${agentCommand} >> /work/agent.log 2>&1 &`,
+        `cd /work/app && nohup bash -c ${shellEscape(agentCommand)} >> /work/agent.log 2>&1 &`,
       );
     }
 
@@ -304,14 +284,17 @@ async function provisionResume(
 
     onProgress?.('Starting agent');
     await logToSandbox(sandbox, 'Starting agent...');
-    const agentCmd = buildAgentCommand({
-      agent: options.agent,
-      mode: isInteractive ? 'interactive' : 'detached',
-      model,
-      agentArgs: options.agentArgs,
-      continue: true,
-      prompt: isInteractive ? undefined : options.prompt,
-    });
+    const agentCmd = wrapWithPrompt(
+      buildAgentCommand({
+        agent: options.agent,
+        mode: isInteractive ? 'interactive' : 'detached',
+        model,
+        agentArgs: options.agentArgs,
+        continue: true,
+      }),
+      options.agent,
+      options.prompt,
+    );
 
     if (isInteractive) {
       await sandboxExec(
@@ -321,7 +304,7 @@ async function provisionResume(
     } else {
       await sandboxExec(
         sandbox,
-        `cd /work/app && nohup ${agentCmd} >> /work/agent.log 2>&1 &`,
+        `cd /work/app && nohup bash -c ${shellEscape(agentCmd)} >> /work/agent.log 2>&1 &`,
       );
     }
 
