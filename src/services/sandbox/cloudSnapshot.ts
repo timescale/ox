@@ -39,7 +39,7 @@ export function getBaseSnapshotSlug(): string {
   // so that updating the base triggers a rebuild.
   const safeVersion = packageJson.version.replace(/[^a-z0-9-]/g, '-');
   const tvHash = baseToolsHash();
-  return `ox-base-${safeVersion}-${tvHash}`.slice(0, 32);
+  return `ox-base-${safeVersion}-${tvHash}`.slice(0, 32).replace(/-+$/, '');
 }
 
 /**
@@ -52,8 +52,11 @@ export function getAgentSnapshotSlug(agent: AgentType): string {
   const agentVer = getAgentVersion(agent)
     .replace(/[^a-z0-9-]/g, '-')
     .slice(0, 6);
-  // e.g. "ox-0-14-1-codex-0-106-" — fit within 32 chars
-  return `ox-${safeVersion}-${agent}-${agentVer}`.slice(0, 32);
+  // e.g. "ox-0-17-0-codex-0-111-0" — fit within 32 chars
+  // Strip trailing hyphens — Deno API rejects slugs ending with '-'
+  return `ox-${safeVersion}-${agent}-${agentVer}`
+    .slice(0, 32)
+    .replace(/-+$/, '');
 }
 
 /**
@@ -415,7 +418,7 @@ chmod +x /etc/profile.d/docker-start.sh`,
       );
     }
 
-    // 11. Kill sandbox to detach the volume (required before snapshotting)
+    // 11. Kill sandbox and wait for volume detachment (required before snapshotting)
     onProgress?.({
       type: 'snapshotting',
       message: 'Detaching volume',
@@ -427,14 +430,7 @@ chmod +x /etc/profile.d/docker-start.sh`,
       // ignore close errors
     }
     if (buildSandboxId) {
-      try {
-        await client.killSandbox(buildSandboxId);
-      } catch (err) {
-        log.warn(
-          { err, sandboxId: buildSandboxId },
-          'Failed to kill build sandbox — it may need manual cleanup',
-        );
-      }
+      await client.killAndWaitForDetach(buildSandboxId);
     } else {
       log.warn(
         'No sandbox ID available — cannot kill build sandbox. It may need manual cleanup.',
@@ -442,17 +438,14 @@ chmod +x /etc/profile.d/docker-start.sh`,
     }
     sandbox = null; // Prevent double-kill in finally
 
-    // Wait for the platform to fully detach the volume from the dead sandbox.
-    // Without this delay, snapshotVolume can hit a 500 error.
-    await new Promise((resolve) => setTimeout(resolve, 5_000));
-
-    // 12. Snapshot the volume
+    // 12. Snapshot the volume (retries on VOLUME_IS_MOUNTED — the platform
+    //     may take time to fully release the volume after sandbox death)
     onProgress?.({
       type: 'snapshotting',
       message: 'Creating snapshot (this may take a moment)',
     });
     try {
-      await client.snapshotVolume(volume.id, { slug: snapshotSlug });
+      await client.snapshotVolumeWithRetry(volume.id, { slug: snapshotSlug });
     } catch (err) {
       log.error(
         { err, volumeId: volume.id, snapshotSlug },
@@ -643,7 +636,7 @@ export async function ensureAgentCloudSnapshot(options: {
       },
     );
 
-    // 7. Kill sandbox to detach the volume
+    // 7. Kill sandbox and wait for volume detachment
     onProgress?.({
       type: 'snapshotting',
       message: 'Detaching volume',
@@ -655,26 +648,17 @@ export async function ensureAgentCloudSnapshot(options: {
       // ignore close errors
     }
     if (buildSandboxId) {
-      try {
-        await client.killSandbox(buildSandboxId);
-      } catch (err) {
-        log.warn(
-          { err, sandboxId: buildSandboxId },
-          'Failed to kill agent build sandbox',
-        );
-      }
+      await client.killAndWaitForDetach(buildSandboxId);
     }
     sandbox = null;
 
-    await new Promise((resolve) => setTimeout(resolve, 5_000));
-
-    // 8. Snapshot the volume
+    // 8. Snapshot the volume (retries on VOLUME_IS_MOUNTED)
     onProgress?.({
       type: 'snapshotting',
       message: `Creating ${agent} agent snapshot`,
     });
     try {
-      await client.snapshotVolume(volume.id, { slug: snapshotSlug });
+      await client.snapshotVolumeWithRetry(volume.id, { slug: snapshotSlug });
     } catch (err) {
       log.error(
         { err, volumeId: volume.id, snapshotSlug },
