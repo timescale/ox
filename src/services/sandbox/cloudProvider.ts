@@ -52,6 +52,14 @@ import type {
 /** Name of the tmux session used for agent processes inside cloud sandboxes. */
 const TMUX_SESSION = 'ox';
 
+/**
+ * Base64-encode a string for safe shell transport.
+ * Decoded at runtime via `echo '<b64>' | base64 -d`.
+ */
+function base64Encode(text: string): string {
+  return Buffer.from(text, 'utf8').toString('base64');
+}
+
 /** Check whether an error message indicates a concurrency/quota limit. */
 function isConcurrencyLimitError(message: string): boolean {
   return (
@@ -214,19 +222,40 @@ async function provisionSandbox(
     // Start agent process
     onProgress?.('Starting agent');
     await logToSandbox(sandbox, 'Starting agent...');
-    const agentCommand = buildAgentCommand({
-      agent: options.agent,
-      mode: options.interactive ? 'interactive' : 'detached',
-      model: options.model,
-      agentArgs: options.agentArgs,
-      prompt: options.prompt,
-    });
+    const hasPrompt =
+      options.prompt != null && options.prompt.trim().length > 0;
     if (options.interactive) {
+      // For interactive sessions, do NOT pass the prompt to
+      // buildAgentCommand() — that would pipe it via stdin, stealing the
+      // TTY from the agent's interactive TUI.  Instead we inject the prompt
+      // as a positional argument (or --prompt for opencode), matching
+      // Docker's escapePrompt() approach.
+      let agentCommand = buildAgentCommand({
+        agent: options.agent,
+        mode: 'interactive',
+        model: options.model,
+        agentArgs: options.agentArgs,
+      });
+      if (options.agent === 'opencode' && hasPrompt) {
+        agentCommand += ' --prompt';
+      }
+      const inner =
+        hasPrompt && options.prompt
+          ? `OX_PROMPT="$(echo '${base64Encode(options.prompt)}' | base64 -d)"; ${agentCommand} "$OX_PROMPT"`
+          : agentCommand;
       await sandboxExec(
         sandbox,
-        `tmux new-session -d -s ${TMUX_SESSION} -c /work/app ${shellEscape(agentCommand)}`,
+        `tmux new-session -d -s ${TMUX_SESSION} -c /work/app ${shellEscape(inner)}`,
       );
     } else {
+      // Non-interactive (detached): piping prompt via stdin is fine.
+      const agentCommand = buildAgentCommand({
+        agent: options.agent,
+        mode: 'detached',
+        model: options.model,
+        agentArgs: options.agentArgs,
+        prompt: options.prompt,
+      });
       await sandboxExec(
         sandbox,
         `cd /work/app && nohup ${agentCommand} >> /work/agent.log 2>&1 &`,
