@@ -286,18 +286,19 @@ describe('classifyCloudSnapshot', () => {
 // ============================================================================
 
 describe('classifyCloudVolume', () => {
-  test('build volume (oxb-*) is orphaned when not source of current base snapshot', () => {
+  const emptyCtx = {
+    currentBaseVolumeSlug: null,
+    sessionsByVolumeSlug: new Map(),
+    deletedSessionsByVolumeSlug: new Map(),
+    snapshotsByVolumeSlug: new Map(),
+  };
+
+  test('build volume (oxb-*) is orphaned when not source of current base snapshot and no child snapshots', () => {
     const volume = makeVolume({
       slug: 'oxb-build-abc123',
     });
 
-    const result = assertResource(
-      classifyCloudVolume(volume, {
-        currentBaseVolumeSlug: null,
-        sessionsByVolumeSlug: new Map(),
-        deletedSessionsByVolumeSlug: new Map(),
-      }),
-    );
+    const result = assertResource(classifyCloudVolume(volume, { ...emptyCtx }));
 
     expect(result.status).toBe('orphaned');
     expect(result.category).toBe('Build Volume');
@@ -312,9 +313,8 @@ describe('classifyCloudVolume', () => {
 
     const result = assertResource(
       classifyCloudVolume(volume, {
+        ...emptyCtx,
         currentBaseVolumeSlug: 'oxb-build-abc123',
-        sessionsByVolumeSlug: new Map(),
-        deletedSessionsByVolumeSlug: new Map(),
       }),
     );
 
@@ -322,16 +322,15 @@ describe('classifyCloudVolume', () => {
     expect(result.category).toBe('Build Volume');
   });
 
-  test('build volume (oxb-*) is orphaned when different from current base volume', () => {
+  test('build volume (oxb-*) is orphaned when different from current base volume and no child snapshots', () => {
     const volume = makeVolume({
       slug: 'oxb-old-build-xyz789',
     });
 
     const result = assertResource(
       classifyCloudVolume(volume, {
+        ...emptyCtx,
         currentBaseVolumeSlug: 'oxb-build-abc123',
-        sessionsByVolumeSlug: new Map(),
-        deletedSessionsByVolumeSlug: new Map(),
       }),
     );
 
@@ -339,21 +338,82 @@ describe('classifyCloudVolume', () => {
     expect(result.category).toBe('Build Volume');
   });
 
-  test('agent build volume (oxa-*) is always orphaned', () => {
+  test('build volume (oxb-*) is old when not current but has old child snapshots', () => {
+    const volume = makeVolume({
+      slug: 'oxb-old-build-xyz789',
+    });
+
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        ...emptyCtx,
+        currentBaseVolumeSlug: 'oxb-build-abc123',
+        snapshotsByVolumeSlug: new Map([
+          [
+            'oxb-old-build-xyz789',
+            [{ slug: 'ox-base-0-11-0-oldold', status: 'old' }],
+          ],
+        ]),
+      }),
+    );
+
+    expect(result.status).toBe('old');
+    expect(result.category).toBe('Build Volume');
+    expect(result.childSnapshotSlugs).toEqual(['ox-base-0-11-0-oldold']);
+  });
+
+  test('agent build volume (oxa-*) is orphaned when no child snapshots', () => {
+    const volume = makeVolume({
+      slug: 'oxa-build-abc123',
+    });
+
+    const result = assertResource(classifyCloudVolume(volume, { ...emptyCtx }));
+
+    expect(result.status).toBe('orphaned');
+    expect(result.category).toBe('Agent Build Volume');
+  });
+
+  test('agent build volume (oxa-*) is current when it has a current child snapshot', () => {
     const volume = makeVolume({
       slug: 'oxa-build-abc123',
     });
 
     const result = assertResource(
       classifyCloudVolume(volume, {
-        currentBaseVolumeSlug: null,
-        sessionsByVolumeSlug: new Map(),
-        deletedSessionsByVolumeSlug: new Map(),
+        ...emptyCtx,
+        snapshotsByVolumeSlug: new Map([
+          [
+            'oxa-build-abc123',
+            [{ slug: 'ox-0-17-0-claude-2-1-70', status: 'current' }],
+          ],
+        ]),
       }),
     );
 
-    expect(result.status).toBe('orphaned');
+    expect(result.status).toBe('current');
     expect(result.category).toBe('Agent Build Volume');
+    expect(result.childSnapshotSlugs).toEqual(['ox-0-17-0-claude-2-1-70']);
+  });
+
+  test('agent build volume (oxa-*) is old when all child snapshots are old', () => {
+    const volume = makeVolume({
+      slug: 'oxa-build-abc123',
+    });
+
+    const result = assertResource(
+      classifyCloudVolume(volume, {
+        ...emptyCtx,
+        snapshotsByVolumeSlug: new Map([
+          [
+            'oxa-build-abc123',
+            [{ slug: 'ox-0-16-0-claude-2-0-0', status: 'old' }],
+          ],
+        ]),
+      }),
+    );
+
+    expect(result.status).toBe('old');
+    expect(result.category).toBe('Agent Build Volume');
+    expect(result.childSnapshotSlugs).toEqual(['ox-0-16-0-claude-2-0-0']);
   });
 
   test('active session volume (oxs-*) linked to non-deleted session', () => {
@@ -367,9 +427,8 @@ describe('classifyCloudVolume', () => {
 
     const result = assertResource(
       classifyCloudVolume(volume, {
-        currentBaseVolumeSlug: null,
+        ...emptyCtx,
         sessionsByVolumeSlug: new Map([['oxs-my-session-abc123', session]]),
-        deletedSessionsByVolumeSlug: new Map(),
       }),
     );
 
@@ -389,9 +448,8 @@ describe('classifyCloudVolume', () => {
 
     const result = assertResource(
       classifyCloudVolume(volume, {
-        currentBaseVolumeSlug: null,
+        ...emptyCtx,
         sessionsByVolumeSlug: new Map([['oxr-resumed-abc123', session]]),
-        deletedSessionsByVolumeSlug: new Map(),
       }),
     );
 
@@ -411,8 +469,7 @@ describe('classifyCloudVolume', () => {
 
     const result = assertResource(
       classifyCloudVolume(volume, {
-        currentBaseVolumeSlug: null,
-        sessionsByVolumeSlug: new Map(),
+        ...emptyCtx,
         deletedSessionsByVolumeSlug: new Map([
           ['oxs-deleted-abc123', deletedSession],
         ]),
@@ -429,13 +486,7 @@ describe('classifyCloudVolume', () => {
       slug: 'oxs-mystery-abc123',
     });
 
-    const result = assertResource(
-      classifyCloudVolume(volume, {
-        currentBaseVolumeSlug: null,
-        sessionsByVolumeSlug: new Map(),
-        deletedSessionsByVolumeSlug: new Map(),
-      }),
-    );
+    const result = assertResource(classifyCloudVolume(volume, { ...emptyCtx }));
 
     expect(result.status).toBe('orphaned');
     expect(result.category).toBe('Session Volume');
@@ -446,13 +497,7 @@ describe('classifyCloudVolume', () => {
       slug: 'oxe-shell-abc123',
     });
 
-    const result = assertResource(
-      classifyCloudVolume(volume, {
-        currentBaseVolumeSlug: null,
-        sessionsByVolumeSlug: new Map(),
-        deletedSessionsByVolumeSlug: new Map(),
-      }),
-    );
+    const result = assertResource(classifyCloudVolume(volume, { ...emptyCtx }));
 
     expect(result.status).toBe('orphaned');
     expect(result.category).toBe('Shell Volume');
@@ -466,13 +511,7 @@ describe('classifyCloudVolume', () => {
       bootable: false,
     });
 
-    const result = assertResource(
-      classifyCloudVolume(volume, {
-        currentBaseVolumeSlug: null,
-        sessionsByVolumeSlug: new Map(),
-        deletedSessionsByVolumeSlug: new Map(),
-      }),
-    );
+    const result = assertResource(classifyCloudVolume(volume, { ...emptyCtx }));
 
     expect(result.size).toBe(9999);
     expect(result.region).toBe('ord');
@@ -484,13 +523,27 @@ describe('classifyCloudVolume', () => {
       slug: 'my-custom-volume',
     });
 
-    const result = classifyCloudVolume(volume, {
-      currentBaseVolumeSlug: null,
-      sessionsByVolumeSlug: new Map(),
-      deletedSessionsByVolumeSlug: new Map(),
-    });
+    const result = classifyCloudVolume(volume, { ...emptyCtx });
 
     expect(result).toBeNull();
+  });
+
+  test('snapshot sourceVolumeSlug is populated', () => {
+    const snapshot = makeSnapshot({
+      slug: 'ox-0-17-0-claude-2-1-70',
+      volume: { id: 'vol_abc', slug: 'oxa-build-abc123' },
+    });
+
+    const result = assertResource(
+      classifyCloudSnapshot(snapshot, {
+        currentBaseSlug: 'ox-base-0-17-0-a1b2c3',
+        currentAgentSlugs: new Set(['ox-0-17-0-claude-2-1-70']),
+        sessionsBySnapshotSlug: new Map(),
+        deletedSessionsBySnapshotSlug: new Map(),
+      }),
+    );
+
+    expect(result.sourceVolumeSlug).toBe('oxa-build-abc123');
   });
 });
 

@@ -8,6 +8,7 @@ import { ActionButton } from './ActionButton.tsx';
 
 export interface ResourceDetailPanelProps {
   resource: SandboxResource;
+  allResources: SandboxResource[];
   onDelete: (resource: SandboxResource) => void;
   cleanupCount: number;
   onCleanup: () => void;
@@ -28,6 +29,7 @@ function statusLabel(status: SandboxResource['status']): string {
 
 export function ResourceDetailPanel({
   resource,
+  allResources,
   onDelete,
   cleanupCount,
   onCleanup,
@@ -48,6 +50,27 @@ export function ResourceDetailPanel({
         return theme.error;
     }
   }, [resource.status, theme]);
+
+  // For snapshots: find the parent volume by sourceVolumeSlug
+  const parentVolume = useMemo(() => {
+    if (resource.kind !== 'snapshot' || !resource.sourceVolumeSlug) return null;
+    return (
+      allResources.find(
+        (r) => r.kind === 'volume' && r.name === resource.sourceVolumeSlug,
+      ) ?? null
+    );
+  }, [resource, allResources]);
+
+  // For volumes: find child snapshots by childSnapshotSlugs
+  const childSnapshots = useMemo(() => {
+    if (resource.kind !== 'volume' || !resource.childSnapshotSlugs?.length) {
+      return [];
+    }
+    const slugSet = new Set(resource.childSnapshotSlugs);
+    return allResources.filter(
+      (r) => r.kind === 'snapshot' && slugSet.has(r.name),
+    );
+  }, [resource, allResources]);
 
   const providerLabel = resource.provider === 'cloud' ? 'cloud' : 'docker';
   const providerColor =
@@ -132,6 +155,30 @@ export function ResourceDetailPanel({
           </box>
         )}
       </box>
+
+      {/* Row 4 (optional): Relationship info */}
+      {parentVolume && (
+        <box flexDirection="row" gap={1} overflow="hidden">
+          <text fg={theme.textMuted}>volume</text>
+          <text>{parentVolume.name}</text>
+          <text fg={theme.textMuted}>({parentVolume.status})</text>
+        </box>
+      )}
+      {resource.sourceVolumeSlug && !parentVolume && (
+        <box flexDirection="row" gap={1} overflow="hidden">
+          <text fg={theme.textMuted}>volume</text>
+          <text fg={theme.textMuted}>{resource.sourceVolumeSlug}</text>
+          <text fg={theme.textMuted}>(not found)</text>
+        </box>
+      )}
+      {childSnapshots.length > 0 && (
+        <box flexDirection="row" gap={1} overflow="hidden">
+          <text fg={theme.textMuted}>
+            {childSnapshots.length === 1 ? 'snapshot' : 'snapshots'}
+          </text>
+          <text>{childSnapshots.map((s) => s.name).join(', ')}</text>
+        </box>
+      )}
 
       {/* Action buttons */}
       <box flexDirection="row" flexWrap="wrap" gap={1} marginTop={1}>
