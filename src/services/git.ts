@@ -5,6 +5,7 @@
 import { nanoid } from 'nanoid';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { runClaudeInDocker } from './claude';
+import { runCodexInDocker } from './codex';
 import type { AgentType } from './config';
 import { log } from './logger';
 import { runOpencodeInDocker } from './opencode';
@@ -198,19 +199,40 @@ ${[...allExistingNames].join(', ')}`;
 
     let result: string;
     try {
-      if (agent === 'claude') {
-        const cmdArgs = effectiveModel
-          ? ['--model', effectiveModel, '-p', llmPrompt]
-          : ['-p', llmPrompt];
-        const proc = await runClaudeInDocker({ cmdArgs });
-        result = proc.text();
-      } else {
-        // opencode
-        const cmdArgs = effectiveModel
-          ? ['run', '--model', effectiveModel, llmPrompt]
-          : ['run', llmPrompt];
-        const proc = await runOpencodeInDocker({ cmdArgs });
-        result = proc.text();
+      switch (agent) {
+        case 'claude': {
+          const cmdArgs = effectiveModel
+            ? ['--model', effectiveModel, '-p', llmPrompt]
+            : ['-p', llmPrompt];
+          const proc = await runClaudeInDocker({ cmdArgs });
+          result = proc.text();
+          break;
+        }
+        case 'codex': {
+          const baseArgs = [
+            'exec',
+            '--dangerously-bypass-approvals-and-sandbox',
+            '--skip-git-repo-check',
+          ];
+          const cmdArgs = effectiveModel
+            ? [...baseArgs, '--model', effectiveModel, llmPrompt]
+            : [...baseArgs, llmPrompt];
+          const codexResult = await runCodexInDocker({ cmdArgs });
+          result = codexResult.text();
+          break;
+        }
+        case 'opencode': {
+          const cmdArgs = effectiveModel
+            ? ['run', '--model', effectiveModel, llmPrompt]
+            : ['run', llmPrompt];
+          const proc = await runOpencodeInDocker({ cmdArgs });
+          result = proc.text();
+          break;
+        }
+        default:
+          throw new Error(
+            `Unsupported agent for branch name generation: ${agent satisfies never}`,
+          );
       }
     } catch (err) {
       log.error({ err, agent }, 'Failed to generate branch name');
