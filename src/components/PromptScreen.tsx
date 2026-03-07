@@ -173,7 +173,7 @@ export function PromptScreen({
   const [mountDir, setMountDir] = useState<string | null>(
     initialMountDir ?? (forceMountMode ? process.cwd() : null),
   );
-  const imageReady = useReadinessStore((s) => s.sandboxImage === 'ready');
+  const imageReady = useReadinessStore((s) => s.sandboxBaseImage === 'ready');
   const modelsMap = useAgentModels(null, imageReady);
   // Ref so callbacks can read the latest modelsMap without depending on the
   // object reference (which changes when models finish loading).
@@ -229,6 +229,14 @@ export function PromptScreen({
     if (!imageReady || !modelId) return;
     useReadinessStore.getState().checkAgentAuth(agent, modelId);
   }, [imageReady, agent, modelId]);
+
+  // Prebuild agent-specific sandbox image as soon as the base image is ready
+  // and the agent + provider are known. This runs in the background so the
+  // overlay is likely cached by the time the user submits their prompt.
+  useEffect(() => {
+    if (!imageReady) return;
+    useReadinessStore.getState().prebuildAgentImage(agent, sandboxProvider);
+  }, [imageReady, agent, sandboxProvider]);
 
   // Handle agent switch with model matching (disabled when resuming)
   const switchAgent = useCallback(() => {

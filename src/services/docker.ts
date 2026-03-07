@@ -681,7 +681,7 @@ export const ensureDockerSandbox = async (): Promise<void> => {
   if (finalState.dockerRunning !== 'running') {
     throw new Error('Docker is not running');
   }
-  if (finalState.sandboxImage !== 'ready') {
+  if (finalState.sandboxBaseImage !== 'ready') {
     throw new Error('Docker sandbox image is not available');
   }
 };

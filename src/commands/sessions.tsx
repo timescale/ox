@@ -33,7 +33,7 @@ import {
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { getDenoToken } from '../services/deno';
-import { ensureDockerImage } from '../services/docker';
+import { ensureDockerImage, type PullLayer } from '../services/docker';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -767,7 +767,7 @@ function SessionsApp({
           const store = useReadinessStore.getState();
 
           // If checks haven't completed, subscribe and wait
-          if (store.sandboxImage !== 'ready') {
+          if (store.sandboxBaseImage !== 'ready') {
             await new Promise<void>((resolve, reject) => {
               const unsub = useReadinessStore.subscribe((s) => {
                 // Update starting screen with progress
@@ -778,12 +778,13 @@ function SessionsApp({
                       : v,
                   );
                 } else if (
-                  s.sandboxImage === 'pulling' ||
-                  s.sandboxImage === 'checking'
+                  s.sandboxBaseImage === 'pulling' ||
+                  s.sandboxBaseImage === 'checking'
                 ) {
-                  const layers = s.pullLayers;
+                  const layers = s.basePullLayers;
                   const done = layers.filter(
-                    (l) => l.state === 'complete' || l.state === 'exists',
+                    (l: PullLayer) =>
+                      l.state === 'complete' || l.state === 'exists',
                   ).length;
                   const total = layers.length;
                   const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
@@ -792,15 +793,15 @@ function SessionsApp({
                       ? {
                           ...v,
                           step: `Pulling sandbox image${suffix}`,
-                          layers: s.pullLayers,
+                          layers: s.basePullLayers,
                         }
                       : v,
                   );
-                } else if (s.sandboxImage === 'ready') {
+                } else if (s.sandboxBaseImage === 'ready') {
                   unsub();
                   resolve();
                 } else if (
-                  s.sandboxImage === 'error' ||
+                  s.sandboxBaseImage === 'error' ||
                   s.dockerRunning === 'not-running' ||
                   s.dockerInstalled === 'not-installed'
                 ) {
