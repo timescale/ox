@@ -73,7 +73,6 @@ export async function branchAction(
     ? getSandboxProvider(options.provider)
     : await getDefaultProvider();
   await provider.ensureReady();
-  await provider.ensureImage();
 
   // Step 1: Check if we're in a git repository
   const repoInfo = await tryGetRepoInfo();
@@ -122,6 +121,10 @@ export async function branchAction(
   const effectiveServiceId = options.serviceId ?? config.tigerServiceId;
   const effectiveAgent: AgentType = options.agent ?? config.agent ?? 'opencode';
   const effectiveModel: string | undefined = options.model ?? config.model;
+
+  // Step 4b: Ensure sandbox image (including agent overlay) is ready
+  console.log('Ensuring sandbox image...');
+  await provider.ensureImage({ agent: effectiveAgent });
 
   // Step 5: Get repo info (if in a git repo)
   if (isGitRepo) {

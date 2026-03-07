@@ -328,6 +328,7 @@ function SessionsApp({
           mode,
         });
         await activeProvider.ensureImage({
+          agent,
           onProgress: (progress) => {
             if (
               progress.type === 'pulling' ||
