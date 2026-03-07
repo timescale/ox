@@ -132,7 +132,7 @@ export async function ensureCloudSnapshot(options: {
   }
 
   // 2. Create a bootable volume from the Debian base image
-  const buildVolumeSlug = denoSlug('hbb');
+  const buildVolumeSlug = denoSlug('oxb');
   onProgress?.({
     type: 'creating-volume',
     message: 'Creating bootable build volume',
@@ -547,7 +547,7 @@ export async function ensureAgentCloudSnapshot(options: {
   }
 
   // 2. Create a bootable volume from the base snapshot
-  const buildVolumeSlug = denoSlug('hab');
+  const buildVolumeSlug = denoSlug('oxa');
   onProgress?.({
     type: 'creating-volume',
     message: `Creating volume for ${agent} agent`,

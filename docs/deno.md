@@ -98,12 +98,14 @@ We use `nanoid` with a custom alphabet (`a-z0-9`) for random suffixes, with pref
 
 | Prefix | Resource |
 |--------|----------|
-| `hbb-` | Build volume (base image build) |
-| `hs-` | Session root volume |
-| `hr-` | Resume volume (created from snapshot) |
-| `hsh-` | Ephemeral shell volume |
-| `hsnap-` | Session resume snapshot |
+| `oxb-` | Build volume (base image build) |
+| `oxa-` | Agent build volume (agent overlay build) |
+| `oxs-` | Session root volume |
+| `oxr-` | Resume volume (created from snapshot) |
+| `oxe-` | Ephemeral shell volume |
+| `oxn-` | Session resume snapshot |
 | `ox-base-{version}` | Base snapshot (deterministic, no nanoid) |
+| `ox-{version}-{agent}-{agentVer}` | Agent overlay snapshot (deterministic, no nanoid) |
 
 ### Volume Lifecycle
 
@@ -232,7 +234,7 @@ set -ga terminal-overrides ",xterm-256color:Tc"   # true-color passthrough
 
 The Deno platform auto-generates `/etc/profile.d/app-env.sh` on each sandbox boot, which **resets PATH to system directories only**. User-installed binaries (claude, opencode, etc.) in `~/.local/bin` and `~/.opencode/bin` won't be found.
 
-Fix: Create `/etc/profile.d/ox-path.sh` which sorts alphabetically after `app-env.sh` (`h` > `a`):
+Fix: Create `/etc/profile.d/ox-path.sh` which sorts alphabetically after `app-env.sh` (`o` > `a`):
 
 ```bash
 export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"

@@ -602,7 +602,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // 1. Create session-specific root volume from the base snapshot.
     onProgress?.('Creating volume');
-    const volumeSlug = denoSlug('hs', options.branchName);
+    const volumeSlug = denoSlug('oxs', options.branchName);
     const rootVolume = await client.createVolume({
       slug: volumeSlug,
       region,
@@ -722,7 +722,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     // tools are visible (snapshot-direct boot uses a read-only overlay).
     onProgress?.('Creating volume');
     const shellVolume = await client.createVolume({
-      slug: denoSlug('hsh'),
+      slug: denoSlug('oxe'),
       region,
       capacity: '10GiB',
       from: baseSnapshot,
@@ -808,7 +808,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     if (existing.snapshotSlug) {
       onProgress?.('Creating volume from snapshot');
-      const resumeVolumeSlug = denoSlug('hr', existing.name);
+      const resumeVolumeSlug = denoSlug('oxr', existing.name);
       const resumeVolume = await client.createVolume({
         slug: resumeVolumeSlug,
         region,
@@ -1091,7 +1091,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         }
       }
 
-      const snapshotSlug = denoSlug('hsnap', session.name);
+      const snapshotSlug = denoSlug('oxn', session.name);
       try {
         await client.snapshotVolume(session.volumeSlug, {
           slug: snapshotSlug,
