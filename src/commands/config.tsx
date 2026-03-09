@@ -684,13 +684,13 @@ export async function configAction(): Promise<void> {
       let authResult: boolean;
       switch (result.agent) {
         case 'claude':
-          authResult = await ensureClaudeAuth();
+          authResult = await ensureClaudeAuth(result.config.model);
           break;
         case 'codex':
-          authResult = await ensureCodexAuth();
+          authResult = await ensureCodexAuth(result.config.model);
           break;
         default:
-          authResult = await ensureOpencodeAuth();
+          authResult = await ensureOpencodeAuth(result.config.model);
           break;
       }
       if (!authResult) {

@@ -1225,6 +1225,11 @@ export async function runSessionsTui({
   let nextMountDir = mountDir;
   let nextIsGitRepo = isGitRepo;
 
+  // Circuit breaker: prevent infinite auth retry loops.
+  const MAX_AUTH_RETRIES = 3;
+  let consecutiveAgentAuthRetries = 0;
+  let consecutiveGhAuthRetries = 0;
+
   while (true) {
     const deferredResult = new Deferred<SessionsResult>();
 
@@ -1264,6 +1269,15 @@ export async function runSessionsTui({
     nextSession = undefined;
     nextMountDir = mountDir;
     nextIsGitRepo = isGitRepo;
+
+    // Reset auth retry counters when we get a non-auth result,
+    // indicating the session progressed past the auth phase.
+    if (result.type !== 'needs-agent-auth') {
+      consecutiveAgentAuthRetries = 0;
+    }
+    if (result.type !== 'needs-gh-auth') {
+      consecutiveGhAuthRetries = 0;
+    }
 
     // Quit exits the loop
     if (result.type === 'quit') {
@@ -1395,6 +1409,14 @@ export async function runSessionsTui({
 
     // Handle needs-agent-auth action - run interactive login and retry
     if (result.type === 'needs-agent-auth' && result.authInfo) {
+      consecutiveAgentAuthRetries++;
+      if (consecutiveAgentAuthRetries > MAX_AUTH_RETRIES) {
+        console.error(
+          `\nError: Agent authentication failed after ${MAX_AUTH_RETRIES} attempts. Exiting.`,
+        );
+        process.exit(1);
+      }
+
       const { agent, model, prompt } = result.authInfo;
       const agentName = AGENT_INFO_MAP[agent].name;
 
@@ -1430,13 +1452,13 @@ export async function runSessionsTui({
       let authResult: boolean;
       switch (agent) {
         case 'claude':
-          authResult = await ensureClaudeAuth();
+          authResult = await ensureClaudeAuth(model);
           break;
         case 'codex':
-          authResult = await ensureCodexAuth();
+          authResult = await ensureCodexAuth(model);
           break;
         default:
-          authResult = await ensureOpencodeAuth();
+          authResult = await ensureOpencodeAuth(model);
           break;
       }
 
@@ -1446,6 +1468,10 @@ export async function runSessionsTui({
       }
 
       console.log(`\n${agentName} login successful. Resuming...\n`);
+
+      // Clear stale cached auth state so the next TUI iteration re-checks
+      // fresh credentials instead of reusing the previous 'invalid' result.
+      useReadinessStore.getState().resetAgentAuth(agent);
 
       // Set up the next iteration to continue where we left off
       nextView = 'starting';
@@ -1458,6 +1484,14 @@ export async function runSessionsTui({
 
     // Handle needs-gh-auth action - run interactive GitHub login and retry
     if (result.type === 'needs-gh-auth' && result.ghAuthInfo) {
+      consecutiveGhAuthRetries++;
+      if (consecutiveGhAuthRetries > MAX_AUTH_RETRIES) {
+        console.error(
+          `\nError: GitHub authentication failed after ${MAX_AUTH_RETRIES} attempts. Exiting.`,
+        );
+        process.exit(1);
+      }
+
       try {
         console.log('\nGitHub credentials are missing or expired.');
         console.log('Starting GitHub login...\n');
@@ -1475,6 +1509,9 @@ export async function runSessionsTui({
         nextIsGitRepo = retry.nextIsGitRepo;
 
         console.log('\nGitHub login successful. Resuming...\n');
+
+        // Clear stale cached GH auth state for the next TUI iteration.
+        useReadinessStore.getState().resetGhAuth();
       } catch (err) {
         console.error(
           `\nError: ${err instanceof Error ? err.message : String(err)}`,

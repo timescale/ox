@@ -62,6 +62,10 @@ export interface ReadinessState {
     providerType: SandboxProviderType,
   ) => void;
   reset: () => void;
+  /** Reset a single agent's auth state so the next check runs fresh. */
+  resetAgentAuth: (agent: 'claude' | 'opencode' | 'codex') => void;
+  /** Reset GitHub auth state so the next check runs fresh. */
+  resetGhAuth: () => void;
 }
 
 // ============================================================================
@@ -70,7 +74,12 @@ export interface ReadinessState {
 
 const initialState: Omit<
   ReadinessState,
-  'runChecks' | 'checkAgentAuth' | 'prebuildAgentImage' | 'reset'
+  | 'runChecks'
+  | 'checkAgentAuth'
+  | 'prebuildAgentImage'
+  | 'reset'
+  | 'resetAgentAuth'
+  | 'resetGhAuth'
 > = {
   dockerInstalled: 'unknown',
   dockerStatus: null,
@@ -105,6 +114,26 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
   reset: () => {
     checksRunning = false;
     set(initialState);
+  },
+
+  resetAgentAuth: (agent: 'claude' | 'opencode' | 'codex') => {
+    const authKey =
+      agent === 'claude'
+        ? 'claudeAuth'
+        : agent === 'codex'
+          ? 'codexAuth'
+          : 'opencodeAuth';
+    const modelKey =
+      agent === 'claude'
+        ? 'claudeAuthModel'
+        : agent === 'codex'
+          ? 'codexAuthModel'
+          : 'opencodeAuthModel';
+    set({ [authKey]: 'unknown', [modelKey]: undefined });
+  },
+
+  resetGhAuth: () => {
+    set({ ghAuth: 'unknown' });
   },
 
   runChecks: async () => {
