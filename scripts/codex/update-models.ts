@@ -34,10 +34,15 @@ async function main() {
 
   const data = (await response.json()) as CodexModelsJson;
 
-  // Filter to visible models and sort by priority (ascending)
+  // Filter to visible models and sort by priority (ascending), then by slug
+  // descending so higher version numbers appear first when priority is equal
   const visible = data.models
     .filter((m) => m.visibility === 'list')
-    .sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999));
+    .sort(
+      (a, b) =>
+        (a.priority ?? 999) - (b.priority ?? 999) ||
+        b.slug.localeCompare(a.slug),
+    );
 
   if (visible.length === 0) {
     throw new Error('No visible models found in models.json');

@@ -6,13 +6,13 @@ import type { Model } from './agents.ts';
 /** Codex models fetched from the official codex repository, filtered to visibility=list */
 export const CODEX_MODELS: Model[] = [
   {
-    id: 'gpt-5.3-codex',
-    name: 'gpt-5.3-codex',
+    id: 'gpt-5.4',
+    name: 'gpt-5.4',
     description: 'Latest frontier agentic coding model.',
   },
   {
-    id: 'gpt-5.4',
-    name: 'gpt-5.4',
+    id: 'gpt-5.3-codex',
+    name: 'gpt-5.3-codex',
     description: 'Latest frontier agentic coding model.',
   },
   {
