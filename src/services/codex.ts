@@ -93,6 +93,20 @@ const writeOxCredentialCache = async (creds: CodexAuthJson): Promise<void> => {
 };
 
 /**
+ * Returns true if codex has valid file-based credentials (host config or
+ * ox keyring), independent of the OPENAI_API_KEY / CODEX_API_KEY env vars.
+ * Used to decide whether to suppress env var passthrough into containers —
+ * the env vars' presence alongside OAuth tokens triggers conflicting auth
+ * behaviour in the codex CLI.
+ */
+export const hasValidCodexFileCredentials = async (): Promise<boolean> => {
+  const host = await readHostCredentials();
+  if (codexCredsValid(host)) return true;
+  const cached = await readOxCredentialCache();
+  return !!(cached && codexCredsValid(cached));
+};
+
+/**
  * Merge host credentials into the cached credentials.
  * If neither source has valid creds, check for OPENAI_API_KEY env var.
  */
@@ -260,6 +274,14 @@ export const checkCodexCredentials = async (): Promise<boolean> => {
   const exitCode = await proc.exited;
   const output = proc.text().trim();
   log.debug({ exitCode, output }, 'checkCodexCredentials login status');
+
+  // Wait for any refreshed credentials to be captured back from the
+  // container and written into the in-memory cache.  Without this, a
+  // subsequent getCodexAuthJson() call (e.g. from startContainer →
+  // getCredentialFiles) could return the stale pre-refresh tokens, causing
+  // "refresh_token_reused" errors in async sessions.
+  await proc.credsCaptured;
+
   // `codex login status` prints "Logged in using ..." when valid,
   // "Not logged in" when invalid
   return exitCode === 0 && !output.includes('Not logged in');

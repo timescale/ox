@@ -64,7 +64,10 @@ import {
   performUpdate,
 } from '../services/updater';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
-import { useReadinessStore } from '../stores/readinessStore.ts';
+import {
+  useReadinessStore,
+  waitForAgentAuthCheck,
+} from '../stores/readinessStore.ts';
 import { type SessionsResult, useRouterStore } from '../stores/routerStore.ts';
 import { useToastStore } from '../stores/toastStore';
 import { Deferred } from '../types/deferred.ts';
@@ -394,18 +397,28 @@ function SessionsApp({
               ? { ...v, step: `Checking ${agent} credentials` }
               : v,
           );
-          switch (agent) {
-            case 'claude':
-              agentAuthValid = await checkClaudeCredentials(model || undefined);
-              break;
-            case 'codex':
-              agentAuthValid = await checkCodexCredentials();
-              break;
-            default:
-              agentAuthValid = await checkOpencodeCredentials(
-                model || undefined,
-              );
-              break;
+          // If a background readiness check is already in flight, await it
+          // instead of launching a duplicate.  Concurrent checks race on
+          // OAuth token refresh and cause "refresh_token_reused" errors.
+          const pending = waitForAgentAuthCheck(agent);
+          if (pending) {
+            agentAuthValid = await pending;
+          } else {
+            switch (agent) {
+              case 'claude':
+                agentAuthValid = await checkClaudeCredentials(
+                  model || undefined,
+                );
+                break;
+              case 'codex':
+                agentAuthValid = await checkCodexCredentials();
+                break;
+              default:
+                agentAuthValid = await checkOpencodeCredentials(
+                  model || undefined,
+                );
+                break;
+            }
           }
         }
 

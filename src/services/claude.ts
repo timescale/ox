@@ -280,6 +280,21 @@ export const captureClaudeCredentialsFromContainer = async (
   );
 };
 
+/**
+ * Returns true if claude has valid file-based credentials (host keyring,
+ * host file, or ox keyring), independent of the ANTHROPIC_API_KEY env var.
+ */
+export const hasValidClaudeFileCredentials = async (): Promise<boolean> => {
+  const creds = await readHostCredentials();
+  if (claudeCredsValid(creds)) return true;
+  const oxCreds = await readOxCredentialCache();
+  if (claudeCredsValid(oxCreds)) return true;
+  const apiKey = await readHostConfigApiKey();
+  if (apiKey) return true;
+  const oxApiKey = await readOxApiKeyCache();
+  return !!oxApiKey;
+};
+
 export const getClaudeCredentialsJson = async (
   force = false,
 ): Promise<ClaudeCredentialsJson | null> => {

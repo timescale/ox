@@ -38,8 +38,8 @@ import {
   shellEscape,
 } from '../utils/shell.ts';
 import { buildAgentCommand, wrapWithPrompt } from './agentCommand';
-import { getClaudeConfigFiles } from './claude';
-import { getCodexConfigFiles } from './codex';
+import { getClaudeConfigFiles, hasValidClaudeFileCredentials } from './claude';
+import { getCodexConfigFiles, hasValidCodexFileCredentials } from './codex';
 import {
   type AgentType,
   type OxConfig,
@@ -51,7 +51,10 @@ import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
 import { getGhConfigFiles } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
-import { getOpencodeConfigFiles } from './opencode';
+import {
+  getOpencodeConfigFiles,
+  hasValidOpencodeFileCredentials,
+} from './opencode';
 import { runInDocker, type VirtualFile } from './runInDocker';
 import type { AttachOptions, SubmitMode } from './sandbox/types';
 
@@ -1803,18 +1806,37 @@ export async function startContainer(
   // Order matters for precedence: later values override earlier ones
   // Precedence (lowest to highest): hostEnvArgs -> --env-file -> envArgs
 
-  // Pass through API keys from host environment (lowest precedence)
+  // Pass through API keys from host environment (lowest precedence).
+  // Only pass env-var keys that the active agent actually needs, and only
+  // when valid file-based credentials aren't already present. Having both
+  // an env-var key and file-based OAuth tokens causes some agents (notably
+  // codex) to attempt conflicting auth flows, leading to noisy
+  // "refresh_token_reused" errors.
   const hostEnvArgs: string[] = [];
-  const apiKeysToPassthrough = [
-    'ANTHROPIC_API_KEY',
-    'OPENAI_API_KEY',
-    'CODEX_API_KEY',
-  ];
-  for (const key of apiKeysToPassthrough) {
+  const pushEnv = (key: string) => {
     const value = process.env[key];
     if (value) {
       hostEnvArgs.push('-e', `${key}=${value}`);
     }
+  };
+  switch (agent) {
+    case 'claude':
+      if (!(await hasValidClaudeFileCredentials())) {
+        pushEnv('ANTHROPIC_API_KEY');
+      }
+      break;
+    case 'codex':
+      if (!(await hasValidCodexFileCredentials())) {
+        pushEnv('OPENAI_API_KEY');
+        pushEnv('CODEX_API_KEY');
+      }
+      break;
+    case 'opencode':
+      if (!(await hasValidOpencodeFileCredentials())) {
+        pushEnv('ANTHROPIC_API_KEY');
+        pushEnv('OPENAI_API_KEY');
+      }
+      break;
   }
 
   // Pass through terminal environment for proper color rendering

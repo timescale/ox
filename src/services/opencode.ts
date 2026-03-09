@@ -143,6 +143,17 @@ const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
   return merged;
 };
 
+/**
+ * Returns true if opencode has valid file-based credentials (host config or
+ * ox keyring), independent of any env vars like ANTHROPIC_API_KEY.
+ */
+export const hasValidOpencodeFileCredentials = async (): Promise<boolean> => {
+  const host = await readHostCredentials();
+  if (authCredsValid(host)) return true;
+  const cached = await readOxCredentialCache();
+  return !!(cached && authCredsValid(cached));
+};
+
 export const getOpencodeAuthJson = async (
   force = false,
 ): Promise<OpencodeAuthJson> => {

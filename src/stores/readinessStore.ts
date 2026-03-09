@@ -108,6 +108,20 @@ const initialState: Omit<
 // Guard against concurrent runChecks calls
 let checksRunning = false;
 
+// In-flight agent auth check promises so callers can await a pending check
+// instead of launching a duplicate (which would race on token refresh).
+const pendingAgentAuthChecks = new Map<string, Promise<boolean>>();
+
+/**
+ * Wait for an in-flight agent auth check to finish.
+ * Returns the cached result (true/false) or null if no check is pending.
+ */
+export const waitForAgentAuthCheck = (
+  agent: 'claude' | 'opencode' | 'codex',
+): Promise<boolean> | null => {
+  return pendingAgentAuthChecks.get(agent) ?? null;
+};
+
 export const useReadinessStore = create<ReadinessState>()((set) => ({
   ...initialState,
 
@@ -286,8 +300,10 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
 
     set({ [authKey]: 'checking', [modelKey]: model });
 
-    // Fire-and-forget
-    (async () => {
+    // Track the in-flight promise so callers (e.g. startSession) can await
+    // a pending check instead of launching a duplicate that would race on
+    // OAuth token refresh.
+    const checkPromise = (async () => {
       try {
         let ok: boolean;
         switch (agent) {
@@ -308,10 +324,15 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
             break;
         }
         set({ [authKey]: ok ? 'ready' : 'invalid' });
+        return ok;
       } catch {
         set({ [authKey]: 'error' });
+        return false;
+      } finally {
+        pendingAgentAuthChecks.delete(agent);
       }
     })();
+    pendingAgentAuthChecks.set(agent, checkPromise);
   },
 
   prebuildAgentImage: (agent: AgentType, providerType: SandboxProviderType) => {
