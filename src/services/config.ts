@@ -77,6 +77,12 @@ export interface OxConfig {
    *   DO_NOT_TRACK=1, NO_TELEMETRY=1, OX_ANALYTICS=false
    */
   analytics?: boolean;
+
+  /** Per-agent model preferences. Maps agent name to last-used model ID. */
+  agentModels?: Partial<Record<AgentType, string>>;
+
+  /** Default interaction mode: 'interactive', 'plan', or 'async' */
+  submitMode?: 'async' | 'interactive' | 'plan';
 }
 
 // ============================================================================
@@ -88,7 +94,8 @@ export type ConfigValueType =
   | 'boolean'
   | 'string|null'
   | 'string[]'
-  | 'boolean|string';
+  | 'boolean|string'
+  | 'object';
 
 /** Type metadata for each config key, used for validation and parsing in CLI */
 export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
@@ -103,6 +110,8 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   sandboxProvider: 'string',
   cloudRegion: 'string',
   analytics: 'boolean',
+  agentModels: 'object',
+  submitMode: 'string',
 };
 
 /**
@@ -147,6 +156,17 @@ export function parseConfigValue(
 
     case 'string':
       return { value: raw };
+
+    case 'object':
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return { value: parsed };
+        }
+        return { error: `Expected a JSON object for ${key}, got: ${raw}` };
+      } catch {
+        return { error: `Invalid JSON for ${key}: ${raw}` };
+      }
 
     default:
       return { value: raw };
