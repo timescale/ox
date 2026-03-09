@@ -875,13 +875,25 @@ function SessionsApp({
   // Handle config wizard completion
   const handleConfigComplete = useCallback(
     async (result: ConfigWizardResult) => {
+      const currentView = useRouterStore.getState().view;
+      const returnToPrompt =
+        currentView.type === 'config' ? currentView.returnToPrompt : undefined;
+
       if (result.type === 'cancelled') {
-        useRouterStore.getState().quit();
+        if (returnToPrompt) {
+          useRouterStore.getState().goToPrompt(returnToPrompt.resumeSession);
+        } else {
+          useRouterStore.getState().quit();
+        }
         return;
       }
       if (result.type === 'error') {
         useToastStore.getState().show(result.message, 'error');
-        useRouterStore.getState().quit();
+        if (returnToPrompt) {
+          useRouterStore.getState().goToPrompt(returnToPrompt.resumeSession);
+        } else {
+          useRouterStore.getState().quit();
+        }
         return;
       }
 
@@ -892,8 +904,14 @@ function SessionsApp({
       const mergedConfig = await readConfig();
       setConfig(mergedConfig);
 
-      // Navigate to target view and kick off readiness checks
-      navigateToTargetView(mergedConfig);
+      // Return to the prompt when config was launched from there.
+      if (returnToPrompt) {
+        useRouterStore.getState().goToPrompt(returnToPrompt.resumeSession);
+      } else {
+        // Initial setup flow: continue to the requested target view.
+        navigateToTargetView(mergedConfig);
+      }
+
       useReadinessStore.getState().runChecks();
     },
     [navigateToTargetView],
