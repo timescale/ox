@@ -1,13 +1,8 @@
 FROM ubuntu:24.04
 
 LABEL maintainer="Tiger Data"
-LABEL description="Minimal sandbox environment for AI agents"
+LABEL description="Minimal base sandbox environment (no agents)"
 LABEL org.opencontainers.image.source=https://github.com/timescale/ox
-
-# Pinned tool versions — override at build time with --build-arg
-# Canonical values live in sandbox/versions.json
-ARG CLAUDE_CODE_VERSION=latest
-ARG OPENCODE_VERSION=latest
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
@@ -50,10 +45,8 @@ ARG USER_GID=10000
 RUN groupadd --gid ${USER_GID} ${USER_NAME} \
   && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USER_NAME} \
   && mkdir -p /home/${USER_NAME}/.local/bin \
-  && mkdir -p /home/${USER_NAME}/.local/share/opencode \
   && mkdir -p /home/${USER_NAME}/.cache \
   && mkdir -p /home/${USER_NAME}/.config/gh \
-  && mkdir -p /home/${USER_NAME}/.claude \
   && chown -R ${USER_NAME}:${USER_NAME} /home/${USER_NAME}
 
 # tmux config for agent sessions — mouse support, true-color, ctrl+\ detach
@@ -70,17 +63,8 @@ set -g default-terminal "xterm-256color"
 set -ga terminal-overrides ",xterm-256color:Tc"
 TMUX_EOF
 
-# Install claude code as non-root user
+# Switch to non-root user for environment setup
 USER ${USER_NAME}
-RUN curl -fsSL https://claude.ai/install.sh | bash -s ${CLAUDE_CODE_VERSION}
-
-# tiger CLI
-RUN curl -fsSL https://cli.tigerdata.com | sh
-
-# opencode
-RUN curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION}
-RUN ln -s /home/${USER_NAME}/.opencode/bin/opencode /home/${USER_NAME}/.local/bin/opencode
-
 
 ENV HOME="/home/${USER_NAME}"
 ENV PATH="/home/${USER_NAME}/.local/bin:$PATH"

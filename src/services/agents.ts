@@ -4,6 +4,10 @@
 
 import type { SelectOption } from '@opentui/core';
 import { useEffect, useState } from 'react';
+
+import { CODEX_MODELS } from './codexModels.generated.ts';
+export { CODEX_MODELS };
+
 import type { AgentType } from './config';
 import { log } from './logger';
 import { runOpencodeInDocker } from './opencode';
@@ -48,6 +52,12 @@ export const AGENT_INFO = [
     name: 'Claude Code',
     color: '#D77757',
     description: 'Anthropic Claude Code CLI',
+  } satisfies AgentInfo,
+  {
+    id: 'codex',
+    name: 'Codex',
+    color: '#10A37F',
+    description: 'OpenAI Codex CLI',
   } satisfies AgentInfo,
 ] as const;
 
@@ -99,6 +109,15 @@ async function getOpencodeModels(): Promise<readonly Model[]> {
 }
 
 /**
+ * Get available models for codex.
+ * Returns the list generated from the official codex repository's models.json.
+ * Run `./bun scripts/codex/update-models.ts` to refresh.
+ */
+async function getCodexModels(): Promise<readonly Model[]> {
+  return CODEX_MODELS;
+}
+
+/**
  * Get models for a specific agent
  */
 export async function getModelsForAgent(
@@ -106,6 +125,9 @@ export async function getModelsForAgent(
 ): Promise<readonly Model[]> {
   if (agent === 'claude') {
     return CLAUDE_MODELS;
+  }
+  if (agent === 'codex') {
+    return getCodexModels();
   }
 
   // For opencode, fetch from CLI
@@ -120,6 +142,7 @@ export const useAgentModels = (
   const [map, setMap] = useState<Record<AgentType, null | readonly Model[]>>({
     claude: CLAUDE_MODELS,
     opencode: null,
+    codex: CODEX_MODELS,
   });
 
   useEffect(() => {

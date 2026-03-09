@@ -346,218 +346,227 @@ export function SessionDetailPanel({
 
   return (
     <>
-      {/* Metadata section */}
-      <box flexDirection="row" gap={1} overflow="hidden">
-        <box flexDirection="row" gap={1}>
-          <text wrapMode="none" fg={theme.textMuted}>
-            name
-          </text>
-          <text wrapMode="none">{session.name}</text>
-        </box>
-        <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-end">
-          <text fg={theme.textMuted}>created</text>
-          <text>
-            {session.created ? formatRelativeTime(session.created) : 'unknown'}
-          </text>
-        </box>
-      </box>
-      <box flexDirection="row" gap={2} height={1} overflow="hidden">
-        <box flexDirection="row" gap={1}>
-          <text wrapMode="none" fg={theme.textMuted}>
-            repo
-          </text>
-          <text wrapMode="none">
-            {session.repo} : ox/{session.branch}
-          </text>
-        </box>
-        {prInfo && (
+      <box flexShrink={0}>
+        {/* Metadata section */}
+        <box flexDirection="row" gap={1} overflow="hidden">
+          <box flexDirection="row" gap={1}>
+            <text wrapMode="none" fg={theme.textMuted}>
+              name
+            </text>
+            <text wrapMode="none">{session.name}</text>
+          </box>
           <box
-            backgroundColor={prHovered ? theme.backgroundElement : undefined}
-            onMouseDown={handlePrClick}
-            onMouseOver={() => setPrHovered(true)}
-            onMouseOut={() => setPrHovered(false)}
+            flexDirection="row"
+            gap={1}
+            flexGrow={1}
+            justifyContent="flex-end"
           >
-            <text
-              fg={
-                {
-                  OPEN: theme.success,
-                  MERGED: theme.accent,
-                  CLOSED: theme.textMuted,
-                }[prInfo.state]
-              }
-              wrapMode="none"
-            >
-              {`#${prInfo.number} ${prInfo.state.toLowerCase()}`}
+            <text fg={theme.textMuted}>created</text>
+            <text>
+              {session.created
+                ? formatRelativeTime(session.created)
+                : 'unknown'}
             </text>
           </box>
-        )}
-      </box>
-      <box
-        flexDirection="row"
-        columnGap={isWide ? 3 : 2}
-        overflow="hidden"
-        flexWrap="wrap"
-      >
-        <box flexDirection="row" gap={1}>
-          <text fg={theme.textMuted}>status</text>
-          <text fg={statusColor}>
-            {statusIcon} {statusText}
-          </text>
         </box>
-        <box flexDirection="row" gap={1}>
-          <text fg={theme.textMuted}>provider</text>
-          <text fg={session.provider === 'cloud' ? theme.accent : theme.text}>
-            {session.provider === 'cloud' ? 'cloud' : 'docker'}
-          </text>
-        </box>
-        {isRunning && stats && session.provider !== 'cloud' && (
-          <>
-            <box flexDirection="row" gap={1}>
-              <text fg={theme.textMuted}>cpu</text>
-              <text>{formatCpuPercent(stats.cpuPercent)}</text>
+        <box flexDirection="row" gap={2} height={1} overflow="hidden">
+          <box flexDirection="row" gap={1}>
+            <text wrapMode="none" fg={theme.textMuted}>
+              repo
+            </text>
+            <text wrapMode="none">
+              {session.repo} : ox/{session.branch}
+            </text>
+          </box>
+          {prInfo && (
+            <box
+              backgroundColor={prHovered ? theme.backgroundElement : undefined}
+              onMouseDown={handlePrClick}
+              onMouseOver={() => setPrHovered(true)}
+              onMouseOut={() => setPrHovered(false)}
+            >
+              <text
+                fg={
+                  {
+                    OPEN: theme.success,
+                    MERGED: theme.accent,
+                    CLOSED: theme.textMuted,
+                  }[prInfo.state]
+                }
+                wrapMode="none"
+              >
+                {`#${prInfo.number} ${prInfo.state.toLowerCase()}`}
+              </text>
             </box>
-            <box flexDirection="row" gap={1}>
-              <text fg={theme.textMuted}>mem</text>
-              <text>{formatMemUsage(stats.memUsage)}</text>
-            </box>
-          </>
-        )}
-        <box flexDirection="row" flexGrow={1} justifyContent="flex-end">
-          <text>{agentDisplay}</text>
+          )}
         </box>
-      </box>
-      {session.resumedFrom && (
-        <box height={1} flexDirection="row" gap={1} overflow="hidden">
-          <text fg={theme.textMuted}>resumed from</text>
-          <text>{session.resumedFrom}</text>
-        </box>
-      )}
-      {session.provider === 'cloud' && (
         <box
           flexDirection="row"
           columnGap={isWide ? 3 : 2}
           overflow="hidden"
           flexWrap="wrap"
         >
-          {session.region && (
-            <box flexDirection="row" gap={1}>
-              <text fg={theme.textMuted}>region</text>
-              <text>{session.region}</text>
-            </box>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme.textMuted}>status</text>
+            <text fg={statusColor}>
+              {statusIcon} {statusText}
+            </text>
+          </box>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme.textMuted}>provider</text>
+            <text fg={session.provider === 'cloud' ? theme.accent : theme.text}>
+              {session.provider === 'cloud' ? 'cloud' : 'docker'}
+            </text>
+          </box>
+          {isRunning && stats && session.provider !== 'cloud' && (
+            <>
+              <box flexDirection="row" gap={1}>
+                <text fg={theme.textMuted}>cpu</text>
+                <text>{formatCpuPercent(stats.cpuPercent)}</text>
+              </box>
+              <box flexDirection="row" gap={1}>
+                <text fg={theme.textMuted}>mem</text>
+                <text>{formatMemUsage(stats.memUsage)}</text>
+              </box>
+            </>
           )}
-          {session.volumeSlug && (
-            <box flexDirection="row" gap={1}>
-              <text fg={theme.textMuted}>volume</text>
-              <text>{session.volumeSlug}</text>
-            </box>
-          )}
-          {session.snapshotSlug && (
-            <box flexDirection="row" gap={1}>
-              <text fg={theme.textMuted}>snapshot</text>
-              <text>{session.snapshotSlug}</text>
-            </box>
-          )}
+          <box flexDirection="row" flexGrow={1} justifyContent="flex-end">
+            <text>{agentDisplay}</text>
+          </box>
         </box>
-      )}
+        {session.resumedFrom && (
+          <box height={1} flexDirection="row" gap={1} overflow="hidden">
+            <text fg={theme.textMuted}>resumed from</text>
+            <text>{session.resumedFrom}</text>
+          </box>
+        )}
+        {session.provider === 'cloud' && (
+          <box
+            flexDirection="row"
+            columnGap={isWide ? 3 : 2}
+            overflow="hidden"
+            flexWrap="wrap"
+          >
+            {session.region && (
+              <box flexDirection="row" gap={1}>
+                <text fg={theme.textMuted}>region</text>
+                <text>{session.region}</text>
+              </box>
+            )}
+            {session.volumeSlug && (
+              <box flexDirection="row" gap={1}>
+                <text fg={theme.textMuted}>volume</text>
+                <text>{session.volumeSlug}</text>
+              </box>
+            )}
+            {session.snapshotSlug && (
+              <box flexDirection="row" gap={1}>
+                <text fg={theme.textMuted}>snapshot</text>
+                <text>{session.snapshotSlug}</text>
+              </box>
+            )}
+          </box>
+        )}
 
-      {/* Prompt section */}
-      {/* Half-height padding top */}
-      <box
-        height={1}
-        flexShrink={0}
-        border={['left', 'right']}
-        borderColor={agentInfo?.color}
-        customBorderChars={{
-          ...EmptyBorder,
-          vertical: '\u257B',
-        }}
-      >
+        {/* Prompt section */}
+        {/* Half-height padding top */}
         <box
           height={1}
           flexShrink={0}
-          border={['top']}
-          borderColor={theme.backgroundElement}
+          border={['left', 'right']}
+          borderColor={agentInfo?.color}
           customBorderChars={{
             ...EmptyBorder,
-            horizontal: '\u2584',
+            vertical: '\u257B',
           }}
-        />
-      </box>
-      <box
-        flexShrink={0}
-        border={['left', 'right']}
-        borderColor={agentInfo?.color}
-        customBorderChars={{
-          ...EmptyBorder,
-          vertical: '\u2503',
-          bottomLeft: '\u2579',
-        }}
-      >
-        <box
-          flexDirection="column"
-          paddingLeft={1}
-          paddingRight={1}
-          flexShrink={0}
-          backgroundColor={theme.backgroundElement}
-          onMouseDown={handlePromptClick}
         >
-          <textarea
-            textColor={theme.text}
-            backgroundColor={theme.backgroundElement}
-            focusedBackgroundColor={theme.backgroundElement}
-            minHeight={1}
-            maxHeight={3}
-            initialValue={session.prompt || '(no prompt)'}
-            onKeyDown={(evt) => {
-              if (!['left', 'right', 'up', 'down'].includes(evt.name)) {
-                evt.preventDefault();
-              }
+          <box
+            height={1}
+            flexShrink={0}
+            border={['top']}
+            borderColor={theme.backgroundElement}
+            customBorderChars={{
+              ...EmptyBorder,
+              horizontal: '\u2584',
             }}
           />
         </box>
-      </box>
-      {/* Half-height padding bottom */}
-      <box
-        height={1}
-        flexShrink={0}
-        border={['left', 'right']}
-        borderColor={agentInfo?.color}
-        customBorderChars={{
-          ...EmptyBorder,
-          vertical: '\u2579',
-        }}
-      >
+        <box
+          flexShrink={0}
+          border={['left', 'right']}
+          borderColor={agentInfo?.color}
+          customBorderChars={{
+            ...EmptyBorder,
+            vertical: '\u2503',
+            bottomLeft: '\u2579',
+          }}
+        >
+          <box
+            flexDirection="column"
+            paddingLeft={1}
+            paddingRight={1}
+            flexShrink={0}
+            backgroundColor={theme.backgroundElement}
+            onMouseDown={handlePromptClick}
+          >
+            <textarea
+              textColor={theme.text}
+              backgroundColor={theme.backgroundElement}
+              focusedBackgroundColor={theme.backgroundElement}
+              minHeight={1}
+              maxHeight={3}
+              initialValue={session.prompt || '(no prompt)'}
+              onKeyDown={(evt) => {
+                if (!['left', 'right', 'up', 'down'].includes(evt.name)) {
+                  evt.preventDefault();
+                }
+              }}
+            />
+          </box>
+        </box>
+        {/* Half-height padding bottom */}
         <box
           height={1}
           flexShrink={0}
-          border={['bottom']}
-          borderColor={theme.backgroundElement}
+          border={['left', 'right']}
+          borderColor={agentInfo?.color}
           customBorderChars={{
             ...EmptyBorder,
-            horizontal: '\u2580',
+            vertical: '\u2579',
           }}
-        />
-      </box>
-
-      {/* Action buttons */}
-      <box flexDirection="row" flexWrap="wrap" gap={1}>
-        {actionButtons.map((btn) => (
-          <ActionButton key={btn.label} {...btn} />
-        ))}
-        <box flexGrow={1} />
-        {showBack && (
-          <ActionButton
-            label="back"
-            color={theme.textMuted}
-            onPress={() => useRouterStore.getState().goToList()}
+        >
+          <box
+            height={1}
+            flexShrink={0}
+            border={['bottom']}
+            borderColor={theme.backgroundElement}
+            customBorderChars={{
+              ...EmptyBorder,
+              horizontal: '\u2580',
+            }}
           />
-        )}
-        <ActionButton
-          label="commands"
-          keybind="^p"
-          color={theme.text}
-          onPress={showCommands}
-        />
+        </box>
+
+        {/* Action buttons */}
+        <box flexDirection="row" flexWrap="wrap" gap={1}>
+          {actionButtons.map((btn) => (
+            <ActionButton key={btn.label} {...btn} />
+          ))}
+          <box flexGrow={1} />
+          {showBack && (
+            <ActionButton
+              label="back"
+              color={theme.textMuted}
+              onPress={() => useRouterStore.getState().goToList()}
+            />
+          )}
+          <ActionButton
+            label="commands"
+            keybind="^p"
+            color={theme.text}
+            onPress={showCommands}
+          />
+        </box>
       </box>
 
       {/* Confirmation modals */}

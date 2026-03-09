@@ -1,5 +1,10 @@
+import debounce from 'debounce';
 import { useEffect, useState } from 'react';
 import { log } from '../services/logger';
+
+const debouncedLog = debounce((c: number, r: number) => {
+  log.debug({ c, r }, 'Window resized');
+}, 1000);
 
 export const useWindowSize = () => {
   const [columns, setColumns] = useState(() => process.stdout.columns ?? 80);
@@ -11,7 +16,7 @@ export const useWindowSize = () => {
       const r = process.stdout.rows ?? 24;
       setColumns(c);
       setRows(r);
-      log.debug({ c, r }, 'Window resized');
+      debouncedLog(c, r);
     };
 
     process.stdout.on('resize', handleResize);

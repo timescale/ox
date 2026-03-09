@@ -1,8 +1,9 @@
-// Pass-through to the claude CLI, running in docker
+// Auth management - check and login to various providers
 
 import { Command } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
+import { checkCodexCredentials, ensureCodexAuth } from '../services/codex';
 import { ensureDockerSandbox } from '../services/docker';
 import { checkGhCredentials } from '../services/gh';
 import { log } from '../services/logger';
@@ -20,7 +21,7 @@ authCommand
   .command('check')
   .aliases(['status', 'c', 's'])
   .description('Check authentication status')
-  .argument('<provider>', 'The provider to check: claude, opencode, gh')
+  .argument('<provider>', 'The provider to check: claude, opencode, codex, gh')
   .action(async (provider: string) => {
     try {
       await ensureDockerSandbox();
@@ -41,6 +42,15 @@ authCommand
             return;
           }
           console.error('OpenCode credentials are invalid.');
+          break;
+        }
+        case 'codex': {
+          if (await checkCodexCredentials()) {
+            console.log('Codex credentials are valid.');
+            process.exit(0);
+            return;
+          }
+          console.error('Codex credentials are invalid.');
           break;
         }
         case 'gh': {
@@ -67,7 +77,7 @@ authCommand
 authCommand
   .command('login')
   .description('Ensure the provider is logged in')
-  .argument('<provider>', 'The provider to login: claude, opencode, gh')
+  .argument('<provider>', 'The provider to login: claude, opencode, codex, gh')
   .action(async (provider: string) => {
     try {
       await ensureDockerSandbox();
@@ -87,6 +97,15 @@ authCommand
             break;
           }
           console.error('OpenCode login failed or was cancelled.');
+          process.exit(1);
+          break;
+        }
+        case 'codex': {
+          if (await ensureCodexAuth()) {
+            console.log('Codex credentials are valid.');
+            break;
+          }
+          console.error('Codex login failed or was cancelled.');
           process.exit(1);
           break;
         }

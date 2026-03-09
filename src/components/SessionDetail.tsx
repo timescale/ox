@@ -200,7 +200,6 @@ export function SessionDetail({ session, onResume }: SessionDetailProps) {
           title="Logs"
           border
           borderStyle="single"
-          marginTop={1}
           flexGrow={1}
           flexShrink={1}
           flexDirection="column"

@@ -21,7 +21,9 @@ import { SessionDetail } from '../components/SessionDetail';
 import { SessionsList } from '../components/SessionsList';
 import { ShutdownOverlay } from '../components/ShutdownOverlay';
 import { StartingScreen } from '../components/StartingScreen';
+import { AGENT_INFO_MAP } from '../services/agents';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
+import { checkCodexCredentials, ensureCodexAuth } from '../services/codex';
 import { CommandPaletteHost } from '../services/commands.tsx';
 import {
   type AgentType,
@@ -31,7 +33,7 @@ import {
 } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { getDenoToken } from '../services/deno';
-import { ensureDockerImage } from '../services/docker';
+import { ensureDockerImage, type PullLayer } from '../services/docker';
 import { checkGhCredentials } from '../services/gh.ts';
 import {
   generateBranchName,
@@ -62,7 +64,10 @@ import {
   performUpdate,
 } from '../services/updater';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
-import { useReadinessStore } from '../stores/readinessStore.ts';
+import {
+  useReadinessStore,
+  waitForAgentAuthCheck,
+} from '../stores/readinessStore.ts';
 import { type SessionsResult, useRouterStore } from '../stores/routerStore.ts';
 import { useToastStore } from '../stores/toastStore';
 import { Deferred } from '../types/deferred.ts';
@@ -326,6 +331,7 @@ function SessionsApp({
           mode,
         });
         await activeProvider.ensureImage({
+          agent,
           onProgress: (progress) => {
             if (
               progress.type === 'pulling' ||
@@ -375,7 +381,11 @@ function SessionsApp({
         // Use cached result from readiness store if available
         const readiness = useReadinessStore.getState();
         const cachedAgentAuth =
-          agent === 'claude' ? readiness.claudeAuth : readiness.opencodeAuth;
+          agent === 'claude'
+            ? readiness.claudeAuth
+            : agent === 'codex'
+              ? readiness.codexAuth
+              : readiness.opencodeAuth;
         let agentAuthValid: boolean;
         if (cachedAgentAuth === 'ready') {
           agentAuthValid = true;
@@ -387,10 +397,29 @@ function SessionsApp({
               ? { ...v, step: `Checking ${agent} credentials` }
               : v,
           );
-          agentAuthValid =
-            agent === 'claude'
-              ? await checkClaudeCredentials(model || undefined)
-              : await checkOpencodeCredentials(model || undefined);
+          // If a background readiness check is already in flight, await it
+          // instead of launching a duplicate.  Concurrent checks race on
+          // OAuth token refresh and cause "refresh_token_reused" errors.
+          const pending = waitForAgentAuthCheck(agent);
+          if (pending) {
+            agentAuthValid = await pending;
+          } else {
+            switch (agent) {
+              case 'claude':
+                agentAuthValid = await checkClaudeCredentials(
+                  model || undefined,
+                );
+                break;
+              case 'codex':
+                agentAuthValid = await checkCodexCredentials();
+                break;
+              default:
+                agentAuthValid = await checkOpencodeCredentials(
+                  model || undefined,
+                );
+                break;
+            }
+          }
         }
 
         const { isGitRepo: inGitRepo } = propsRef.current;
@@ -751,7 +780,7 @@ function SessionsApp({
           const store = useReadinessStore.getState();
 
           // If checks haven't completed, subscribe and wait
-          if (store.sandboxImage !== 'ready') {
+          if (store.sandboxBaseImage !== 'ready') {
             await new Promise<void>((resolve, reject) => {
               const unsub = useReadinessStore.subscribe((s) => {
                 // Update starting screen with progress
@@ -762,12 +791,13 @@ function SessionsApp({
                       : v,
                   );
                 } else if (
-                  s.sandboxImage === 'pulling' ||
-                  s.sandboxImage === 'checking'
+                  s.sandboxBaseImage === 'pulling' ||
+                  s.sandboxBaseImage === 'checking'
                 ) {
-                  const layers = s.pullLayers;
+                  const layers = s.basePullLayers;
                   const done = layers.filter(
-                    (l) => l.state === 'complete' || l.state === 'exists',
+                    (l: PullLayer) =>
+                      l.state === 'complete' || l.state === 'exists',
                   ).length;
                   const total = layers.length;
                   const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
@@ -776,15 +806,15 @@ function SessionsApp({
                       ? {
                           ...v,
                           step: `Pulling sandbox image${suffix}`,
-                          layers: s.pullLayers,
+                          layers: s.basePullLayers,
                         }
                       : v,
                   );
-                } else if (s.sandboxImage === 'ready') {
+                } else if (s.sandboxBaseImage === 'ready') {
                   unsub();
                   resolve();
                 } else if (
-                  s.sandboxImage === 'error' ||
+                  s.sandboxBaseImage === 'error' ||
                   s.dockerRunning === 'not-running' ||
                   s.dockerInstalled === 'not-installed'
                 ) {
@@ -1208,6 +1238,11 @@ export async function runSessionsTui({
   let nextMountDir = mountDir;
   let nextIsGitRepo = isGitRepo;
 
+  // Circuit breaker: prevent infinite auth retry loops.
+  const MAX_AUTH_RETRIES = 3;
+  let consecutiveAgentAuthRetries = 0;
+  let consecutiveGhAuthRetries = 0;
+
   while (true) {
     const deferredResult = new Deferred<SessionsResult>();
 
@@ -1248,6 +1283,15 @@ export async function runSessionsTui({
     nextMountDir = mountDir;
     nextIsGitRepo = isGitRepo;
 
+    // Reset auth retry counters when we get a non-auth result,
+    // indicating the session progressed past the auth phase.
+    if (result.type !== 'needs-agent-auth') {
+      consecutiveAgentAuthRetries = 0;
+    }
+    if (result.type !== 'needs-gh-auth') {
+      consecutiveGhAuthRetries = 0;
+    }
+
     // Quit exits the loop
     if (result.type === 'quit') {
       // Wait for background tasks before exiting
@@ -1272,9 +1316,13 @@ export async function runSessionsTui({
           { err, sessionId: result.sessionId },
           'Failed to attach to session',
         );
-        console.error(
-          `Failed to attach: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        useToastStore
+          .getState()
+          .show(
+            `SSH connection dropped: ${err instanceof Error ? err.message : String(err)}`,
+            'error',
+            5000,
+          );
       }
       // Return to the session detail view after detaching (or on error)
       if (result.session) {
@@ -1319,9 +1367,13 @@ export async function runSessionsTui({
           { err, sessionId: result.sessionId },
           'Failed to attach to new session',
         );
-        console.error(
-          `Failed to attach: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        useToastStore
+          .getState()
+          .show(
+            `SSH connection dropped: ${err instanceof Error ? err.message : String(err)}`,
+            'error',
+            5000,
+          );
       }
       // Return to the session detail view after detaching (or on error)
       if (result.session) {
@@ -1370,8 +1422,16 @@ export async function runSessionsTui({
 
     // Handle needs-agent-auth action - run interactive login and retry
     if (result.type === 'needs-agent-auth' && result.authInfo) {
+      consecutiveAgentAuthRetries++;
+      if (consecutiveAgentAuthRetries > MAX_AUTH_RETRIES) {
+        console.error(
+          `\nError: Agent authentication failed after ${MAX_AUTH_RETRIES} attempts. Exiting.`,
+        );
+        process.exit(1);
+      }
+
       const { agent, model, prompt } = result.authInfo;
-      const agentName = agent === 'claude' ? 'Claude' : 'Opencode';
+      const agentName = AGENT_INFO_MAP[agent].name;
 
       // Auth flows run inside Docker containers, so ensure the image is
       // available before attempting login.
@@ -1402,10 +1462,18 @@ export async function runSessionsTui({
       console.log(`\n${agentName} credentials are missing or expired.`);
       console.log(`Starting ${agentName} login...\n`);
 
-      const authResult =
-        agent === 'claude'
-          ? await ensureClaudeAuth()
-          : await ensureOpencodeAuth();
+      let authResult: boolean;
+      switch (agent) {
+        case 'claude':
+          authResult = await ensureClaudeAuth(model);
+          break;
+        case 'codex':
+          authResult = await ensureCodexAuth(model);
+          break;
+        default:
+          authResult = await ensureOpencodeAuth(model);
+          break;
+      }
 
       if (!authResult) {
         console.error(`\nError: ${agentName} login failed`);
@@ -1413,6 +1481,10 @@ export async function runSessionsTui({
       }
 
       console.log(`\n${agentName} login successful. Resuming...\n`);
+
+      // Clear stale cached auth state so the next TUI iteration re-checks
+      // fresh credentials instead of reusing the previous 'invalid' result.
+      useReadinessStore.getState().resetAgentAuth(agent);
 
       // Set up the next iteration to continue where we left off
       nextView = 'starting';
@@ -1425,6 +1497,14 @@ export async function runSessionsTui({
 
     // Handle needs-gh-auth action - run interactive GitHub login and retry
     if (result.type === 'needs-gh-auth' && result.ghAuthInfo) {
+      consecutiveGhAuthRetries++;
+      if (consecutiveGhAuthRetries > MAX_AUTH_RETRIES) {
+        console.error(
+          `\nError: GitHub authentication failed after ${MAX_AUTH_RETRIES} attempts. Exiting.`,
+        );
+        process.exit(1);
+      }
+
       try {
         console.log('\nGitHub credentials are missing or expired.');
         console.log('Starting GitHub login...\n');
@@ -1442,6 +1522,9 @@ export async function runSessionsTui({
         nextIsGitRepo = retry.nextIsGitRepo;
 
         console.log('\nGitHub login successful. Resuming...\n');
+
+        // Clear stale cached GH auth state for the next TUI iteration.
+        useReadinessStore.getState().resetGhAuth();
       } catch (err) {
         console.error(
           `\nError: ${err instanceof Error ? err.message : String(err)}`,

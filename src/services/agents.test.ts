@@ -5,12 +5,17 @@ import {
   AGENT_SELECT_OPTIONS,
   AGENTS,
   CLAUDE_MODELS,
+  CODEX_MODELS,
   DEFAULT_AGENT,
   getModelsForAgent,
   openCodeIdToModel,
 } from './agents';
 
-// Mock runInDocker to avoid Docker dependency in tests
+// Mock Docker dependencies to avoid Docker dependency in tests
+mock.module('./docker', () => ({
+  ensureDockerImageForAgent: mock(() => Promise.resolve('mock-image:latest')),
+}));
+
 mock.module('./runInDocker', () => ({
   runInDocker: mock(() =>
     Promise.resolve({
@@ -93,12 +98,13 @@ describe('CLAUDE_MODELS', () => {
 });
 
 describe('AGENT_INFO', () => {
-  test('contains opencode and claude agents', () => {
-    expect(AGENT_INFO).toHaveLength(2);
+  test('contains opencode, claude, and codex agents', () => {
+    expect(AGENT_INFO).toHaveLength(3);
 
     const agentIds = AGENT_INFO.map((a) => a.id);
     expect(agentIds).toContain('opencode');
     expect(agentIds).toContain('claude');
+    expect(agentIds).toContain('codex');
   });
 
   test('all agents have required fields', () => {
@@ -121,6 +127,7 @@ describe('AGENTS', () => {
   test('contains all agent ids', () => {
     expect(AGENTS).toContain('opencode');
     expect(AGENTS).toContain('claude');
+    expect(AGENTS).toContain('codex');
   });
 
   test('matches AGENT_INFO ids', () => {
@@ -141,7 +148,7 @@ describe('DEFAULT_AGENT', () => {
 
 describe('AGENT_SELECT_OPTIONS', () => {
   test('contains options for all agents', () => {
-    expect(AGENT_SELECT_OPTIONS).toHaveLength(2);
+    expect(AGENT_SELECT_OPTIONS).toHaveLength(3);
   });
 
   test('options have correct structure', () => {
@@ -156,6 +163,7 @@ describe('AGENT_SELECT_OPTIONS', () => {
     const optionValues = AGENT_SELECT_OPTIONS.map((o) => o.value);
     expect(optionValues).toContain('opencode');
     expect(optionValues).toContain('claude');
+    expect(optionValues).toContain('codex');
   });
 });
 
@@ -163,6 +171,7 @@ describe('AGENT_INFO_MAP', () => {
   test('contains entries for all agents', () => {
     expect(AGENT_INFO_MAP.opencode).toBeDefined();
     expect(AGENT_INFO_MAP.claude).toBeDefined();
+    expect(AGENT_INFO_MAP.codex).toBeDefined();
   });
 
   test('entries match AGENT_INFO', () => {
@@ -176,6 +185,11 @@ describe('getModelsForAgent', () => {
   test('returns CLAUDE_MODELS for claude agent', async () => {
     const models = await getModelsForAgent('claude');
     expect(models).toBe(CLAUDE_MODELS);
+  });
+
+  test('returns CODEX_MODELS for codex agent', async () => {
+    const models = await getModelsForAgent('codex');
+    expect(models).toBe(CODEX_MODELS);
   });
 
   // runInDocker is mocked to return mock model data

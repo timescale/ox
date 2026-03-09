@@ -12,13 +12,20 @@ import {
   shellEscape,
   TUI_SUBPROCESS_OPTS,
 } from '../../utils/shell.ts';
-import { buildAgentCommand, buildContinueCommand } from '../agentCommand.ts';
+import {
+  buildAgentCommand,
+  buildContinueCommand,
+  wrapWithPrompt,
+} from '../agentCommand.ts';
 import type { AgentType } from '../config.ts';
 import { readConfig } from '../config.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
 import { log } from '../logger.ts';
-import { ensureCloudSnapshot } from './cloudSnapshot.ts';
+import {
+  ensureAgentCloudSnapshot,
+  ensureCloudSnapshot,
+} from './cloudSnapshot.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import { sandboxExec } from './sandboxExec.ts';
 import {
@@ -211,22 +218,27 @@ async function provisionSandbox(
     // Start agent process
     onProgress?.('Starting agent');
     await logToSandbox(sandbox, 'Starting agent...');
-    const agentCommand = buildAgentCommand({
-      agent: options.agent,
-      mode: options.interactive ? 'interactive' : 'detached',
-      model: options.model,
-      agentArgs: options.agentArgs,
-      prompt: options.prompt,
-    });
+    const agentCommand = wrapWithPrompt(
+      buildAgentCommand({
+        agent: options.agent,
+        mode: options.interactive ? 'interactive' : 'detached',
+        model: options.model,
+        agentArgs: options.agentArgs,
+      }),
+      options.agent,
+      options.prompt,
+    );
     if (options.interactive) {
       await sandboxExec(
         sandbox,
         `tmux new-session -d -s ${TMUX_SESSION} -c /work/app ${shellEscape(agentCommand)}`,
       );
     } else {
+      // Wrap in bash -c so that the semicolons in the wrapWithPrompt output
+      // (variable assignment + command) are treated as a single unit by nohup.
       await sandboxExec(
         sandbox,
-        `cd /work/app && nohup ${agentCommand} >> /work/agent.log 2>&1 &`,
+        `cd /work/app && nohup bash -c ${shellEscape(agentCommand)} >> /work/agent.log 2>&1 &`,
       );
     }
 
@@ -272,14 +284,17 @@ async function provisionResume(
 
     onProgress?.('Starting agent');
     await logToSandbox(sandbox, 'Starting agent...');
-    const agentCmd = buildAgentCommand({
-      agent: options.agent,
-      mode: isInteractive ? 'interactive' : 'detached',
-      model,
-      agentArgs: options.agentArgs,
-      continue: true,
-      prompt: isInteractive ? undefined : options.prompt,
-    });
+    const agentCmd = wrapWithPrompt(
+      buildAgentCommand({
+        agent: options.agent,
+        mode: isInteractive ? 'interactive' : 'detached',
+        model,
+        agentArgs: options.agentArgs,
+        continue: true,
+      }),
+      options.agent,
+      options.prompt,
+    );
 
     if (isInteractive) {
       await sandboxExec(
@@ -289,7 +304,7 @@ async function provisionResume(
     } else {
       await sandboxExec(
         sandbox,
-        `cd /work/app && nohup ${agentCmd} >> /work/agent.log 2>&1 &`,
+        `cd /work/app && nohup bash -c ${shellEscape(agentCmd)} >> /work/agent.log 2>&1 &`,
       );
     }
 
@@ -391,15 +406,46 @@ async function sshIntoSandbox(
   }
 
   try {
+    const startTime = Date.now();
     const proc = Bun.spawn(sshArgs, {
       stdio: ['inherit', 'inherit', 'inherit'],
     });
     const exitCode = await proc.exited;
+    const elapsedMs = Date.now() - startTime;
+
     if (exitCode !== 0) {
-      log.warn({ exitCode }, 'SSH process exited with non-zero status');
+      log.warn(
+        { exitCode, elapsedMs },
+        'SSH process exited with non-zero status',
+      );
+
+      // Exit code 255 = SSH connection failure. If this happened quickly
+      // (within 10s of starting), it's likely a transient startup issue
+      // (sshd not ready yet). Throw so the caller can retry.
+      if (exitCode === 255 && elapsedMs < 10_000) {
+        throw new SshEarlyExitError(exitCode, elapsedMs);
+      }
     }
   } finally {
     resetTerminal();
+  }
+}
+
+/**
+ * Error thrown when SSH exits with code 255 shortly after starting,
+ * indicating a transient connection failure (e.g. sshd not ready).
+ * Callers can catch this to retry the SSH connection.
+ */
+export class SshEarlyExitError extends Error {
+  readonly exitCode: number;
+  readonly elapsedMs: number;
+  constructor(exitCode: number, elapsedMs: number) {
+    super(
+      `SSH connection failed (exit ${exitCode}) after ${elapsedMs}ms — sandbox may not be ready yet`,
+    );
+    this.name = 'SshEarlyExitError';
+    this.exitCode = exitCode;
+    this.elapsedMs = elapsedMs;
   }
 }
 
@@ -473,6 +519,7 @@ export class CloudSandboxProvider implements SandboxProvider {
   // --------------------------------------------------------------------------
 
   async ensureImage(options?: {
+    agent?: AgentType;
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string> {
     const token = await getDenoToken();
@@ -484,35 +531,57 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     const region = await this.resolveRegion();
 
-    const slug = await ensureCloudSnapshot({
+    const mapProgress = (p: {
+      type: string;
+      message?: string;
+      snapshotSlug?: string;
+    }) => {
+      switch (p.type) {
+        case 'checking':
+          options?.onProgress?.({ type: 'checking' });
+          break;
+        case 'exists':
+          options?.onProgress?.({ type: 'exists' });
+          break;
+        case 'creating-volume':
+        case 'booting-sandbox':
+        case 'installing':
+        case 'snapshotting':
+        case 'cleaning-up':
+          options?.onProgress?.({
+            type: 'building',
+            message: p.message ?? '',
+          });
+          break;
+        case 'done':
+          options?.onProgress?.({ type: 'done' });
+          break;
+        case 'error':
+          log.error({ error: p.message }, 'Snapshot build error');
+          break;
+      }
+    };
+
+    // 1. Ensure base snapshot exists
+    const baseSlug = await ensureCloudSnapshot({
       token,
       region,
-      onProgress: (p) => {
-        switch (p.type) {
-          case 'checking':
-            options?.onProgress?.({ type: 'checking' });
-            break;
-          case 'exists':
-            options?.onProgress?.({ type: 'exists' });
-            break;
-          case 'creating-volume':
-          case 'booting-sandbox':
-          case 'installing':
-          case 'snapshotting':
-          case 'cleaning-up':
-            options?.onProgress?.({ type: 'building', message: p.message });
-            break;
-          case 'done':
-            options?.onProgress?.({ type: 'done' });
-            break;
-          case 'error':
-            log.error({ error: p.message }, 'Snapshot build error');
-            break;
-        }
-      },
+      onProgress: mapProgress,
     });
 
-    return slug;
+    // 2. If agent specified, ensure agent overlay snapshot exists
+    if (options?.agent) {
+      const agentSlug = await ensureAgentCloudSnapshot({
+        token,
+        region,
+        agent: options.agent,
+        baseSnapshotSlug: baseSlug,
+        onProgress: mapProgress,
+      });
+      return agentSlug;
+    }
+
+    return baseSlug;
   }
 
   // --------------------------------------------------------------------------
@@ -529,11 +598,11 @@ export class CloudSandboxProvider implements SandboxProvider {
     const { onProgress } = options;
     const client = await this.getClient();
     const region = await this.resolveRegion();
-    const baseSnapshot = await this.ensureImage();
+    const baseSnapshot = await this.ensureImage({ agent: options.agent });
 
     // 1. Create session-specific root volume from the base snapshot.
     onProgress?.('Creating volume');
-    const volumeSlug = denoSlug('hs', options.branchName);
+    const volumeSlug = denoSlug('oxs', options.branchName);
     const rootVolume = await client.createVolume({
       slug: volumeSlug,
       region,
@@ -653,7 +722,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     // tools are visible (snapshot-direct boot uses a read-only overlay).
     onProgress?.('Creating volume');
     const shellVolume = await client.createVolume({
-      slug: denoSlug('hsh'),
+      slug: denoSlug('oxe'),
       region,
       capacity: '10GiB',
       from: baseSnapshot,
@@ -739,7 +808,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     if (existing.snapshotSlug) {
       onProgress?.('Creating volume from snapshot');
-      const resumeVolumeSlug = denoSlug('hr', existing.name);
+      const resumeVolumeSlug = denoSlug('oxr', existing.name);
       const resumeVolume = await client.createVolume({
         slug: resumeVolumeSlug,
         region,
@@ -1022,7 +1091,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         }
       }
 
-      const snapshotSlug = denoSlug('hsnap', session.name);
+      const snapshotSlug = denoSlug('oxn', session.name);
       try {
         await client.snapshotVolume(session.volumeSlug, {
           slug: snapshotSlug,

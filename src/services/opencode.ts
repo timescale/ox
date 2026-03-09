@@ -6,6 +6,7 @@ import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
 import { readConfig } from './config';
+import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
 import { log } from './logger';
@@ -142,6 +143,17 @@ const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
   return merged;
 };
 
+/**
+ * Returns true if opencode has valid file-based credentials (host config or
+ * ox keyring), independent of any env vars like ANTHROPIC_API_KEY.
+ */
+export const hasValidOpencodeFileCredentials = async (): Promise<boolean> => {
+  const host = await readHostCredentials();
+  if (authCredsValid(host)) return true;
+  const cached = await readOxCredentialCache();
+  return !!(cached && authCredsValid(cached));
+};
+
 export const getOpencodeAuthJson = async (
   force = false,
 ): Promise<OpencodeAuthJson> => {
@@ -204,8 +216,13 @@ export const runOpencodeInDocker = async ({
 > => {
   const configFiles = await getOpencodeConfigFiles();
 
+  // Ensure the opencode agent overlay image is available when no explicit image is provided
+  const resolvedImage =
+    dockerImage ?? (await ensureDockerImageForAgent('opencode'));
+
   const effectiveDockerArgs = [
     ...dockerArgs,
+    ...(process.env.TERM ? ['-e', `TERM=${process.env.TERM}`] : []),
     ...(process.env.COLORTERM
       ? ['-e', `COLORTERM=${process.env.COLORTERM}`]
       : []),
@@ -215,7 +232,7 @@ export const runOpencodeInDocker = async ({
     dockerArgs: effectiveDockerArgs,
     cmdArgs,
     cmdName: 'opencode',
-    dockerImage,
+    dockerImage: resolvedImage,
     interactive,
     shouldThrow,
     files: [...configFiles, ...files],

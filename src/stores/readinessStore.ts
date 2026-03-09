@@ -1,7 +1,9 @@
 import { create } from 'zustand';
+import type { AgentType } from '../services/config.ts';
 import type { PullLayer } from '../services/docker.ts';
 import type { DockerProvider, DockerStatus } from '../services/dockerSetup.ts';
 import { log } from '../services/logger.ts';
+import type { SandboxProviderType } from '../services/sandbox/types.ts';
 
 // ============================================================================
 // Types
@@ -22,9 +24,15 @@ export interface ReadinessState {
     | 'running'
     | 'not-running';
 
-  // Tier 3: Sandbox image
-  sandboxImage: CheckStatus | 'pulling';
-  pullLayers: PullLayer[];
+  // Tier 3: Sandbox base image
+  sandboxBaseImage: CheckStatus | 'pulling';
+  basePullLayers: PullLayer[];
+
+  // Tier 3b: Agent-specific sandbox image (depends on base image + selected agent)
+  sandboxAgentImage: CheckStatus | 'building';
+  agentImageAgent: AgentType | null;
+  agentImageProvider: SandboxProviderType | null;
+  agentBuildLayers: PullLayer[];
 
   // Tier 3: Models
   models: CheckStatus;
@@ -32,19 +40,32 @@ export interface ReadinessState {
   // Tier 3: Credentials (per-agent, cached independently)
   claudeAuth: CheckStatus | 'invalid';
   opencodeAuth: CheckStatus | 'invalid';
+  codexAuth: CheckStatus | 'invalid';
   ghAuth: CheckStatus | 'invalid';
 
   // Track which model was used for each agent credential check
   claudeAuthModel: string | undefined;
   opencodeAuthModel: string | undefined;
+  codexAuthModel: string | undefined;
 
   // Error details
   error: string | null;
 
   // Actions
   runChecks: () => Promise<void>;
-  checkAgentAuth: (agent: 'claude' | 'opencode', model?: string) => void;
+  checkAgentAuth: (
+    agent: 'claude' | 'opencode' | 'codex',
+    model?: string,
+  ) => void;
+  prebuildAgentImage: (
+    agent: AgentType,
+    providerType: SandboxProviderType,
+  ) => void;
   reset: () => void;
+  /** Reset a single agent's auth state so the next check runs fresh. */
+  resetAgentAuth: (agent: 'claude' | 'opencode' | 'codex') => void;
+  /** Reset GitHub auth state so the next check runs fresh. */
+  resetGhAuth: () => void;
 }
 
 // ============================================================================
@@ -53,19 +74,30 @@ export interface ReadinessState {
 
 const initialState: Omit<
   ReadinessState,
-  'runChecks' | 'checkAgentAuth' | 'reset'
+  | 'runChecks'
+  | 'checkAgentAuth'
+  | 'prebuildAgentImage'
+  | 'reset'
+  | 'resetAgentAuth'
+  | 'resetGhAuth'
 > = {
   dockerInstalled: 'unknown',
   dockerStatus: null,
   dockerRunning: 'unknown',
-  sandboxImage: 'unknown',
-  pullLayers: [],
+  sandboxBaseImage: 'unknown',
+  basePullLayers: [],
+  sandboxAgentImage: 'unknown',
+  agentImageAgent: null,
+  agentImageProvider: null,
+  agentBuildLayers: [],
   models: 'unknown',
   claudeAuth: 'unknown',
   opencodeAuth: 'unknown',
+  codexAuth: 'unknown',
   ghAuth: 'unknown',
   claudeAuthModel: undefined,
   opencodeAuthModel: undefined,
+  codexAuthModel: undefined,
   error: null,
 };
 
@@ -76,12 +108,46 @@ const initialState: Omit<
 // Guard against concurrent runChecks calls
 let checksRunning = false;
 
+// In-flight agent auth check promises so callers can await a pending check
+// instead of launching a duplicate (which would race on token refresh).
+const pendingAgentAuthChecks = new Map<string, Promise<boolean>>();
+
+/**
+ * Wait for an in-flight agent auth check to finish.
+ * Returns the cached result (true/false) or null if no check is pending.
+ */
+export const waitForAgentAuthCheck = (
+  agent: 'claude' | 'opencode' | 'codex',
+): Promise<boolean> | null => {
+  return pendingAgentAuthChecks.get(agent) ?? null;
+};
+
 export const useReadinessStore = create<ReadinessState>()((set) => ({
   ...initialState,
 
   reset: () => {
     checksRunning = false;
     set(initialState);
+  },
+
+  resetAgentAuth: (agent: 'claude' | 'opencode' | 'codex') => {
+    const authKey =
+      agent === 'claude'
+        ? 'claudeAuth'
+        : agent === 'codex'
+          ? 'codexAuth'
+          : 'opencodeAuth';
+    const modelKey =
+      agent === 'claude'
+        ? 'claudeAuthModel'
+        : agent === 'codex'
+          ? 'codexAuthModel'
+          : 'opencodeAuthModel';
+    set({ [authKey]: 'unknown', [modelKey]: undefined });
+  },
+
+  resetGhAuth: () => {
+    set({ ghAuth: 'unknown' });
   },
 
   runChecks: async () => {
@@ -153,7 +219,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
       }
 
       // ---- Tier 3: Sandbox image? ----
-      set({ sandboxImage: 'checking' });
+      set({ sandboxBaseImage: 'checking' });
 
       let imageReady: boolean;
       try {
@@ -163,9 +229,9 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
       }
 
       if (imageReady) {
-        set({ sandboxImage: 'ready' });
+        set({ sandboxBaseImage: 'ready' });
       } else {
-        set({ sandboxImage: 'pulling', pullLayers: [] });
+        set({ sandboxBaseImage: 'pulling', basePullLayers: [] });
 
         try {
           await ensureDockerImage({
@@ -174,16 +240,16 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
                 progress.type === 'pulling' ||
                 progress.type === 'pulling-cache'
               ) {
-                set({ pullLayers: progress.layers ?? [] });
+                set({ basePullLayers: progress.layers ?? [] });
               }
             },
           });
-          set({ sandboxImage: 'ready', pullLayers: [] });
+          set({ sandboxBaseImage: 'ready', basePullLayers: [] });
         } catch (err) {
           log.error({ err }, 'Failed to pull/build sandbox image');
           set({
-            sandboxImage: 'error',
-            pullLayers: [],
+            sandboxBaseImage: 'error',
+            basePullLayers: [],
             error: err instanceof Error ? err.message : String(err),
           });
           return;
@@ -208,37 +274,157 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
     }
   },
 
-  checkAgentAuth: (agent: 'claude' | 'opencode', model?: string) => {
+  checkAgentAuth: (agent: 'claude' | 'opencode' | 'codex', model?: string) => {
     const state = useReadinessStore.getState();
-    const authKey = agent === 'claude' ? 'claudeAuth' : 'opencodeAuth';
+    const authKey =
+      agent === 'claude'
+        ? 'claudeAuth'
+        : agent === 'codex'
+          ? 'codexAuth'
+          : 'opencodeAuth';
     const modelKey =
-      agent === 'claude' ? 'claudeAuthModel' : 'opencodeAuthModel';
+      agent === 'claude'
+        ? 'claudeAuthModel'
+        : agent === 'codex'
+          ? 'codexAuthModel'
+          : 'opencodeAuthModel';
     const current = state[authKey];
     const prevModel = state[modelKey];
 
     // Don't re-check if already checking
     if (current === 'checking') return;
     // Don't check if sandbox image isn't ready yet
-    if (state.sandboxImage !== 'ready') return;
+    if (state.sandboxBaseImage !== 'ready') return;
     // Re-check if: never checked ('unknown'), or model changed since last check
     if (current !== 'unknown' && model === prevModel) return;
 
     set({ [authKey]: 'checking', [modelKey]: model });
 
-    // Fire-and-forget
-    (async () => {
+    // Track the in-flight promise so callers (e.g. startSession) can await
+    // a pending check instead of launching a duplicate that would race on
+    // OAuth token refresh.
+    const checkPromise = (async () => {
       try {
-        const ok =
-          agent === 'claude'
-            ? await (
-                await import('../services/claude.ts')
-              ).checkClaudeCredentials(model)
-            : await (
-                await import('../services/opencode.ts')
-              ).checkOpencodeCredentials(model);
+        let ok: boolean;
+        switch (agent) {
+          case 'claude':
+            ok = await (
+              await import('../services/claude.ts')
+            ).checkClaudeCredentials(model);
+            break;
+          case 'codex':
+            ok = await (
+              await import('../services/codex.ts')
+            ).checkCodexCredentials();
+            break;
+          default:
+            ok = await (
+              await import('../services/opencode.ts')
+            ).checkOpencodeCredentials(model);
+            break;
+        }
         set({ [authKey]: ok ? 'ready' : 'invalid' });
+        return ok;
       } catch {
         set({ [authKey]: 'error' });
+        return false;
+      } finally {
+        pendingAgentAuthChecks.delete(agent);
+      }
+    })();
+    pendingAgentAuthChecks.set(agent, checkPromise);
+  },
+
+  prebuildAgentImage: (agent: AgentType, providerType: SandboxProviderType) => {
+    const state = useReadinessStore.getState();
+
+    // Don't start if base image isn't ready yet
+    if (state.sandboxBaseImage !== 'ready') return;
+
+    // If already building for the same agent+provider, skip
+    if (
+      (state.sandboxAgentImage === 'checking' ||
+        state.sandboxAgentImage === 'building') &&
+      state.agentImageAgent === agent &&
+      state.agentImageProvider === providerType
+    ) {
+      return;
+    }
+
+    // If already ready for the same agent+provider, skip
+    if (
+      state.sandboxAgentImage === 'ready' &&
+      state.agentImageAgent === agent &&
+      state.agentImageProvider === providerType
+    ) {
+      return;
+    }
+
+    // Start building — update tracking state (don't cancel any in-flight build;
+    // it will finish and cache its result for potential future use).
+    set({
+      sandboxAgentImage: 'checking',
+      agentImageAgent: agent,
+      agentImageProvider: providerType,
+      agentBuildLayers: [],
+    });
+
+    // Fire-and-forget async build
+    (async () => {
+      try {
+        const { getSandboxProvider } = await import(
+          '../services/sandbox/index.ts'
+        );
+        const provider = getSandboxProvider(providerType);
+
+        set({ sandboxAgentImage: 'building' });
+
+        await provider.ensureImage({
+          agent,
+          onProgress: (progress) => {
+            // Only update if this is still the active build
+            const current = useReadinessStore.getState();
+            if (
+              current.agentImageAgent !== agent ||
+              current.agentImageProvider !== providerType
+            ) {
+              return;
+            }
+
+            if (
+              progress.type === 'pulling' ||
+              progress.type === 'pulling-cache'
+            ) {
+              set({ agentBuildLayers: progress.layers ?? [] });
+            }
+          },
+        });
+
+        // Only mark ready if this is still the active build
+        const current = useReadinessStore.getState();
+        if (
+          current.agentImageAgent === agent &&
+          current.agentImageProvider === providerType
+        ) {
+          set({ sandboxAgentImage: 'ready', agentBuildLayers: [] });
+        }
+      } catch (err) {
+        // Only set error if this is still the active build
+        const current = useReadinessStore.getState();
+        if (
+          current.agentImageAgent === agent &&
+          current.agentImageProvider === providerType
+        ) {
+          log.error(
+            { err, agent, providerType },
+            'Failed to prebuild agent image',
+          );
+          set({
+            sandboxAgentImage: 'error',
+            agentBuildLayers: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     })();
   },

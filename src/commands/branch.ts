@@ -5,6 +5,7 @@
 import { Command, Option } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { ensureClaudeAuth } from '../services/claude';
+import { ensureCodexAuth } from '../services/codex';
 import { type AgentType, projectConfig, readConfig } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
 import {
@@ -72,7 +73,6 @@ export async function branchAction(
     ? getSandboxProvider(options.provider)
     : await getDefaultProvider();
   await provider.ensureReady();
-  await provider.ensureImage();
 
   // Step 1: Check if we're in a git repository
   const repoInfo = await tryGetRepoInfo();
@@ -122,6 +122,10 @@ export async function branchAction(
   const effectiveAgent: AgentType = options.agent ?? config.agent ?? 'opencode';
   const effectiveModel: string | undefined = options.model ?? config.model;
 
+  // Step 4b: Ensure sandbox image (including agent overlay) is ready
+  console.log('Ensuring sandbox image...');
+  await provider.ensureImage({ agent: effectiveAgent });
+
   // Step 5: Get repo info (if in a git repo)
   if (isGitRepo) {
     log.debug({ repo: repoInfo.fullName }, 'Repository info resolved');
@@ -161,10 +165,18 @@ export async function branchAction(
   // Step 8: Ensure agent credentials are valid
   log.debug({ agent: effectiveAgent }, 'Checking agent credentials');
   console.log(`Checking ${effectiveAgent} credentials...`);
-  const authValid =
-    effectiveAgent === 'claude'
-      ? await ensureClaudeAuth(effectiveModel)
-      : await ensureOpencodeAuth(effectiveModel);
+  let authValid: boolean;
+  switch (effectiveAgent) {
+    case 'claude':
+      authValid = await ensureClaudeAuth(effectiveModel);
+      break;
+    case 'codex':
+      authValid = await ensureCodexAuth(effectiveModel);
+      break;
+    default:
+      authValid = await ensureOpencodeAuth(effectiveModel);
+      break;
+  }
 
   if (!authValid) {
     log.error(

@@ -10,7 +10,7 @@ import envPaths from 'env-paths';
 // Types
 // ============================================================================
 
-export type AgentType = 'claude' | 'opencode';
+export type AgentType = 'claude' | 'opencode' | 'codex';
 
 /**
  * Ox configuration - all keys are valid at both user and project level.

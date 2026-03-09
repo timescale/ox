@@ -2,11 +2,13 @@
 // Docker Sandbox Provider - Adapts existing Docker functions to SandboxProvider
 // ============================================================================
 
+import type { AgentType } from '../config.ts';
 import {
   attachToContainer,
   type OxSession as DockerSession,
   getSession as dockerGetSession,
   ensureDockerImage,
+  ensureDockerImageForAgent,
   ensureDockerSandbox,
   getContainerLogs,
   getContainerStats,
@@ -121,8 +123,14 @@ export class DockerSandboxProvider implements SandboxProvider {
   }
 
   async ensureImage(options?: {
+    agent?: AgentType;
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string> {
+    if (options?.agent) {
+      return ensureDockerImageForAgent(options.agent, {
+        onProgress: options?.onProgress,
+      });
+    }
     return ensureDockerImage({ onProgress: options?.onProgress });
   }
 
@@ -136,6 +144,11 @@ export class DockerSandboxProvider implements SandboxProvider {
       'Creating Docker sandbox',
     );
     const { onProgress } = options;
+
+    // Ensure agent-specific overlay image exists
+    onProgress?.('Preparing agent image');
+    const agentImage = await this.ensureImage({ agent: options.agent });
+
     onProgress?.('Starting container');
     const containerName = await startContainer({
       branchName: options.branchName,
@@ -150,6 +163,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       isGitRepo: options.isGitRepo,
       agentArgs: options.agentArgs,
       submitMode: options.submitMode,
+      dockerImage: agentImage,
     });
 
     // Fetch the full session info for the container

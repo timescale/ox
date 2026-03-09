@@ -28,11 +28,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-      - name: Read pinned tool versions
-        id: versions
-        run: |
-          echo "claude_code=$(jq -r .claudeCode sandbox/versions.json)" >> $GITHUB_OUTPUT
-          echo "opencode=$(jq -r .opencode sandbox/versions.json)" >> $GITHUB_OUTPUT
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
@@ -51,8 +46,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/timescale/ox/${{ matrix.image }}:latest
-          build-args: |
-            CLAUDE_CODE_VERSION=${{ steps.versions.outputs.claude_code }}
-            OPENCODE_VERSION=${{ steps.versions.outputs.opencode }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}

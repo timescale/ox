@@ -9,6 +9,7 @@
 import SLIM_DOCKERFILE from '../../../sandbox/slim.Dockerfile' with {
   type: 'text',
 };
+import type { AgentType } from '../config.ts';
 import { getDenoToken } from '../deno.ts';
 import {
   computeDockerfileHash,
@@ -18,7 +19,7 @@ import {
   listOxImages,
 } from '../docker.ts';
 import { log } from '../logger.ts';
-import { getBaseSnapshotSlug } from './cloudSnapshot.ts';
+import { getAgentSnapshotSlug, getBaseSnapshotSlug } from './cloudSnapshot.ts';
 import {
   DenoApiClient,
   type DenoSnapshot,
@@ -51,6 +52,10 @@ export interface SandboxResource {
   bootable?: boolean;
   sessionName?: string;
   createdAt?: string;
+  /** For snapshots: the slug of the source volume this snapshot was taken from */
+  sourceVolumeSlug?: string;
+  /** For volumes: slugs of snapshots that depend on this volume */
+  childSnapshotSlugs?: string[];
 }
 
 // ============================================================================
@@ -59,6 +64,7 @@ export interface SandboxResource {
 
 interface SnapshotClassificationContext {
   currentBaseSlug: string;
+  currentAgentSlugs: Set<string>;
   sessionsBySnapshotSlug: Map<string, OxSession>;
   deletedSessionsBySnapshotSlug: Map<string, OxSession>;
 }
@@ -68,6 +74,11 @@ interface VolumeClassificationContext {
   currentBaseVolumeSlug: string | null;
   sessionsByVolumeSlug: Map<string, OxSession>;
   deletedSessionsByVolumeSlug: Map<string, OxSession>;
+  /** Map from volume slug to the slugs + statuses of snapshots taken from that volume */
+  snapshotsByVolumeSlug: Map<
+    string,
+    { slug: string; status: ResourceStatus }[]
+  >;
 }
 
 interface ImageClassificationContext {
@@ -82,10 +93,10 @@ interface ImageClassificationContext {
 // ============================================================================
 
 /** Known Ox snapshot slug prefixes. */
-const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'hsnap-'];
+const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'ox-', 'oxn-'];
 
 /** Known Ox volume slug prefixes. */
-const OX_VOLUME_PREFIXES = ['hbb-', 'hsh-', 'hs-', 'hr-'];
+const OX_VOLUME_PREFIXES = ['oxb-', 'oxa-', 'oxe-', 'oxs-', 'oxr-'];
 
 /**
  * Classify a cloud snapshot as current/active/old/orphaned.
@@ -93,9 +104,10 @@ const OX_VOLUME_PREFIXES = ['hbb-', 'hsh-', 'hs-', 'hr-'];
  *
  * Rules:
  * - `ox-base-*` → "Base Snapshot": `current` if matches getBaseSnapshotSlug(), else `old`
- * - `hsnap-*` → "Session Snapshot": `active` if linked to non-deleted session,
+ * - `ox-*` (not `ox-base-*`) → "Agent Snapshot": `current` if in currentAgentSlugs, else `old`
+ * - `oxn-*` → "Session Snapshot": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
- * - Other prefixes → null (not a Ox resource, skip)
+ * - Other prefixes → null (not an Ox resource, skip)
  */
 export function classifyCloudSnapshot(
   snapshot: DenoSnapshot,
@@ -114,6 +126,7 @@ export function classifyCloudSnapshot(
     size: snapshot.allocatedSize,
     region: snapshot.region,
     bootable: snapshot.bootable,
+    sourceVolumeSlug: snapshot.volume.slug,
   };
 
   // Base snapshots
@@ -125,7 +138,19 @@ export function classifyCloudSnapshot(
     };
   }
 
-  // Session snapshots (hsnap-*)
+  // Agent overlay snapshots (ox-{version}-{agent}-{agentVer}, but NOT ox-base-*)
+  if (
+    snapshot.slug.startsWith('ox-') &&
+    !snapshot.slug.startsWith('ox-base-')
+  ) {
+    return {
+      ...base,
+      category: 'Agent Snapshot',
+      status: ctx.currentAgentSlugs.has(snapshot.slug) ? 'current' : 'old',
+    };
+  }
+
+  // Session snapshots (oxn-*)
   const activeSession = ctx.sessionsBySnapshotSlug.get(snapshot.slug);
   if (activeSession) {
     return {
@@ -154,16 +179,36 @@ export function classifyCloudSnapshot(
 }
 
 /**
+ * Derive a volume's status from its child snapshots.
+ * - If any child is `current` or `active` → `current`
+ * - If children exist but all are `old` → `old`
+ * - If no children → `orphaned`
+ */
+function volumeStatusFromChildSnapshots(
+  children: { slug: string; status: ResourceStatus }[] | undefined,
+): ResourceStatus {
+  if (!children || children.length === 0) return 'orphaned';
+  if (children.some((s) => s.status === 'current' || s.status === 'active')) {
+    return 'current';
+  }
+  return 'old';
+}
+
+/**
  * Classify a cloud volume as current/active/old/orphaned.
  * Returns null for non-Ox volumes (unrecognized slug prefix).
  *
  * Rules:
- * - `hbb-*` → "Build Volume": `current` if it is the source volume of the
- *   current base snapshot, else `orphaned`
- * - `hs-*` / `hr-*` → "Session Volume": `active` if linked to non-deleted session,
+ * - `oxb-*` → "Build Volume": `current` if it is the source volume of the
+ *   current base snapshot or has current child snapshots, `old` if only old
+ *   snapshots remain, `orphaned` if no snapshots depend on it
+ * - `oxa-*` → "Agent Build Volume": status derived from child snapshots
+ *   (`current` if any child snapshot is current, `old` if all are old,
+ *   `orphaned` if no child snapshots exist)
+ * - `oxs-*` / `oxr-*` → "Session Volume": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
- * - `hsh-*` → "Shell Volume": always `orphaned` (ephemeral, shouldn't persist)
- * - Other prefixes → null (not a Ox resource, skip)
+ * - `oxe-*` → "Shell Volume": always `orphaned` (ephemeral, shouldn't persist)
+ * - Other prefixes → null (not an Ox resource, skip)
  */
 export function classifyCloudVolume(
   volume: DenoVolume,
@@ -174,6 +219,9 @@ export function classifyCloudVolume(
     return null;
   }
 
+  const childSnapshots = ctx.snapshotsByVolumeSlug.get(volume.slug);
+  const childSnapshotSlugs = childSnapshots?.map((s) => s.slug);
+
   const base: Omit<SandboxResource, 'category' | 'status' | 'sessionName'> = {
     id: volume.id,
     provider: 'cloud',
@@ -182,22 +230,37 @@ export function classifyCloudVolume(
     size: volume.allocatedSize,
     region: volume.region,
     bootable: volume.bootable,
+    childSnapshotSlugs,
   };
 
-  // Build volumes — current if source of the current base snapshot, else orphaned
-  if (volume.slug.startsWith('hbb-')) {
+  // Build volumes — current if source of the current base snapshot.
+  // If no longer current but still has dependent snapshots, derive status from those snapshots.
+  if (volume.slug.startsWith('oxb-')) {
+    const isCurrent =
+      ctx.currentBaseVolumeSlug != null &&
+      volume.slug === ctx.currentBaseVolumeSlug;
     return {
       ...base,
       category: 'Build Volume',
-      status:
-        ctx.currentBaseVolumeSlug && volume.slug === ctx.currentBaseVolumeSlug
-          ? 'current'
-          : 'orphaned',
+      status: isCurrent
+        ? 'current'
+        : volumeStatusFromChildSnapshots(childSnapshots),
+    };
+  }
+
+  // Agent build volumes — status derived from child snapshots.
+  // A volume with current snapshots is current; with only old snapshots is old;
+  // with no snapshots at all it is orphaned.
+  if (volume.slug.startsWith('oxa-')) {
+    return {
+      ...base,
+      category: 'Agent Build Volume',
+      status: volumeStatusFromChildSnapshots(childSnapshots),
     };
   }
 
   // Shell volumes — always orphaned
-  if (volume.slug.startsWith('hsh-')) {
+  if (volume.slug.startsWith('oxe-')) {
     return {
       ...base,
       category: 'Shell Volume',
@@ -205,7 +268,7 @@ export function classifyCloudVolume(
     };
   }
 
-  // Session volumes (hs-* or hr-*)
+  // Session volumes (oxs-* or oxr-*)
   const activeSession = ctx.sessionsByVolumeSlug.get(volume.slug);
   if (activeSession) {
     return {
@@ -259,11 +322,16 @@ export function classifyDockerImage(
 
   // Local builds (ox-sandbox:md5-*)
   if (image.repository === 'ox-sandbox' && image.tag.startsWith('md5-')) {
-    const hash = image.tag.slice(4); // strip 'md5-' prefix
+    // Agent overlays have tags like 'md5-{hash}-{agent}-{version}'.
+    // Base images have tags like 'md5-{hash}'. Both are "current" if hash matches.
+    const isCurrentBase = image.tag === `md5-${ctx.currentDockerfileHash}`;
+    const isCurrentOverlay = image.tag.startsWith(
+      `md5-${ctx.currentDockerfileHash}-`,
+    );
     return {
       ...base,
       category: 'Local Build',
-      status: hash === ctx.currentDockerfileHash ? 'current' : 'old',
+      status: isCurrentBase || isCurrentOverlay ? 'current' : 'old',
     };
   }
 
@@ -360,6 +428,8 @@ async function discoverCloudResources(
   log.debug('Discovering cloud resources...');
   const client = new DenoApiClient(token);
   const currentBaseSlug = getBaseSnapshotSlug();
+  const AGENTS: AgentType[] = ['claude', 'opencode', 'codex'];
+  const currentAgentSlugs = new Set(AGENTS.map(getAgentSnapshotSlug));
 
   const [volumes, snapshots] = await Promise.all([
     client.listVolumes(),
@@ -378,9 +448,11 @@ async function discoverCloudResources(
 
   const resources: SandboxResource[] = [];
 
+  // Classify snapshots first so we can build a reverse map for volumes
   for (const snapshot of snapshots) {
     const classified = classifyCloudSnapshot(snapshot, {
       currentBaseSlug,
+      currentAgentSlugs,
       sessionsBySnapshotSlug: lookups.sessionsBySnapshotSlug,
       deletedSessionsBySnapshotSlug: lookups.deletedSessionsBySnapshotSlug,
     });
@@ -389,11 +461,34 @@ async function discoverCloudResources(
     }
   }
 
+  // Build reverse map: volume slug → snapshot slugs + statuses.
+  // This lets volume classification know which snapshots depend on it.
+  const snapshotsByVolumeSlug = new Map<
+    string,
+    { slug: string; status: ResourceStatus }[]
+  >();
+  for (const snapshot of snapshots) {
+    const volumeSlug = snapshot.volume.slug;
+    const classified = resources.find(
+      (r) => r.kind === 'snapshot' && r.id === snapshot.id,
+    );
+    if (classified) {
+      const existing = snapshotsByVolumeSlug.get(volumeSlug);
+      const entry = { slug: snapshot.slug, status: classified.status };
+      if (existing) {
+        existing.push(entry);
+      } else {
+        snapshotsByVolumeSlug.set(volumeSlug, [entry]);
+      }
+    }
+  }
+
   for (const volume of volumes) {
     const classified = classifyCloudVolume(volume, {
       currentBaseVolumeSlug,
       sessionsByVolumeSlug: lookups.sessionsByVolumeSlug,
       deletedSessionsByVolumeSlug: lookups.deletedSessionsByVolumeSlug,
+      snapshotsByVolumeSlug,
     });
     if (classified) {
       resources.push(classified);

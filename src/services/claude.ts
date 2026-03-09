@@ -8,6 +8,7 @@ import type {
 } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { readCache, writeCache } from './cache';
+import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, getSecret, setOxSecret } from './keyring';
 import { log } from './logger';
@@ -279,6 +280,21 @@ export const captureClaudeCredentialsFromContainer = async (
   );
 };
 
+/**
+ * Returns true if claude has valid file-based credentials (host keyring,
+ * host file, or ox keyring), independent of the ANTHROPIC_API_KEY env var.
+ */
+export const hasValidClaudeFileCredentials = async (): Promise<boolean> => {
+  const creds = await readHostCredentials();
+  if (claudeCredsValid(creds)) return true;
+  const oxCreds = await readOxCredentialCache();
+  if (claudeCredsValid(oxCreds)) return true;
+  const apiKey = await readHostConfigApiKey();
+  if (apiKey) return true;
+  const oxApiKey = await readOxApiKeyCache();
+  return !!oxApiKey;
+};
+
 export const getClaudeCredentialsJson = async (
   force = false,
 ): Promise<ClaudeCredentialsJson | null> => {
@@ -358,8 +374,13 @@ export const runClaudeInDocker = async ({
 > => {
   const configFiles = await getClaudeConfigFiles();
 
+  // Ensure the claude agent overlay image is available when no explicit image is provided
+  const resolvedImage =
+    dockerImage ?? (await ensureDockerImageForAgent('claude'));
+
   const effectiveDockerArgs = [
     ...dockerArgs,
+    ...(process.env.TERM ? ['-e', `TERM=${process.env.TERM}`] : []),
     ...(process.env.COLORTERM
       ? ['-e', `COLORTERM=${process.env.COLORTERM}`]
       : []),
@@ -369,7 +390,7 @@ export const runClaudeInDocker = async ({
     dockerArgs: effectiveDockerArgs,
     cmdArgs,
     cmdName: 'claude',
-    dockerImage,
+    dockerImage: resolvedImage,
     interactive,
     shouldThrow,
     files: [...configFiles, ...files],

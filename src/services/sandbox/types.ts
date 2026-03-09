@@ -128,6 +128,7 @@ export interface SandboxProvider {
 
   // Image/snapshot management
   ensureImage(options?: {
+    agent?: AgentType;
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string>;
 

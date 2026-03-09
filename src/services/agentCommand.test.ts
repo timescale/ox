@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { buildAgentCommand, buildContinueCommand } from './agentCommand.ts';
+import {
+  buildAgentCommand,
+  buildContinueCommand,
+  wrapWithPrompt,
+} from './agentCommand.ts';
 
 // ============================================================================
 // Claude
@@ -16,36 +20,12 @@ describe('buildAgentCommand - claude', () => {
     expect(cmd).toBe('claude --dangerously-skip-permissions');
   });
 
-  test('interactive, with prompt (base64 piped)', () => {
-    const cmd = buildAgentCommand({
-      agent: 'claude',
-      mode: 'interactive',
-      prompt: 'Fix the bug',
-    });
-    const b64 = Buffer.from('Fix the bug').toString('base64');
-    expect(cmd).toBe(
-      `echo '${b64}' | base64 -d | claude --dangerously-skip-permissions`,
-    );
-  });
-
   test('detached, no prompt', () => {
     const cmd = buildAgentCommand({
       agent: 'claude',
       mode: 'detached',
     });
     expect(cmd).toBe('claude -p --dangerously-skip-permissions');
-  });
-
-  test('detached, with prompt', () => {
-    const cmd = buildAgentCommand({
-      agent: 'claude',
-      mode: 'detached',
-      prompt: 'Add tests',
-    });
-    const b64 = Buffer.from('Add tests').toString('base64');
-    expect(cmd).toBe(
-      `echo '${b64}' | base64 -d | claude -p --dangerously-skip-permissions`,
-    );
   });
 
   test('with model', () => {
@@ -111,19 +91,6 @@ describe('buildAgentCommand - claude', () => {
     expect(cmd).toBe('claude -c -p --dangerously-skip-permissions');
   });
 
-  test('continue detached with prompt', () => {
-    const cmd = buildAgentCommand({
-      agent: 'claude',
-      mode: 'detached',
-      continue: true,
-      prompt: 'Now fix the tests',
-    });
-    const b64 = Buffer.from('Now fix the tests').toString('base64');
-    expect(cmd).toBe(
-      `echo '${b64}' | base64 -d | claude -c -p --dangerously-skip-permissions`,
-    );
-  });
-
   test('continue with model', () => {
     const cmd = buildAgentCommand({
       agent: 'claude',
@@ -164,40 +131,12 @@ describe('buildAgentCommand - opencode', () => {
     expect(cmd).toBe('opencode');
   });
 
-  test('interactive, with prompt (--prompt flag)', () => {
-    const cmd = buildAgentCommand({
-      agent: 'opencode',
-      mode: 'interactive',
-      prompt: 'Fix the bug',
-    });
-    expect(cmd).toBe("opencode --prompt 'Fix the bug'");
-  });
-
-  test('interactive, with prompt containing single quotes', () => {
-    const cmd = buildAgentCommand({
-      agent: 'opencode',
-      mode: 'interactive',
-      prompt: "Don't break it",
-    });
-    expect(cmd).toBe("opencode --prompt 'Don'\\''t break it'");
-  });
-
   test('detached, no prompt', () => {
     const cmd = buildAgentCommand({
       agent: 'opencode',
       mode: 'detached',
     });
     expect(cmd).toBe('opencode run');
-  });
-
-  test('detached, with prompt (base64 piped)', () => {
-    const cmd = buildAgentCommand({
-      agent: 'opencode',
-      mode: 'detached',
-      prompt: 'Add tests',
-    });
-    const b64 = Buffer.from('Add tests').toString('base64');
-    expect(cmd).toBe(`echo '${b64}' | base64 -d | opencode run`);
   });
 
   test('with model', () => {
@@ -248,17 +187,6 @@ describe('buildAgentCommand - opencode', () => {
     expect(cmd).toBe('opencode run -c');
   });
 
-  test('continue detached with prompt', () => {
-    const cmd = buildAgentCommand({
-      agent: 'opencode',
-      mode: 'detached',
-      continue: true,
-      prompt: 'Now fix the tests',
-    });
-    const b64 = Buffer.from('Now fix the tests').toString('base64');
-    expect(cmd).toBe(`echo '${b64}' | base64 -d | opencode run -c`);
-  });
-
   test('continue with model', () => {
     const cmd = buildAgentCommand({
       agent: 'opencode',
@@ -268,17 +196,6 @@ describe('buildAgentCommand - opencode', () => {
     });
     expect(cmd).toBe("opencode --model 'gpt-4o' -c");
   });
-
-  test('continue interactive ignores prompt (prompt is only for fresh starts)', () => {
-    const cmd = buildAgentCommand({
-      agent: 'opencode',
-      mode: 'interactive',
-      continue: true,
-      prompt: 'This should be ignored',
-    });
-    // In continue mode, interactive opencode just gets -c (no --prompt)
-    expect(cmd).toBe('opencode -c');
-  });
 });
 
 // ============================================================================
@@ -286,24 +203,6 @@ describe('buildAgentCommand - opencode', () => {
 // ============================================================================
 
 describe('buildAgentCommand - edge cases', () => {
-  test('empty prompt is treated as no prompt', () => {
-    const cmd = buildAgentCommand({
-      agent: 'claude',
-      mode: 'interactive',
-      prompt: '',
-    });
-    expect(cmd).toBe('claude --dangerously-skip-permissions');
-  });
-
-  test('whitespace-only prompt is treated as no prompt', () => {
-    const cmd = buildAgentCommand({
-      agent: 'claude',
-      mode: 'interactive',
-      prompt: '   ',
-    });
-    expect(cmd).toBe('claude --dangerously-skip-permissions');
-  });
-
   test('continue defaults to false when not specified', () => {
     const cmd = buildAgentCommand({
       agent: 'claude',
@@ -311,19 +210,6 @@ describe('buildAgentCommand - edge cases', () => {
     });
     // No -c flag
     expect(cmd).not.toContain(' -c');
-  });
-
-  test('prompt with special shell characters is base64 encoded for claude', () => {
-    const prompt = 'Fix the "bug" && rm -rf / | echo $HOME';
-    const cmd = buildAgentCommand({
-      agent: 'claude',
-      mode: 'detached',
-      prompt,
-    });
-    const b64 = Buffer.from(prompt).toString('base64');
-    // The prompt is safely base64-encoded, not inlined raw
-    expect(cmd).toContain(`echo '${b64}'`);
-    expect(cmd).not.toContain('rm -rf');
   });
 });
 
@@ -352,5 +238,114 @@ describe('buildContinueCommand', () => {
   test('opencode with model', () => {
     const cmd = buildContinueCommand('opencode', 'gpt-4o');
     expect(cmd).toBe("opencode --model 'gpt-4o' -c");
+  });
+});
+
+// ============================================================================
+// wrapWithPrompt
+// ============================================================================
+
+describe('wrapWithPrompt', () => {
+  test('returns command unchanged when no prompt', () => {
+    const cmd = 'claude --dangerously-skip-permissions';
+    expect(wrapWithPrompt(cmd, 'claude')).toBe(cmd);
+  });
+
+  test('returns command unchanged when prompt is null', () => {
+    const cmd = 'claude --dangerously-skip-permissions';
+    expect(wrapWithPrompt(cmd, 'claude', null)).toBe(cmd);
+  });
+
+  test('returns command unchanged when prompt is empty', () => {
+    const cmd = 'claude --dangerously-skip-permissions';
+    expect(wrapWithPrompt(cmd, 'claude', '')).toBe(cmd);
+  });
+
+  test('returns command unchanged when prompt is whitespace-only', () => {
+    const cmd = 'claude --dangerously-skip-permissions';
+    expect(wrapWithPrompt(cmd, 'claude', '   ')).toBe(cmd);
+  });
+
+  test('wraps claude command with OX_PROMPT variable', () => {
+    const cmd = 'claude --dangerously-skip-permissions';
+    const result = wrapWithPrompt(cmd, 'claude', 'Fix the bug');
+    const b64 = Buffer.from('Fix the bug').toString('base64');
+    expect(result).toBe(
+      `OX_PROMPT="$(echo '${b64}' | base64 -d)"; claude --dangerously-skip-permissions "$OX_PROMPT"`,
+    );
+  });
+
+  test('wraps detached claude command with OX_PROMPT variable', () => {
+    const cmd = 'claude -p --dangerously-skip-permissions';
+    const result = wrapWithPrompt(cmd, 'claude', 'Add tests');
+    const b64 = Buffer.from('Add tests').toString('base64');
+    expect(result).toBe(
+      `OX_PROMPT="$(echo '${b64}' | base64 -d)"; claude -p --dangerously-skip-permissions "$OX_PROMPT"`,
+    );
+  });
+
+  test('wraps codex interactive command with OX_PROMPT variable', () => {
+    const cmd = 'codex --dangerously-bypass-approvals-and-sandbox';
+    const result = wrapWithPrompt(cmd, 'codex', 'Fix the bug');
+    const b64 = Buffer.from('Fix the bug').toString('base64');
+    expect(result).toBe(
+      `OX_PROMPT="$(echo '${b64}' | base64 -d)"; codex --dangerously-bypass-approvals-and-sandbox "$OX_PROMPT"`,
+    );
+  });
+
+  test('wraps codex detached command with OX_PROMPT variable', () => {
+    const cmd =
+      'codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check';
+    const result = wrapWithPrompt(cmd, 'codex', 'Add tests');
+    const b64 = Buffer.from('Add tests').toString('base64');
+    expect(result).toBe(
+      `OX_PROMPT="$(echo '${b64}' | base64 -d)"; codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$OX_PROMPT"`,
+    );
+  });
+
+  test('wraps interactive opencode with --prompt flag', () => {
+    const cmd = 'opencode';
+    const result = wrapWithPrompt(cmd, 'opencode', 'Fix the bug');
+    const b64 = Buffer.from('Fix the bug').toString('base64');
+    expect(result).toBe(
+      `OX_PROMPT="$(echo '${b64}' | base64 -d)"; opencode --prompt "$OX_PROMPT"`,
+    );
+  });
+
+  test('wraps detached opencode with positional arg (not --prompt)', () => {
+    const cmd = 'opencode run';
+    const result = wrapWithPrompt(cmd, 'opencode', 'Add tests');
+    const b64 = Buffer.from('Add tests').toString('base64');
+    expect(result).toBe(
+      `OX_PROMPT="$(echo '${b64}' | base64 -d)"; opencode run "$OX_PROMPT"`,
+    );
+  });
+
+  test('prompt with special shell characters is base64 encoded', () => {
+    const prompt = 'Fix the "bug" && rm -rf / | echo $HOME';
+    const cmd = 'claude -p --dangerously-skip-permissions';
+    const result = wrapWithPrompt(cmd, 'claude', prompt);
+    const b64 = Buffer.from(prompt).toString('base64');
+    // The prompt is safely base64-encoded, not inlined raw
+    expect(result).toContain(`echo '${b64}'`);
+    expect(result).not.toContain('rm -rf');
+  });
+
+  test('wraps continue-detached claude with OX_PROMPT variable', () => {
+    const cmd = 'claude -c -p --dangerously-skip-permissions';
+    const result = wrapWithPrompt(cmd, 'claude', 'Now fix the tests');
+    const b64 = Buffer.from('Now fix the tests').toString('base64');
+    expect(result).toBe(
+      `OX_PROMPT="$(echo '${b64}' | base64 -d)"; claude -c -p --dangerously-skip-permissions "$OX_PROMPT"`,
+    );
+  });
+
+  test('wraps continue-detached opencode with OX_PROMPT variable', () => {
+    const cmd = 'opencode run -c';
+    const result = wrapWithPrompt(cmd, 'opencode', 'Now fix the tests');
+    const b64 = Buffer.from('Now fix the tests').toString('base64');
+    expect(result).toBe(
+      `OX_PROMPT="$(echo '${b64}' | base64 -d)"; opencode run -c "$OX_PROMPT"`,
+    );
   });
 });

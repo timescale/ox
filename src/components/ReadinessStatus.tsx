@@ -16,15 +16,23 @@ export interface ReadinessStatusProps {
 function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
   const { theme } = useTheme();
   const dockerRunning = useReadinessStore((s) => s.dockerRunning);
-  const sandboxImage = useReadinessStore((s) => s.sandboxImage);
-  const pullLayers = useReadinessStore((s) => s.pullLayers);
+  const sandboxBaseImage = useReadinessStore((s) => s.sandboxBaseImage);
+  const basePullLayers = useReadinessStore((s) => s.basePullLayers);
+  const sandboxAgentImage = useReadinessStore((s) => s.sandboxAgentImage);
+  const agentImageAgent = useReadinessStore((s) => s.agentImageAgent);
   const claudeAuth = useReadinessStore((s) => s.claudeAuth);
   const opencodeAuth = useReadinessStore((s) => s.opencodeAuth);
+  const codexAuth = useReadinessStore((s) => s.codexAuth);
   const ghAuth = useReadinessStore((s) => s.ghAuth);
   const error = useReadinessStore((s) => s.error);
 
   // Error state
-  if (error && (dockerRunning === 'not-running' || sandboxImage === 'error')) {
+  if (
+    error &&
+    (dockerRunning === 'not-running' ||
+      sandboxBaseImage === 'error' ||
+      sandboxAgentImage === 'error')
+  ) {
     return (
       <text fg={theme.error}>
         {'\u2717 '} {error}
@@ -42,12 +50,12 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
     );
   }
 
-  // Image pulling
-  if (sandboxImage === 'pulling') {
-    const done = pullLayers.filter(
+  // Base image pulling
+  if (sandboxBaseImage === 'pulling') {
+    const done = basePullLayers.filter(
       (l) => l.state === 'complete' || l.state === 'exists',
     ).length;
-    const total = pullLayers.length;
+    const total = basePullLayers.length;
     const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
     return (
       <text fg={theme.warning}>
@@ -57,8 +65,8 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
     );
   }
 
-  // Image checking
-  if (sandboxImage === 'checking') {
+  // Base image checking
+  if (sandboxBaseImage === 'checking') {
     return (
       <text fg={theme.textMuted}>
         {'\u27F3 '} Checking sandbox image
@@ -67,8 +75,34 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
     );
   }
 
+  // Agent image building
+  if (sandboxAgentImage === 'building') {
+    const agentName = agentImageAgent ?? 'agent';
+    return (
+      <text fg={theme.warning}>
+        {'\u27F3 '} Building {agentName} agent image
+        <Dots />
+      </text>
+    );
+  }
+
+  // Agent image checking
+  if (sandboxAgentImage === 'checking') {
+    return (
+      <text fg={theme.textMuted}>
+        {'\u27F3 '} Checking agent image
+        <Dots />
+      </text>
+    );
+  }
+
   // Credential checking (in progress)
-  const agentAuth = agent === 'claude' ? claudeAuth : opencodeAuth;
+  const agentAuth =
+    agent === 'claude'
+      ? claudeAuth
+      : agent === 'codex'
+        ? codexAuth
+        : opencodeAuth;
   if (agentAuth === 'checking' || ghAuth === 'checking') {
     return (
       <text fg={theme.textMuted}>
@@ -84,7 +118,8 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
     warnings.push('GitHub auth needed');
   }
   if (agentAuth === 'invalid') {
-    const agentName = agent === 'claude' ? 'Claude' : 'OpenCode';
+    const agentName =
+      agent === 'claude' ? 'Claude' : agent === 'codex' ? 'Codex' : 'OpenCode';
     warnings.push(`${agentName} auth needed`);
   }
   if (warnings.length > 0) {

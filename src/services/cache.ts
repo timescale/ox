@@ -1,5 +1,6 @@
 import type {
   ClaudeCredentialsJson,
+  CodexAuthJson,
   OpencodeAuthJson,
 } from '../types/agentConfig';
 
@@ -7,6 +8,7 @@ interface CacheItems {
   claudeCredentialsJson: ClaudeCredentialsJson | null;
   claudeApiKey: string | null;
   opencodeAuthJson: OpencodeAuthJson;
+  codexAuthJson: CodexAuthJson | null;
 }
 
 interface CacheRecord<K extends keyof CacheItems = keyof CacheItems> {

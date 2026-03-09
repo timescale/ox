@@ -14,9 +14,14 @@ import { FilterableSelector } from '../components/FilterableSelector';
 import { GhAuth } from '../components/GhAuth';
 import { Loading } from '../components/Loading';
 import { Selector } from '../components/Selector';
-import { AGENT_SELECT_OPTIONS, useAgentModels } from '../services/agents';
+import {
+  AGENT_INFO_MAP,
+  AGENT_SELECT_OPTIONS,
+  useAgentModels,
+} from '../services/agents';
 import { resetAnalyticsState } from '../services/analytics';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
+import { checkCodexCredentials, ensureCodexAuth } from '../services/codex';
 import {
   type AgentType,
   CONFIG_KEYS,
@@ -172,10 +177,18 @@ export function ConfigWizard({
     let cancelled = false;
 
     const checkAuth = async () => {
-      const isValid =
-        config.agent === 'claude'
-          ? await checkClaudeCredentials(config.model)
-          : await checkOpencodeCredentials(config.model);
+      let isValid: boolean;
+      switch (config.agent) {
+        case 'claude':
+          isValid = await checkClaudeCredentials(config.model);
+          break;
+        case 'codex':
+          isValid = await checkCodexCredentials();
+          break;
+        default:
+          isValid = await checkOpencodeCredentials(config.model);
+          break;
+      }
 
       if (cancelled) return;
 
@@ -594,7 +607,9 @@ export function ConfigWizard({
 
   // ---- Step 5: Agent Auth Check ----
   if (step === 'agent-auth-check') {
-    const agentName = config?.agent === 'claude' ? 'Claude' : 'Opencode';
+    const agentName = config?.agent
+      ? AGENT_INFO_MAP[config.agent].name
+      : 'Agent';
     return (
       <Loading
         title={`Step ${stepNumber('agent-auth-check')}/${steps.length}: ${agentName} Authentication`}
@@ -666,10 +681,18 @@ export async function configAction(): Promise<void> {
     await destroy();
 
     if (result.type === 'needs-agent-auth') {
-      const authResult =
-        result.agent === 'claude'
-          ? await ensureClaudeAuth()
-          : await ensureOpencodeAuth();
+      let authResult: boolean;
+      switch (result.agent) {
+        case 'claude':
+          authResult = await ensureClaudeAuth(result.config.model);
+          break;
+        case 'codex':
+          authResult = await ensureCodexAuth(result.config.model);
+          break;
+        default:
+          authResult = await ensureOpencodeAuth(result.config.model);
+          break;
+      }
       if (!authResult) {
         console.error(`\nError: ${result.agent} login failed`);
         process.exit(1);

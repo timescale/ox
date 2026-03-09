@@ -7,6 +7,19 @@ import { join, resolve } from 'node:path';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
 import packageJson from '../../package.json' with { type: 'json' };
+// Import agent install scripts as text - embedded in the binary
+import INSTALL_CLAUDE from '../../sandbox/agents/install-claude.sh' with {
+  type: 'text',
+};
+import INSTALL_CODEX from '../../sandbox/agents/install-codex.sh' with {
+  type: 'text',
+};
+import INSTALL_OPENCODE from '../../sandbox/agents/install-opencode.sh' with {
+  type: 'text',
+};
+import INSTALL_TIGER from '../../sandbox/agents/install-tiger.sh' with {
+  type: 'text',
+};
 // Import both Dockerfiles as text - Bun's bundler embeds these in the binary
 import FULL_DOCKERFILE from '../../sandbox/full.Dockerfile' with {
   type: 'text',
@@ -24,8 +37,9 @@ import {
   type ShellError,
   shellEscape,
 } from '../utils/shell.ts';
-import { buildAgentCommand } from './agentCommand';
-import { getClaudeConfigFiles } from './claude';
+import { buildAgentCommand, wrapWithPrompt } from './agentCommand';
+import { getClaudeConfigFiles, hasValidClaudeFileCredentials } from './claude';
+import { getCodexConfigFiles, hasValidCodexFileCredentials } from './codex';
 import {
   type AgentType,
   type OxConfig,
@@ -33,22 +47,16 @@ import {
   readConfig,
   userConfigDir,
 } from './config';
-import { CONTAINER_HOME } from './dockerFiles';
+import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
 import { getGhConfigFiles } from './gh';
 import type { RepoInfo } from './git';
 import { log } from './logger';
-import { getOpencodeConfigFiles } from './opencode';
+import {
+  getOpencodeConfigFiles,
+  hasValidOpencodeFileCredentials,
+} from './opencode';
 import { runInDocker, type VirtualFile } from './runInDocker';
 import type { AttachOptions, SubmitMode } from './sandbox/types';
-
-/**
- * Escape a string for safe use in shell commands using base64 encoding.
- * This approach avoids any shell interpretation of special characters
- * by encoding the entire string and decoding it at runtime.
- */
-function base64Encode(text: string): string {
-  return Buffer.from(text, 'utf8').toString('base64');
-}
 
 export const toVolumeArgs = (volumes: string[]): string[] =>
   volumes.flatMap((v) => ['-v', v]);
@@ -56,12 +64,13 @@ export const toVolumeArgs = (volumes: string[]): string[] =>
 export const getCredentialFiles = async (
   homeDir = CONTAINER_HOME,
 ): Promise<VirtualFile[]> => {
-  const [claudeFiles, opencodeFiles, ghFiles] = await Promise.all([
+  const [claudeFiles, opencodeFiles, codexFiles, ghFiles] = await Promise.all([
     getClaudeConfigFiles(),
     getOpencodeConfigFiles(),
+    getCodexConfigFiles(),
     getGhConfigFiles(),
   ]);
-  const files = [...claudeFiles, ...opencodeFiles, ...ghFiles];
+  const files = [...claudeFiles, ...opencodeFiles, ...codexFiles, ...ghFiles];
   // Rewrite paths if a different home directory was requested
   if (homeDir !== CONTAINER_HOME) {
     return files.map((f) => ({
@@ -193,12 +202,18 @@ async function cleanupOverlayDirs(containerName: string): Promise<void> {
  * `tmux attach`, keeping the container alive.
  *
  * Non-interactive (async/detached) sessions skip tmux and exec directly.
+ *
+ * Prompt injection is delegated to {@link wrapWithPrompt} which uses a
+ * shell variable (`$OX_PROMPT`) so stdin stays connected to the terminal.
  */
 const escapePrompt = (
   cmd: string,
+  agent: AgentType,
   prompt?: string | null,
   interactive?: boolean,
 ): string => {
+  const wrapped = wrapWithPrompt(cmd, agent, prompt);
+
   if (interactive) {
     // Wrap in tmux: start a detached session running the agent, then attach.
     // PID 1 becomes `tmux attach`, keeping the container alive while the
@@ -207,19 +222,20 @@ const escapePrompt = (
     // (matches the Deno cloud sandbox's tmux invocation).
     // The inner command is a single string passed to tmux (which runs it via
     // sh -c), so semicolons work fine as separators.
-    const inner = prompt
-      ? `OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"; ${cmd} "$OX_PROMPT"`
-      : cmd;
-    return `tmux -u new-session -d -s main ${shellEscape(inner)}\nexec tmux -u attach -t main`;
+    return `tmux -u new-session -d -s main ${shellEscape(wrapped)}\nexec tmux -u attach -t main`;
   }
 
   // Non-interactive (async/detached): exec the agent directly.
-  // The variable assignment MUST be on its own line so `exec` applies to the
-  // agent command, not to the assignment.
-  if (prompt) {
-    return `OX_PROMPT="$(echo '${base64Encode(prompt)}' | base64 -d)"\nexec ${cmd} "$OX_PROMPT"`;
+  // When there's a prompt, wrapWithPrompt produces a single line:
+  //   OX_PROMPT="$(...)"; cmd "$OX_PROMPT"
+  // We need the variable assignment on its own line so `exec` applies to
+  // the agent command, not to the assignment.  Replace the first "; "
+  // (which separates the assignment from the command) with a newline+exec.
+  if (prompt && prompt.trim().length > 0) {
+    const sep = wrapped.indexOf('; ');
+    return `${wrapped.slice(0, sep)}\nexec ${wrapped.slice(sep + 2)}`;
   }
-  return `exec ${cmd}`;
+  return `exec ${wrapped}`;
 };
 
 // ============================================================================
@@ -273,11 +289,127 @@ type DockerfileVariant = 'slim' | 'full';
 export function computeDockerfileHash(content: string): string {
   const hasher = new Bun.CryptoHasher('md5');
   hasher.update(content);
-  // Include pinned tool versions so a version bump produces a new image tag
-  hasher.update(
-    `claude=${toolVersions.claudeCode},opencode=${toolVersions.opencode}`,
-  );
+  // Base image hash only includes the Dockerfile content — agent versions
+  // are encoded in the overlay image tag, not the base.
   return hasher.digest('hex').slice(0, 12);
+}
+
+// ============================================================================
+// Agent Install Scripts & Overlay Images
+// ============================================================================
+
+/** Map of agent type to embedded install script content */
+const AGENT_INSTALL_SCRIPTS: Record<string, string> = {
+  claude: INSTALL_CLAUDE,
+  opencode: INSTALL_OPENCODE,
+  codex: INSTALL_CODEX,
+  tiger: INSTALL_TIGER,
+};
+
+/** Get the pinned version for an agent from sandbox/versions.json */
+export function getAgentVersion(agent: AgentType): string {
+  switch (agent) {
+    case 'claude':
+      return toolVersions.claudeCode;
+    case 'opencode':
+      return toolVersions.opencode;
+    case 'codex':
+      return toolVersions.codex;
+  }
+}
+
+/** Get the embedded install script content for an agent */
+export function getAgentInstallScript(agent: AgentType | 'tiger'): string {
+  const script = AGENT_INSTALL_SCRIPTS[agent];
+  if (!script) {
+    throw new Error(`No install script for agent: ${agent}`);
+  }
+  return script;
+}
+
+/**
+ * Compute the overlay image tag for a given base image and agent.
+ * Format: <baseImage>-<agent>-<agentVersion>
+ */
+export function getAgentOverlayTag(
+  baseImage: string,
+  agent: AgentType,
+): string {
+  const version = getAgentVersion(agent);
+  return `${baseImage}-${agent}-${version}`;
+}
+
+/**
+ * Ensure an agent-specific overlay image exists on top of the base image.
+ *
+ * The overlay is created by:
+ * 1. Running a temporary container from the base image
+ * 2. Writing the agent + tiger install scripts into it
+ * 3. Executing them
+ * 4. Committing the container as a new image
+ *
+ * The overlay image tag encodes the base hash, agent name, and version
+ * so that any change to the base or agent version triggers a rebuild.
+ */
+export async function ensureAgentOverlay(
+  baseImage: string,
+  agent: AgentType,
+  options?: { onProgress?: (progress: ImageBuildProgress) => void },
+): Promise<string> {
+  const overlayTag = getAgentOverlayTag(baseImage, agent);
+
+  // Check if overlay already exists locally
+  if (await imageExists(overlayTag)) {
+    log.debug({ overlayTag, agent }, 'Agent overlay image already exists');
+    return overlayTag;
+  }
+
+  log.info({ overlayTag, baseImage, agent }, 'Building agent overlay image');
+  options?.onProgress?.({
+    type: 'building',
+    message: `Installing ${agent} agent`,
+  });
+
+  const version = getAgentVersion(agent);
+  const containerName = `ox-overlay-${agent}-${nanoid(6).toLowerCase()}`;
+
+  try {
+    // 1. Start a temporary container from the base image
+    await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+
+    // 2. Write install scripts into the container
+    const agentScript = getAgentInstallScript(agent);
+    const tigerScript = getAgentInstallScript('tiger');
+    await writeFileToContainer(
+      containerName,
+      '/tmp/install-agent.sh',
+      agentScript,
+    );
+    await writeFileToContainer(
+      containerName,
+      '/tmp/install-tiger.sh',
+      tigerScript,
+    );
+
+    // 3. Execute install scripts as the ox user
+    await $`docker exec ${containerName} bash /tmp/install-agent.sh ${version}`.quiet();
+    await $`docker exec ${containerName} bash /tmp/install-tiger.sh`.quiet();
+
+    // 4. Clean up temp files and commit
+    await $`docker exec ${containerName} rm -f /tmp/install-agent.sh /tmp/install-tiger.sh`.quiet();
+    await $`docker commit ${containerName} ${overlayTag}`.quiet();
+
+    log.info({ overlayTag }, 'Agent overlay image built successfully');
+    return overlayTag;
+  } catch (err) {
+    log.error({ err, overlayTag, agent }, 'Failed to build agent overlay');
+    throw new Error(
+      `Failed to build ${agent} overlay image: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    // Always clean up the temporary container
+    await $`docker rm -f ${containerName}`.quiet().nothrow();
+  }
 }
 
 export function getGhcrImageTags(variant: DockerfileVariant): {
@@ -359,6 +491,11 @@ export interface SandboxImageConfig {
  * callers (runInDocker, ghAuth, etc.) use the image that is actually present.
  */
 let ensuredImageOverride: string | null = null;
+
+/** Reset the cached image override. Exported for testing only. */
+export function resetEnsuredImageOverride(): void {
+  ensuredImageOverride = null;
+}
 
 /**
  * Resolve which Docker image to use based on configuration.
@@ -547,7 +684,7 @@ export const ensureDockerSandbox = async (): Promise<void> => {
   if (finalState.dockerRunning !== 'running') {
     throw new Error('Docker is not running');
   }
-  if (finalState.sandboxImage !== 'ready') {
+  if (finalState.sandboxBaseImage !== 'ready') {
     throw new Error('Docker sandbox image is not available');
   }
 };
@@ -671,10 +808,6 @@ async function buildDockerImage(
       'docker',
       'build',
       '-q',
-      '--build-arg',
-      `CLAUDE_CODE_VERSION=${toolVersions.claudeCode}`,
-      '--build-arg',
-      `OPENCODE_VERSION=${toolVersions.opencode}`,
       ...(cacheFromImage ? ['--cache-from', cacheFromImage] : []),
       '-t',
       imageName,
@@ -884,6 +1017,18 @@ export async function ensureDockerImage(
   return resolved;
 }
 
+/**
+ * Ensure the base Docker image + agent overlay image are both available.
+ * Returns the agent-specific overlay image tag, ready to use for containers.
+ */
+export async function ensureDockerImageForAgent(
+  agent: AgentType,
+  options: EnsureDockerImageOptions = {},
+): Promise<string> {
+  const baseImage = await ensureDockerImage(options);
+  return ensureAgentOverlay(baseImage, agent, options);
+}
+
 // ============================================================================
 // Container Options
 // ============================================================================
@@ -905,6 +1050,8 @@ export interface StartContainerOptions {
   agentArgs?: string[];
   /** How the user submitted the session (async, interactive, plan) */
   submitMode?: SubmitMode;
+  /** Pre-resolved Docker image to use (e.g., agent overlay image). If not set, uses the default resolved image. */
+  dockerImage?: string;
 }
 
 // ============================================================================
@@ -1397,6 +1544,8 @@ export interface ResumeSessionOptions {
   agentArgs?: string[];
   /** How the user submitted the session (async, interactive, plan) */
   submitMode?: SubmitMode;
+  /** Pre-resolved Docker image to use for the resumed container. If not set, commits from the stopped container. */
+  dockerImage?: string;
 }
 
 export async function resumeSession(
@@ -1453,6 +1602,13 @@ export async function resumeSession(
   for (const envVar of container.Config.Env ?? []) {
     envArgs.push('-e', envVar);
   }
+  // Ensure terminal env vars are current (may not have been in the original container)
+  for (const key of ['TERM', 'COLORTERM']) {
+    const value = process.env[key];
+    if (value) {
+      envArgs.push('-e', `${key}=${value}`);
+    }
+  }
 
   // Read config for overlay mounts and init script
   const config = await readConfig();
@@ -1502,7 +1658,7 @@ exec bash
 set -e
 cd /work/app
 ${config.initScript || ''}
-${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached' : 'interactive', model, agentArgs: options.agentArgs, continue: true }), prompt, mode === 'interactive')}
+${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached' : 'interactive', model, agentArgs: options.agentArgs, continue: true }), agent, prompt, mode === 'interactive')}
 `.trim();
 
   const oxLabels = buildOxLabels({
@@ -1633,6 +1789,7 @@ export async function startContainer(
     isGitRepo = true,
     agentArgs,
     submitMode,
+    dockerImage,
   } = options;
 
   const oxEnvPath = '.ox/.env';
@@ -1649,10 +1806,41 @@ export async function startContainer(
   // Order matters for precedence: later values override earlier ones
   // Precedence (lowest to highest): hostEnvArgs -> --env-file -> envArgs
 
-  // Pass through API keys from host environment (lowest precedence)
+  // Pass through API keys from host environment (lowest precedence).
+  // Only pass env-var keys that the active agent actually needs, and only
+  // when valid file-based credentials aren't already present. Having both
+  // an env-var key and file-based OAuth tokens causes some agents (notably
+  // codex) to attempt conflicting auth flows, leading to noisy
+  // "refresh_token_reused" errors.
   const hostEnvArgs: string[] = [];
-  const apiKeysToPassthrough = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
-  for (const key of apiKeysToPassthrough) {
+  const pushEnv = (key: string) => {
+    const value = process.env[key];
+    if (value) {
+      hostEnvArgs.push('-e', `${key}=${value}`);
+    }
+  };
+  switch (agent) {
+    case 'claude':
+      if (!(await hasValidClaudeFileCredentials())) {
+        pushEnv('ANTHROPIC_API_KEY');
+      }
+      break;
+    case 'codex':
+      if (!(await hasValidCodexFileCredentials())) {
+        pushEnv('OPENAI_API_KEY');
+        pushEnv('CODEX_API_KEY');
+      }
+      break;
+    case 'opencode':
+      if (!(await hasValidOpencodeFileCredentials())) {
+        pushEnv('ANTHROPIC_API_KEY');
+        pushEnv('OPENAI_API_KEY');
+      }
+      break;
+  }
+
+  // Pass through terminal environment for proper color rendering
+  for (const key of ['TERM', 'COLORTERM']) {
     const value = process.env[key];
     if (value) {
       hostEnvArgs.push('-e', `${key}=${value}`);
@@ -1690,20 +1878,15 @@ export async function startContainer(
   const volumeArgs = toVolumeArgs(volumes);
 
   // Build the agent command based on the selected agent type, model, and mode.
-  // Prompt is NOT passed to the builder — Docker injects it via escapePrompt()
-  // which appends it as a positional arg (exec <cmd> "$OX_PROMPT").
+  // Prompt injection is handled by escapePrompt() → wrapWithPrompt(), which
+  // uses a shell variable ($OX_PROMPT) so stdin stays free for the TUI.
   const hasPrompt = prompt.trim().length > 0;
-  let agentCommand = buildAgentCommand({
+  const agentCommand = buildAgentCommand({
     agent,
     mode: interactive ? 'interactive' : 'detached',
     model,
     agentArgs,
   });
-  // For interactive opencode with a prompt, append --prompt so that
-  // escapePrompt() produces: exec opencode --prompt "$OX_PROMPT"
-  if (agent === 'opencode' && interactive && hasPrompt) {
-    agentCommand += ' --prompt';
-  }
 
   // Only add PR instructions in async mode (detached) with a git repo
   const fullPrompt =
@@ -1731,7 +1914,7 @@ if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
   git switch -c "ox/${branchName}"
 fi
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt, interactive)}
+${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
     } else {
       // Mount mode outside a git repo - skip all git/gh operations
@@ -1739,7 +1922,7 @@ ${escapePrompt(agentCommand, fullPrompt, interactive)}
 set -e
 cd /work/app
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt, interactive)}
+${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
     }
   } else {
@@ -1755,7 +1938,7 @@ gh repo clone ${repoInfo.fullName} app
 cd app
 git switch -c "ox/${branchName}"
 ${config.initScript || ''}
-${escapePrompt(agentCommand, fullPrompt, interactive)}
+${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
   }
 
@@ -1784,6 +1967,7 @@ ${escapePrompt(agentCommand, fullPrompt, interactive)}
       ],
       cmdName: 'bash',
       cmdArgs: ['-c', startupScript],
+      dockerImage,
       // Always start detached — the caller uses provider.attach() for
       // interactive sessions.  allocateTty ensures the container has a
       // TTY so `docker attach` works correctly later.
@@ -1829,10 +2013,20 @@ export async function startShellContainer(
   const shellSuffix = nanoid(6).toLowerCase();
   const containerName = `ox-shell-${shellSuffix}`;
 
-  // Pass through API keys from host environment
+  // Pass through API keys and terminal env from host environment
   const hostEnvArgs: string[] = [];
-  const apiKeysToPassthrough = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
-  for (const key of apiKeysToPassthrough) {
+  const apiKeysToPassthrough2 = [
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'CODEX_API_KEY',
+  ];
+  for (const key of apiKeysToPassthrough2) {
+    const value = process.env[key];
+    if (value) {
+      hostEnvArgs.push('-e', `${key}=${value}`);
+    }
+  }
+  for (const key of ['TERM', 'COLORTERM']) {
     const value = process.env[key];
     if (value) {
       hostEnvArgs.push('-e', `${key}=${value}`);

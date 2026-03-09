@@ -137,7 +137,10 @@ export class DenoApiClient {
         // The error may be an ErrorEvent (Bun WebSocket) or a regular Error
         const msg = (err as { message?: string })?.message ?? String(err);
         const isTransient =
-          msg.includes('Expected 101') || msg.includes('WebSocket');
+          msg.includes('Expected 101') ||
+          msg.includes('WebSocket') ||
+          msg.includes('checkServerIdentity') ||
+          msg.includes("Cannot destructure property 'subject'");
         if (isTransient && attempt < maxAttempts) {
           const delay = attempt * 2_000;
           log.warn(
@@ -222,7 +225,7 @@ export class DenoApiClient {
     const resp = await fetch(url, {
       method: 'DELETE',
       headers,
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!resp.ok) {
@@ -234,6 +237,99 @@ export class DenoApiClient {
       throw new Error(`Failed to kill sandbox ${id}: ${resp.status} ${body}`);
     }
     log.debug({ id }, 'Sandbox killed successfully');
+  }
+
+  /**
+   * Check if a sandbox still exists by ID.
+   * Returns true if the sandbox is still listed, false if it's gone.
+   */
+  async isSandboxAlive(id: string): Promise<boolean> {
+    if (!id) return false;
+    try {
+      const match = /^sbx_([a-z]+)_/.exec(id);
+      const region = match?.[1] ?? 'ord';
+      const baseDomain =
+        process.env.DENO_SANDBOX_BASE_DOMAIN ?? 'sandbox-api.deno.net';
+      const url = `https://${region}.${baseDomain}/api/v3/sandbox/${id}`;
+
+      const resp = await fetch(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${this.token}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      // 404 means sandbox is gone
+      return resp.ok;
+    } catch {
+      // On error (timeout, network), assume still alive to be safe
+      return true;
+    }
+  }
+
+  /**
+   * Kill a sandbox and wait until it's fully gone (volume detached).
+   *
+   * The Deno platform may take time to fully shut down a sandbox after
+   * the DELETE request, especially when Docker is running inside it.
+   * This method polls to confirm the sandbox is actually dead before
+   * returning, which is required before snapshotting its volume.
+   *
+   * @param id Sandbox ID to kill
+   * @param maxWaitMs Maximum time to wait for the sandbox to disappear (default 60s)
+   * @throws if the sandbox is still alive after maxWaitMs
+   */
+  async killAndWaitForDetach(id: string, maxWaitMs = 60_000): Promise<void> {
+    if (!id) {
+      log.warn('killAndWaitForDetach called with empty ID — skipping');
+      return;
+    }
+
+    // Attempt the kill (may time out, but the platform may still process it)
+    try {
+      await this.killSandbox(id);
+    } catch (err) {
+      log.warn(
+        { err, sandboxId: id },
+        'Kill request failed — will poll for sandbox to disappear',
+      );
+    }
+
+    // Poll until the sandbox is gone
+    const startTime = Date.now();
+    const pollIntervalMs = 3_000;
+    let attempts = 0;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      attempts++;
+      const alive = await this.isSandboxAlive(id);
+      if (!alive) {
+        log.debug(
+          { sandboxId: id, attempts, elapsedMs: Date.now() - startTime },
+          'Sandbox confirmed dead',
+        );
+        return;
+      }
+
+      log.debug(
+        { sandboxId: id, attempts, elapsedMs: Date.now() - startTime },
+        'Sandbox still alive — waiting',
+      );
+
+      // If the first poll shows it's still alive, retry the kill in case
+      // the first attempt timed out before the platform received it
+      if (attempts === 2) {
+        try {
+          await this.killSandbox(id);
+        } catch {
+          // ignore — we're polling anyway
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+
+    throw new Error(
+      `Sandbox ${id} is still alive after ${maxWaitMs}ms — cannot snapshot its volume`,
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -297,6 +393,53 @@ export class DenoApiClient {
       bootable: snap.isBootable,
       volume: { id: snap.volume.id, slug: snap.volume.slug },
     };
+  }
+
+  /**
+   * Snapshot a volume, retrying on VOLUME_IS_MOUNTED errors.
+   *
+   * The Deno platform has eventual consistency between sandbox deletion and
+   * volume mount state — a sandbox can appear dead (404 on GET/DELETE) while
+   * the volume is still considered mounted. This method retries with backoff
+   * until the volume is unmounted and the snapshot succeeds.
+   *
+   * @param volumeIdOrSlug Volume to snapshot
+   * @param init Snapshot options (slug, etc.)
+   * @param maxWaitMs Maximum time to retry (default 90s)
+   */
+  async snapshotVolumeWithRetry(
+    volumeIdOrSlug: string,
+    init: SnapshotInit,
+    maxWaitMs = 90_000,
+  ): Promise<DenoSnapshot> {
+    const startTime = Date.now();
+    let attempt = 0;
+    let lastError: unknown;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      attempt++;
+      try {
+        return await this.snapshotVolume(volumeIdOrSlug, init);
+      } catch (err) {
+        lastError = err;
+        const code = (err as { code?: string })?.code;
+        if (code !== 'VOLUME_IS_MOUNTED') {
+          // Not a transient mount issue — fail immediately
+          throw err;
+        }
+
+        const elapsed = Date.now() - startTime;
+        const delay = Math.min(5_000, 2_000 + attempt * 1_000);
+        log.debug(
+          { volumeIdOrSlug, attempt, elapsed, delay },
+          'Volume still mounted — retrying snapshot',
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    // Exhausted retries — throw the last error
+    throw lastError;
   }
 
   // --------------------------------------------------------------------------

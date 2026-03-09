@@ -649,6 +649,7 @@ export function ResourcesList() {
           <ResourceDetailPanel
             key={selectedResource.id}
             resource={selectedResource}
+            allResources={resources}
             onDelete={(r) => setConfirmAction({ type: 'delete', resource: r })}
             cleanupCount={cleanupCount}
             onCleanup={() => {
