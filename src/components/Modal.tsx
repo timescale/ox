@@ -36,6 +36,7 @@ export function Modal({
       alignItems="center"
       justifyContent="center"
       backgroundColor={RGBA.fromInts(0, 0, 0, 150)}
+      onMouseDown={onClose}
     >
       <box
         padding={1}
@@ -43,6 +44,7 @@ export function Modal({
         minWidth={minWidth}
         maxWidth={maxWidth}
         backgroundColor={theme.backgroundPanel}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <box
           marginLeft={2}
@@ -58,7 +60,11 @@ export function Modal({
           >
             {title}
           </text>
-          {onClose ? <text fg={theme.textMuted}>esc</text> : null}
+          {onClose ? (
+            <text fg={theme.textMuted} onMouseDown={onClose}>
+              esc
+            </text>
+          ) : null}
         </box>
         {children}
       </box>

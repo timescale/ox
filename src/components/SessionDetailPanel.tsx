@@ -548,11 +548,11 @@ export function SessionDetailPanel({
         </box>
 
         {/* Action buttons */}
-        <box flexDirection="row" flexWrap="wrap" gap={1}>
+        <box flexDirection="row-reverse" flexWrap="wrap" columnGap={1}>
           {actionButtons.map((btn) => (
             <ActionButton key={btn.label} {...btn} />
           ))}
-          <box flexGrow={1} />
+          <box flexGrow={1} height={0} />
           {showBack && (
             <ActionButton
               label="back"
@@ -560,6 +560,12 @@ export function SessionDetailPanel({
               onPress={() => useRouterStore.getState().goToList()}
             />
           )}
+          <ActionButton
+            label="new"
+            keybind="^n"
+            color={theme.textMuted}
+            onPress={() => useRouterStore.getState().goToNewPrompt()}
+          />
           <ActionButton
             label="commands"
             keybind="^p"

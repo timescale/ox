@@ -3,6 +3,7 @@ import { useWindowSize } from '../hooks/useWindowSize.ts';
 import { useCommandStore } from '../services/commands.tsx';
 import type { SandboxResource } from '../services/sandbox/resources.ts';
 import { formatSize } from '../services/sessionDisplay.ts';
+import { useRouterStore } from '../stores/routerStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { ActionButton } from './ActionButton.tsx';
 
@@ -181,7 +182,12 @@ export function ResourceDetailPanel({
       )}
 
       {/* Action buttons */}
-      <box flexDirection="row" flexWrap="wrap" gap={1} marginTop={1}>
+      <box
+        flexDirection="row-reverse"
+        flexWrap="wrap"
+        columnGap={1}
+        marginTop={1}
+      >
         <ActionButton
           label="delete"
           keybind="^d"
@@ -196,7 +202,12 @@ export function ResourceDetailPanel({
             onPress={onCleanup}
           />
         )}
-        <box flexGrow={1} />
+        <box flexGrow={1} height={0} />
+        <ActionButton
+          label="back"
+          color={theme.textMuted}
+          onPress={() => useRouterStore.getState().goToList()}
+        />
         <ActionButton
           label="commands"
           keybind="^p"

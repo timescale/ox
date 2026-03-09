@@ -30,9 +30,9 @@ import { usePromptSettingsStore } from '../stores/promptSettingsStore.ts';
 import { useReadinessStore } from '../stores/readinessStore.ts';
 import { useRouterStore } from '../stores/routerStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
+import { ActionButton } from './ActionButton.tsx';
 import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
 import { FilterableSelector } from './FilterableSelector';
-import { HotkeysBar } from './HotkeysBar';
 import { Modal } from './Modal';
 import { OxTitle } from './OxTitle';
 import { ReadinessStatus } from './ReadinessStatus.tsx';
@@ -139,6 +139,8 @@ export function PromptScreen({
   const { theme } = useTheme();
   const textareaRef = useRef<TextareaRenderable>(null);
   const inputAnchorRef = useRef<BoxRenderable | null>(null);
+
+  const goToList = useRouterStore((s) => s.goToList);
 
   // ---- Persisted settings from Zustand store ----
   // When resuming a session, the session's values override the store.
@@ -312,8 +314,42 @@ export function PromptScreen({
     }
   }, [resumeSession, agent, modelId, defaultAgent, setAgent, setModelId]);
 
+  // Toggle sandbox provider (extracted so click handler can reuse it)
+  const toggleProvider = useCallback(() => {
+    if (resumeSession) {
+      setToast({
+        message: 'Provider cannot be changed when resuming a session.',
+        type: 'warning',
+      });
+      return;
+    }
+    if (forceMountMode && sandboxProvider === 'docker') {
+      setToast({
+        message:
+          'Cloud sandboxes require a git remote. Add a remote or use Docker.',
+        type: 'warning',
+      });
+      return;
+    }
+    if (sandboxProvider === 'docker') {
+      if (mountMode && !forceMountMode) {
+        setMountMode(false);
+      }
+      setSandboxProvider('cloud');
+    } else {
+      setSandboxProvider('docker');
+    }
+  }, [
+    resumeSession,
+    forceMountMode,
+    sandboxProvider,
+    mountMode,
+    setSandboxProvider,
+  ]);
+
   // Suspend command keybind dispatch when sub-modals are open
   const suspend = useCommandStore((s) => s.suspend);
+  const showCommands = useCommandStore((s) => s.show);
   const isCmdPaletteOpen = useCommandStore((s) => s.isOpen);
   useEffect(() => {
     if (showModelSelector || showThemePicker) {
@@ -374,7 +410,7 @@ export function PromptScreen({
         description: 'Browse and manage existing sessions',
         category: 'Navigation',
         keybind: { key: 'l', ctrl: true },
-        onSelect: () => useRouterStore.getState().goToList(),
+        onSelect: goToList,
       },
       {
         id: 'mount.toggle',
@@ -414,32 +450,7 @@ export function PromptScreen({
         hidden: !!resumeSession,
         enabled:
           !resumeSession && !(forceMountMode && sandboxProvider === 'docker'),
-        onSelect: () => {
-          if (resumeSession) {
-            setToast({
-              message: 'Provider cannot be changed when resuming a session.',
-              type: 'warning',
-            });
-            return;
-          }
-          if (forceMountMode && sandboxProvider === 'docker') {
-            setToast({
-              message:
-                'Cloud sandboxes require a git remote. Add a remote or use Docker.',
-              type: 'warning',
-            });
-            return;
-          }
-          if (sandboxProvider === 'docker') {
-            // Switching to cloud — disable mount mode (not supported)
-            if (mountMode && !forceMountMode) {
-              setMountMode(false);
-            }
-            setSandboxProvider('cloud');
-          } else {
-            setSandboxProvider('docker');
-          }
-        },
+        onSelect: toggleProvider,
       },
       {
         id: 'navigate-resources',
@@ -469,6 +480,7 @@ export function PromptScreen({
       resumeSession,
       currentModels,
       switchAgent,
+      toggleProvider,
       mountMode,
       forceMountMode,
       mountDir,
@@ -544,7 +556,7 @@ export function PromptScreen({
           if (textareaRef.current) {
             textareaRef.current.clear();
           }
-          useRouterStore.getState().goToList();
+          goToList();
         },
       },
       {
@@ -734,6 +746,7 @@ export function PromptScreen({
       sandboxProvider,
       setSandboxProvider,
       setSubmitMode,
+      goToList,
     ],
   );
 
@@ -999,23 +1012,33 @@ export function PromptScreen({
 
               {/* Agent and model display row */}
               <box flexDirection="row" marginTop={1} height={1} gap={1}>
-                <text fg={agentInfo?.color}>{agentInfo?.name || agent}</text>
+                <text fg={agentInfo?.color} onMouseDown={() => switchAgent()}>
+                  {agentInfo?.name || agent}
+                </text>
                 {submitMode === 'async' ? (
                   <text fg={theme.success}>[async]</text>
                 ) : submitMode === 'plan' ? (
                   <text fg={theme.info}>[plan]</text>
                 ) : null}
-                {sandboxProvider === 'cloud' ? (
-                  <text fg={theme.accent}>[cloud]</text>
-                ) : mountMode ? (
-                  <text fg={theme.warning}>[mount]</text>
-                ) : null}
-                <text fg={model?.name ? theme.text : theme.textMuted}>
+                <text
+                  fg={model?.name ? theme.text : theme.textMuted}
+                  onMouseDown={() => {
+                    if (currentModels?.length) setShowModelSelector(true);
+                  }}
+                >
                   {model?.name || modelId || 'Loading...'}
                 </text>
-                {model?.description ? (
-                  <text fg={theme.textMuted}>{model.description}</text>
-                ) : null}
+                <box flexGrow={1} />
+                {sandboxProvider === 'cloud' ? (
+                  <text fg={theme.accent} onMouseDown={() => toggleProvider()}>
+                    cloud
+                  </text>
+                ) : (
+                  <text fg={theme.primary} onMouseDown={() => toggleProvider()}>
+                    docker
+                  </text>
+                )}
+                {mountMode ? <text fg={theme.warning}>[mount]</text> : null}
               </box>
             </box>
           </box>
@@ -1039,21 +1062,28 @@ export function PromptScreen({
               }}
             />
           </box>
+          <box flexDirection="row-reverse" flexWrap="wrap" columnGap={1}>
+            <ActionButton
+              disabled={showSlashCommands}
+              label="start"
+              color={theme.primary}
+              onPress={handleSubmit}
+            />
+            <box flexGrow={1} height={0} />
+            <ActionButton
+              label="sessions"
+              keybind="^l"
+              color={theme.textMuted}
+              onPress={goToList}
+            />
+            <ActionButton
+              label="commands"
+              keybind="^p"
+              color={theme.text}
+              onPress={showCommands}
+            />
+          </box>
           <ReadinessStatus agent={agent} />
-          <HotkeysBar
-            keyList={[
-              ['tab', 'agent'],
-              ...(resumeSession
-                ? []
-                : [['shift+tab', 'mode'] as [string, string]]),
-              ['ctrl+space', 'model'],
-              ...(resumeSession
-                ? []
-                : [['ctrl+e', 'provider'] as [string, string]]),
-              ['ctrl+l', 'sessions'],
-              ['ctrl+p', 'commands'],
-            ]}
-          />
         </box>
       </box>
       <box height={1} flexDirection="row" width="100%">

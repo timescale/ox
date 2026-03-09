@@ -7,6 +7,7 @@ export interface ActionButtonProps {
   color: string;
   onPress: () => void;
   focused?: boolean;
+  disabled?: boolean;
 }
 
 export function ActionButton({
@@ -15,28 +16,33 @@ export function ActionButton({
   color,
   onPress,
   focused,
+  disabled,
 }: ActionButtonProps) {
   const { theme } = useTheme();
   const [hovered, setHovered] = useState(false);
 
-  const highlighted = hovered || focused;
+  const highlighted = !disabled && (hovered || focused);
 
   return (
     <box
-      onMouseOver={() => setHovered(true)}
+      onMouseOver={disabled ? undefined : () => setHovered(true)}
       onMouseOut={() => setHovered(false)}
-      onMouseDown={onPress}
+      onMouseDown={disabled ? undefined : onPress}
       backgroundColor={highlighted ? color : undefined}
       border
       borderStyle="single"
-      borderColor={highlighted ? color : theme.border}
+      borderColor={
+        highlighted ? color : disabled ? theme.textMuted : theme.border
+      }
       paddingLeft={1}
       paddingRight={1}
       height={3}
       gap={2}
       flexDirection="row"
     >
-      <text fg={highlighted ? theme.background : color}>
+      <text
+        fg={highlighted ? theme.background : disabled ? theme.textMuted : color}
+      >
         {highlighted ? <strong>{label}</strong> : label}
       </text>
       {keybind ? (
