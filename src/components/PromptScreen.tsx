@@ -26,6 +26,7 @@ import type {
 } from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { usePromptHistoryStore } from '../stores/promptHistoryStore.ts';
+import { usePromptSettingsStore } from '../stores/promptSettingsStore.ts';
 import { useReadinessStore } from '../stores/readinessStore.ts';
 import { useRouterStore } from '../stores/routerStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
@@ -129,8 +130,6 @@ function findPreferredFallback(targetModels: readonly Model[]): string | null {
 export function PromptScreen({
   defaultAgent,
   defaultModel = null,
-  defaultSandboxProvider,
-  defaultSubmitMode,
   resumeSession,
   initialMountDir,
   forceMountMode = false,
@@ -140,31 +139,59 @@ export function PromptScreen({
   const { theme } = useTheme();
   const textareaRef = useRef<TextareaRenderable>(null);
   const inputAnchorRef = useRef<BoxRenderable | null>(null);
-  const [agent, setAgent] = useState<AgentType>(defaultAgent);
-  const [sandboxProvider, setSandboxProvider] = useState<SandboxProviderType>(
-    defaultSandboxProvider ?? 'docker',
+
+  // ---- Persisted settings from Zustand store ----
+  // When resuming a session, the session's values override the store.
+  // Setters are no-ops during resume so the store isn't mutated.
+  const storedAgent = usePromptSettingsStore((s) => s.agent);
+  const storedModelId = usePromptSettingsStore((s) => s.modelId);
+  const storedSandboxProvider = usePromptSettingsStore(
+    (s) => s.sandboxProvider,
   );
-  const [modelId, setModelId] = useState<string | null>(defaultModel);
-  const modelMem = useRef<Partial<Record<AgentType, string | null>>>({
-    [defaultAgent]: defaultModel,
-  });
-  // Track the last non-null model across any agent, used for cross-agent
-  // equivalent matching when models load asynchronously.
-  const lastModelRef = useRef<string | null>(defaultModel);
-  // Only remember non-null selections so the memo always holds the
-  // last *good* model per agent (null means "nothing chosen yet").
-  if (modelId) {
-    modelMem.current[agent] = modelId;
-    lastModelRef.current = modelId;
-  }
+  const storedSubmitMode = usePromptSettingsStore((s) => s.submitMode);
+
+  const agent = resumeSession?.agent ?? storedAgent;
+  const modelId = resumeSession?.model ?? storedModelId;
+  const sandboxProvider = resumeSession?.provider ?? storedSandboxProvider;
+  const submitMode = resumeSession?.submitMode ?? storedSubmitMode;
+
+  const storeSetAgent = usePromptSettingsStore((s) => s.setAgent);
+  const storeSetModelId = usePromptSettingsStore((s) => s.setModelId);
+  const storeSetSandboxProvider = usePromptSettingsStore(
+    (s) => s.setSandboxProvider,
+  );
+  const storeSetSubmitMode = usePromptSettingsStore((s) => s.setSubmitMode);
+
+  const setAgent = useCallback(
+    (a: AgentType) => {
+      if (!resumeSession) storeSetAgent(a);
+    },
+    [resumeSession, storeSetAgent],
+  );
+  const setModelId = useCallback(
+    (m: string | null) => {
+      if (!resumeSession) storeSetModelId(m);
+    },
+    [resumeSession, storeSetModelId],
+  );
+  const setSandboxProvider = useCallback(
+    (p: SandboxProviderType) => {
+      if (!resumeSession) storeSetSandboxProvider(p);
+    },
+    [resumeSession, storeSetSandboxProvider],
+  );
+  const setSubmitMode = useCallback(
+    (m: SubmitMode) => {
+      if (!resumeSession) storeSetSubmitMode(m);
+    },
+    [resumeSession, storeSetSubmitMode],
+  );
+
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [slashQuery, setSlashQuery] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [submitMode, setSubmitMode] = useState<SubmitMode>(
-    defaultSubmitMode ?? 'interactive',
-  );
   // Mount mode state - enabled when initialMountDir is set, forced, or toggled via Ctrl+D
   // When forceMountMode is true, mount mode cannot be toggled off
   const [mountMode, setMountMode] = useState<boolean>(
@@ -195,31 +222,49 @@ export function PromptScreen({
   // quick-switch case: user presses Tab before OpenCode models have loaded,
   // so modelId is null.  Once models arrive we pick the best match.
   //
-  // Priority chain:
-  //  1. Remembered model for this agent (modelMem)
-  //  2. Equivalent of the last model from any agent (cross-agent matching)
-  //  3. Equivalent of the configured default model
-  //  4. Well-known fallbacks (opus, gpt) — avoids landing on niche models
-  //  5. First model in the list (last resort)
+  // If the user has an explicit model selection for this agent (persisted in
+  // agentModels), we try that first and only fall through to the heuristic
+  // chain if it no longer exists in the model list.
+  //
+  // Fallback priority chain (only when no explicit selection):
+  //  1. Equivalent of the configured default model
+  //  2. Well-known fallbacks (opus, gpt) — avoids landing on niche models
+  //  3. First model in the list (last resort)
   useEffect(() => {
     if (!currentModels?.length) return;
-    if (modelId && currentModels.some((m) => m.id === modelId)) return;
-    const best =
-      // 1. Exact match for a previously-remembered model on this agent
-      findExactModel(modelMem.current[agent] ?? null, currentModels) ??
-      // 2. Equivalent of the last model the user had selected (any agent)
-      findEquivalentModel(lastModelRef.current, currentModels) ??
-      // 3. Equivalent of the configured default model
-      findEquivalentModel(defaultModel, currentModels) ??
-      // 4. Well-known fallbacks
-      findPreferredFallback(currentModels) ??
-      // 5. First available
-      currentModels[0]?.id ??
-      null;
-    if (best && best !== modelId) {
-      setModelId(best);
+    const activeModelId = modelId;
+    if (activeModelId && currentModels.some((m) => m.id === activeModelId))
+      return;
+
+    const { hasExplicitModel, getAgentModel } =
+      usePromptSettingsStore.getState();
+
+    // If the user previously picked a model for this agent, try exact match
+    const explicit = getAgentModel(agent);
+    if (explicit) {
+      const exactMatch = findExactModel(explicit, currentModels);
+      if (exactMatch) {
+        setModelId(exactMatch);
+        return;
+      }
     }
-  }, [agent, modelId, defaultModel, currentModels]);
+
+    // No explicit selection or it no longer exists — run heuristic chain
+    // (only if user never explicitly chose for this agent)
+    if (!hasExplicitModel(agent)) {
+      const best =
+        // 1. Equivalent of the configured default model
+        findEquivalentModel(defaultModel, currentModels) ??
+        // 2. Well-known fallbacks
+        findPreferredFallback(currentModels) ??
+        // 3. First available
+        currentModels[0]?.id ??
+        null;
+      if (best && best !== activeModelId) {
+        setModelId(best);
+      }
+    }
+  }, [agent, modelId, defaultModel, currentModels, setModelId]);
 
   // Trigger credential check for the active agent when image becomes ready,
   // or when the selected model changes (different models may need different credentials).
@@ -238,25 +283,34 @@ export function PromptScreen({
     useReadinessStore.getState().prebuildAgentImage(agent, sandboxProvider);
   }, [imageReady, agent, sandboxProvider]);
 
-  // Handle agent switch with model matching (disabled when resuming)
+  // Handle agent switch with model matching (disabled when resuming).
+  // The store's setAgent already saves the current model and restores
+  // the new agent's persisted model.  We only need the equivalent-model
+  // fallback when the store has nothing for the new agent.
   const switchAgent = useCallback(() => {
-    // Don't allow switching agents when resuming a session
     if (resumeSession) return;
 
+    const currentAgent = agent;
     const newAgent =
-      AGENTS[(AGENTS.indexOf(agent) + 1) % AGENTS.length] ||
+      AGENTS[(AGENTS.indexOf(currentAgent) + 1) % AGENTS.length] ||
       defaultAgent ||
       DEFAULT_AGENT;
+    // Store handles saving old model + restoring new agent's model
     setAgent(newAgent);
-    const models = modelsMapRef.current;
-    const newModelId =
-      modelMem.current[newAgent] ||
-      findEquivalentModel(modelId, models[newAgent]) ||
-      models[newAgent]?.[0]?.id ||
-      null;
-    setModelId(newModelId);
-    // Credential re-check is handled by the useEffect on [imageReady, agent, modelId]
-  }, [resumeSession, agent, defaultAgent, modelId]);
+
+    // If the store didn't restore a model (i.e. null), try equivalent match
+    const restoredModel = usePromptSettingsStore.getState().modelId;
+    if (!restoredModel) {
+      const models = modelsMapRef.current;
+      const fallback =
+        findEquivalentModel(modelId, models[newAgent]) ||
+        models[newAgent]?.[0]?.id ||
+        null;
+      if (fallback) {
+        setModelId(fallback);
+      }
+    }
+  }, [resumeSession, agent, modelId, defaultAgent, setAgent, setModelId]);
 
   // Suspend command keybind dispatch when sub-modals are open
   const suspend = useCommandStore((s) => s.suspend);
@@ -276,12 +330,12 @@ export function PromptScreen({
         description: 'Cycle between interactive, plan, and async modes',
         category: 'Prompt',
         keybind: { key: 'tab', shift: true, display: 'shift+tab' },
-        onSelect: () =>
-          setSubmitMode((m) => {
-            if (m === 'async') return 'interactive';
-            if (m === 'interactive') return 'plan';
-            return 'async';
-          }),
+        onSelect: () => {
+          const m = submitMode;
+          if (m === 'async') setSubmitMode('interactive');
+          else if (m === 'interactive') setSubmitMode('plan');
+          else setSubmitMode('async');
+        },
       },
       {
         id: 'agent.switch',
@@ -376,16 +430,15 @@ export function PromptScreen({
             });
             return;
           }
-          setSandboxProvider((p) => {
-            if (p === 'docker') {
-              // Switching to cloud — disable mount mode (not supported)
-              if (mountMode && !forceMountMode) {
-                setMountMode(false);
-              }
-              return 'cloud';
+          if (sandboxProvider === 'docker') {
+            // Switching to cloud — disable mount mode (not supported)
+            if (mountMode && !forceMountMode) {
+              setMountMode(false);
             }
-            return 'docker';
-          });
+            setSandboxProvider('cloud');
+          } else {
+            setSandboxProvider('docker');
+          }
         },
       },
       {
@@ -420,6 +473,9 @@ export function PromptScreen({
       forceMountMode,
       mountDir,
       sandboxProvider,
+      submitMode,
+      setSandboxProvider,
+      setSubmitMode,
       onShell,
     ],
   );
@@ -621,16 +677,15 @@ export function PromptScreen({
             });
             return;
           }
-          setSandboxProvider((p) => {
-            if (p === 'docker') {
-              // Switching to cloud — disable mount mode
-              if (mountMode && !forceMountMode) {
-                setMountMode(false);
-              }
-              return 'cloud';
+          if (sandboxProvider === 'docker') {
+            // Switching to cloud — disable mount mode
+            if (mountMode && !forceMountMode) {
+              setMountMode(false);
             }
-            return 'docker';
-          });
+            setSandboxProvider('cloud');
+          } else {
+            setSandboxProvider('docker');
+          }
         },
       },
       {
@@ -677,6 +732,8 @@ export function PromptScreen({
       mountMode,
       forceMountMode,
       sandboxProvider,
+      setSandboxProvider,
+      setSubmitMode,
     ],
   );
 
@@ -721,7 +778,13 @@ export function PromptScreen({
       return;
     }
     log.debug(
-      { agent, model: modelId, mode: submitMode, mountMode, mountDir },
+      {
+        agent: agent,
+        model: modelId,
+        mode: submitMode,
+        mountMode,
+        mountDir,
+      },
       'Submitting prompt',
     );
 
@@ -730,11 +793,11 @@ export function PromptScreen({
 
     onSubmit({
       prompt: promptText,
-      agent,
+      agent: agent,
       model: modelId,
       mode: submitMode,
       mountDir: mountMode ? (mountDir ?? process.cwd()) : undefined,
-      sandboxProvider,
+      sandboxProvider: sandboxProvider,
     });
   };
 

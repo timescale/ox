@@ -65,6 +65,10 @@ import {
 } from '../services/updater';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import {
+  flushPromptSettings,
+  usePromptSettingsStore,
+} from '../stores/promptSettingsStore.ts';
+import {
   useReadinessStore,
   waitForAgentAuthCheck,
 } from '../stores/readinessStore.ts';
@@ -151,6 +155,8 @@ interface SessionsAppProps {
   /** Session to display when initialView is 'detail' */
   initialSession?: OxSession;
   provider: SandboxProvider;
+  /** Explicit CLI --provider flag (undefined = not set, use config) */
+  cliSandboxProvider?: SandboxProviderType;
   serviceId?: string;
   dbFork?: boolean;
   /** Mount local directory instead of git clone */
@@ -168,6 +174,7 @@ function SessionsApp({
   initialModel,
   initialSession,
   provider,
+  cliSandboxProvider,
   serviceId,
   dbFork = true,
   initialMountDir,
@@ -886,13 +893,28 @@ function SessionsApp({
       const existingConfig = await readConfig();
       setConfig(existingConfig);
 
+      // Initialize prompt settings store from config + CLI flags.
+      // Only pass values that were explicitly provided via CLI flags as
+      // overrides — config-derived defaults are already in the config object.
+      await usePromptSettingsStore.getState().initialize(existingConfig, {
+        agent: initialAgent as AgentType | undefined,
+        model: initialModel,
+        sandboxProvider: cliSandboxProvider,
+      });
+
       // Navigate to target view immediately (prompt screen renders fast)
       navigateToTargetView(existingConfig);
 
       // Kick off readiness checks in the background
       useReadinessStore.getState().runChecks();
     })();
-  }, [view.type, navigateToTargetView]);
+  }, [
+    view.type,
+    navigateToTargetView,
+    initialAgent,
+    initialModel,
+    cliSandboxProvider,
+  ]);
 
   // Watch readiness store: transition to docker setup if not installed
   const dockerInstalled = useReadinessStore((s) => s.dockerInstalled);
@@ -934,6 +956,14 @@ function SessionsApp({
       const mergedConfig = await readConfig();
       setConfig(mergedConfig);
 
+      // Initialize prompt settings store if not already initialized
+      // (covers initial setup flow where config wizard runs before prompt)
+      await usePromptSettingsStore.getState().initialize(mergedConfig, {
+        agent: initialAgent as AgentType | undefined,
+        model: initialModel,
+        sandboxProvider: cliSandboxProvider,
+      });
+
       // Return to the prompt when config was launched from there.
       if (returnToPrompt) {
         useRouterStore.getState().goToPrompt(returnToPrompt.resumeSession);
@@ -944,7 +974,7 @@ function SessionsApp({
 
       useReadinessStore.getState().runChecks();
     },
-    [navigateToTargetView],
+    [navigateToTargetView, initialAgent, initialModel, cliSandboxProvider],
   );
 
   // Handle resume from session detail
@@ -1261,6 +1291,7 @@ export async function runSessionsTui({
           initialModel={nextModel}
           initialSession={nextSession}
           provider={provider}
+          cliSandboxProvider={sandboxProvider}
           serviceId={serviceId}
           dbFork={dbFork}
           initialMountDir={nextMountDir}
@@ -1294,6 +1325,8 @@ export async function runSessionsTui({
 
     // Quit exits the loop
     if (result.type === 'quit') {
+      // Flush pending config writes so user preferences are not lost
+      await flushPromptSettings();
       // Wait for background tasks before exiting
       const bgStore = useBackgroundTaskStore.getState();
       if (bgStore.pendingCount > 0) {
