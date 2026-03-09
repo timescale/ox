@@ -137,7 +137,10 @@ export class DenoApiClient {
         // The error may be an ErrorEvent (Bun WebSocket) or a regular Error
         const msg = (err as { message?: string })?.message ?? String(err);
         const isTransient =
-          msg.includes('Expected 101') || msg.includes('WebSocket');
+          msg.includes('Expected 101') ||
+          msg.includes('WebSocket') ||
+          msg.includes('checkServerIdentity') ||
+          msg.includes("Cannot destructure property 'subject'");
         if (isTransient && attempt < maxAttempts) {
           const delay = attempt * 2_000;
           log.warn(
