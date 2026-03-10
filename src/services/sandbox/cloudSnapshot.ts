@@ -20,16 +20,6 @@ export type SnapshotBuildProgress =
   | { type: 'done'; snapshotSlug: string }
   | { type: 'error'; message: string };
 
-/** @deprecated Use computeCloudBaseHash from cloudBaseSteps.ts */
-export function baseToolsHash(): string {
-  return computeCloudBaseHash().slice(0, 6);
-}
-
-/** @deprecated Use baseToolsHash + getAgentSnapshotSlug for per-agent snapshots */
-export function toolVersionsHash(): string {
-  return baseToolsHash();
-}
-
 export function getBaseSnapshotSlug(): string {
   // Content-hash based: slug only changes when base build steps change.
   // Format: ox-cloud-{12-char-hash}, truncated to 32 chars.
