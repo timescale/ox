@@ -86,14 +86,14 @@ function makeSession(overrides?: Partial<OxSession>): OxSession {
 // ============================================================================
 
 describe('classifyCloudSnapshot', () => {
-  test('current base snapshot matches getBaseSnapshotSlug()', () => {
+  test('current ox-base-* base snapshot matches getBaseSnapshotSlug()', () => {
     const snapshot = makeSnapshot({
-      slug: 'ox-base-0-12-0-a1b2c3',
+      slug: 'ox-base-a1b2c3d4e5f6',
     });
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
@@ -105,17 +105,17 @@ describe('classifyCloudSnapshot', () => {
     expect(result.provider).toBe('cloud');
     expect(result.kind).toBe('snapshot');
     expect(result.id).toBe('snp_ord_abc123');
-    expect(result.name).toBe('ox-base-0-12-0-a1b2c3');
+    expect(result.name).toBe('ox-base-a1b2c3d4e5f6');
   });
 
-  test('old base snapshot does not match current slug', () => {
+  test('old ox-base-* base snapshot does not match current slug', () => {
     const snapshot = makeSnapshot({
-      slug: 'ox-base-0-11-0-oldold',
+      slug: 'ox-base-oldoldhash999',
     });
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
@@ -137,7 +137,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
         sessionsBySnapshotSlug: new Map([['oxn-my-session-abc123', session]]),
         deletedSessionsBySnapshotSlug: new Map(),
@@ -160,7 +160,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map([
@@ -181,7 +181,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
@@ -202,7 +202,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
@@ -216,13 +216,13 @@ describe('classifyCloudSnapshot', () => {
 
   test('current agent snapshot matches currentAgentSlugs', () => {
     const snapshot = makeSnapshot({
-      slug: 'ox-0-17-0-claude-2-1-70',
+      slug: 'ox-a1b2c3-claude-2-1-71',
     });
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-17-0-a1b2c3',
-        currentAgentSlugs: new Set(['ox-0-17-0-claude-2-1-70']),
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -234,13 +234,13 @@ describe('classifyCloudSnapshot', () => {
 
   test('old agent snapshot does not match any current agent slug', () => {
     const snapshot = makeSnapshot({
-      slug: 'ox-0-16-0-claude-2-0-0',
+      slug: 'ox-a1b2c3-claude-2-0-0',
     });
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-17-0-a1b2c3',
-        currentAgentSlugs: new Set(['ox-0-17-0-claude-2-1-70']),
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -256,7 +256,7 @@ describe('classifyCloudSnapshot', () => {
     });
 
     const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
+      currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
       currentAgentSlugs: new Set(),
       sessionsBySnapshotSlug: new Map(),
       deletedSessionsBySnapshotSlug: new Map(),
@@ -271,7 +271,7 @@ describe('classifyCloudSnapshot', () => {
     });
 
     const result = classifyCloudSnapshot(snapshot, {
-      currentBaseSlug: 'ox-base-0-12-0-a1b2c3',
+      currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
       currentAgentSlugs: new Set(),
       sessionsBySnapshotSlug: new Map(),
       deletedSessionsBySnapshotSlug: new Map(),
@@ -530,14 +530,14 @@ describe('classifyCloudVolume', () => {
 
   test('snapshot sourceVolumeSlug is populated', () => {
     const snapshot = makeSnapshot({
-      slug: 'ox-0-17-0-claude-2-1-70',
+      slug: 'ox-a1b2c3-claude-2-1-71',
       volume: { id: 'vol_abc', slug: 'oxa-build-abc123' },
     });
 
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
-        currentBaseSlug: 'ox-base-0-17-0-a1b2c3',
-        currentAgentSlugs: new Set(['ox-0-17-0-claude-2-1-70']),
+        currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),

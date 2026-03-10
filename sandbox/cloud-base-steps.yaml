@@ -1,0 +1,183 @@
+# ============================================================================
+# Cloud Base Snapshot Build Steps
+# ============================================================================
+#
+# Declarative list of shell commands that build the base cloud snapshot.
+# The content hash of these steps determines the snapshot slug — the snapshot
+# is only rebuilt when the commands here actually change, not on every release.
+#
+# IMPORTANT: Changing any `command` or `sudo` value changes the content hash,
+# which triggers a base snapshot rebuild for all cloud users.  Only modify
+# when you actually want to change the base environment.
+# ============================================================================
+
+- label: Verify environment
+  message: Verifying sandbox environment
+  command: 'echo "user=$(whoami) home=$HOME sudo=$(which sudo 2>/dev/null || echo not-found)" && sudo whoami'
+
+- label: Install system packages
+  message: Installing system packages
+  detail: git, curl, ca-certificates, zip, unzip, tar, gzip, jq, tmux
+  sudo: true
+  command: >-
+    DEBIAN_FRONTEND=noninteractive apt-get update &&
+    DEBIAN_FRONTEND=noninteractive apt-get install -y
+    git curl ca-certificates zip unzip tar gzip jq openssh-client tmux
+
+- label: Install GitHub CLI
+  message: Installing GitHub CLI
+  sudo: true
+  command: >-
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+    && DEBIAN_FRONTEND=noninteractive apt-get update
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y gh
+
+- label: Configure git
+  message: Configuring environment
+  command: 'git config --global user.email "ox@tigerdata.com" && git config --global user.name "Ox Agent"'
+
+- label: Configure PATH and env in profile.d
+  message: Configuring environment
+  command: "printf 'export PATH=\"$HOME/.local/bin:$PATH\"\\nexport DISABLE_AUTOUPDATER=1\\n' | sudo tee /etc/profile.d/ox-path.sh > /dev/null && sudo chmod +x /etc/profile.d/ox-path.sh"
+
+- label: Configure PATH and env in bashrc
+  message: Configuring environment
+  command: "printf 'export PATH=\"$HOME/.local/bin:$PATH\"\\nexport DISABLE_AUTOUPDATER=1\\n' >> ~/.bashrc"
+
+- label: Configure tmux
+  message: Configuring environment
+  command: |
+    cat > ~/.tmux.conf << 'TMUX_EOF'
+    # Detach with ctrl+\ (no prefix needed) — matches Docker detach keys.
+    # -E avoids printing "[detached (from session ...)]" to the host terminal
+    # when disconnecting from tmux over SSH.
+    bind -n C-\\ detach-client -E true
+    # Keep default prefix (ctrl+b) for other tmux commands
+    set -g mouse on
+    # Hide status bar — ox manages the session, no need for tmux chrome
+    set -g status off
+    # True-color support — xterm-256color + Tc flag enables 24-bit RGB
+    # passthrough so TUI apps (OpenCode, Claude) render correctly
+    set -g default-terminal "xterm-256color"
+    set -ga terminal-overrides ",xterm-256color:Tc"
+    TMUX_EOF
+
+- label: Create /work directory
+  message: Configuring environment
+  sudo: true
+  command: mkdir -p /work
+
+- label: Chown /work to app user
+  message: Configuring environment
+  command: "sudo chown $(id -u):$(id -g) /work"
+
+# --- Docker-in-sandbox setup ---
+
+- label: Add Docker apt repository
+  message: Installing Docker
+  detail: docker-ce, containerd.io, docker-compose-plugin
+  sudo: true
+  command: |
+    install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && cat > /etc/apt/sources.list.d/docker.sources <<'DKRREPO'
+    Types: deb
+    URIs: https://download.docker.com/linux/debian
+    Suites: trixie
+    Components: stable
+    Signed-By: /etc/apt/keyrings/docker.asc
+    DKRREPO
+
+- label: Install Docker CE packages
+  message: Installing Docker
+  detail: docker-ce, containerd.io, docker-compose-plugin
+  sudo: true
+  command: >-
+    DEBIAN_FRONTEND=noninteractive apt-get update
+    && (DEBIAN_FRONTEND=noninteractive apt-get install -y
+    docker-ce docker-ce-cli containerd.io
+    docker-buildx-plugin docker-compose-plugin || true)
+
+- label: Fix broken packages after Docker install
+  message: Installing Docker
+  sudo: true
+  command: "dpkg --purge --force-depends libpam-systemd dbus-user-session docker-ce-rootless-extras 2>/dev/null; dpkg --configure -a"
+
+- label: Switch to iptables-legacy
+  message: Installing Docker
+  sudo: true
+  command: "update-alternatives --set iptables /usr/sbin/iptables-legacy && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy"
+
+- label: Write Docker startup script
+  message: Installing Docker
+  sudo: true
+  command: |
+    cat > /usr/local/bin/start-docker.sh << 'STARTDKR'
+    #!/usr/bin/env bash
+    # Idempotent Docker daemon startup for the Deno sandbox environment.
+    # Handles /dev/shm, cgroup v1 controllers, and dockerd.
+    # See docs/dev/sandbox-docker.md for rationale.
+    set -euo pipefail
+
+    # Already running? Nothing to do.
+    if docker info &>/dev/null 2>&1; then
+      exit 0
+    fi
+
+    # 1. Mount /dev/shm (needed for container runtime locking)
+    sudo mkdir -p /dev/shm
+    if ! mountpoint -q /dev/shm; then
+      sudo mount -t tmpfs tmpfs /dev/shm
+    fi
+
+    # 2. Mount cgroup v1 controllers (needed by runc)
+    if [ "$(findmnt -n -o FSTYPE /sys/fs/cgroup 2>/dev/null)" != "tmpfs" ]; then
+      sudo mount -t tmpfs tmpfs /sys/fs/cgroup
+    fi
+    for subsys in memory cpu cpuacct cpuset devices freezer blkio pids; do
+      sudo mkdir -p /sys/fs/cgroup/$subsys
+      if ! mountpoint -q /sys/fs/cgroup/$subsys; then
+        sudo mount -t cgroup -o $subsys cgroup /sys/fs/cgroup/$subsys
+      fi
+    done
+
+    # 3. Start Docker daemon
+    #    DOCKER_INSECURE_NO_IPTABLES_RAW disables Direct Access Filtering
+    #    which requires the iptables "raw" table — not available in this kernel.
+    DOCKER_INSECURE_NO_IPTABLES_RAW=1 sudo -E dockerd &>/tmp/dockerd.log &
+
+    # 4. Wait for the socket to appear, then open it up for non-root usage
+    #    before checking 'docker info' (which needs socket access).
+    timeout 30 bash -c 'until [ -S /var/run/docker.sock ]; do sleep 0.5; done'
+    sudo chmod 666 /var/run/docker.sock
+
+    # 5. Wait for daemon to be fully ready (up to 30s)
+    timeout 30 bash -c 'until docker info &>/dev/null 2>&1; do sleep 1; done'
+    STARTDKR
+    chmod +x /usr/local/bin/start-docker.sh
+
+- label: Add Docker auto-start hook
+  message: Installing Docker
+  sudo: true
+  command: |
+    cat > /etc/profile.d/docker-start.sh << 'PROFILED'
+    # Auto-start Docker daemon on first login shell.
+    # The startup script is idempotent but we use a lockfile to avoid
+    # multiple concurrent shells all trying to start dockerd at once.
+    if ! docker info &>/dev/null 2>&1; then
+      (
+        flock -n 9 || exit 0
+        /usr/local/bin/start-docker.sh &>/dev/null
+      ) 9>/tmp/.docker-start.lock
+    fi
+    PROFILED
+    chmod +x /etc/profile.d/docker-start.sh
+
+- label: Start Docker in build sandbox
+  message: Starting Docker and caching base image
+  command: /usr/local/bin/start-docker.sh

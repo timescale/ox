@@ -9,6 +9,10 @@ import {
   getGhcrAgentTag,
   getGhcrBaseTag,
 } from '../services/docker';
+import {
+  getAgentSnapshotSlug,
+  getBaseSnapshotSlug,
+} from '../services/sandbox/cloudSnapshot';
 
 export const sandboxCommand = new Command('sandbox')
   .description('sandbox image utilities')
@@ -22,11 +26,24 @@ export const sandboxCommand = new Command('sandbox')
         ).choices(['claude', 'opencode', 'codex']),
       )
       .option('-i, --image', 'print the full GHCR image reference')
+      .option('-c, --cloud', 'print cloud snapshot slug instead of Docker tag')
       .action(
         (options: {
           agent?: 'claude' | 'opencode' | 'codex';
           image?: boolean;
+          cloud?: boolean;
         }) => {
+          // Cloud snapshot slugs
+          if (options.cloud) {
+            if (options.agent) {
+              console.log(getAgentSnapshotSlug(options.agent));
+            } else {
+              console.log(getBaseSnapshotSlug());
+            }
+            return;
+          }
+
+          // Docker image tags (existing behavior)
           const hash = computeDockerfileHash(BASE_DOCKERFILE);
 
           if (options.image) {

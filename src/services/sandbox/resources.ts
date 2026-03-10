@@ -135,7 +135,7 @@ export function classifyCloudSnapshot(
     sourceVolumeSlug: snapshot.volume.slug,
   };
 
-  // Base snapshots
+  // Base snapshots (ox-base-*)
   if (snapshot.slug.startsWith('ox-base-')) {
     return {
       ...base,
@@ -144,7 +144,7 @@ export function classifyCloudSnapshot(
     };
   }
 
-  // Agent overlay snapshots (ox-{version}-{agent}-{agentVer}, but NOT ox-base-*)
+  // Agent overlay snapshots (ox-{hash}-{agent}-{agentVer}, but NOT ox-base-*)
   if (
     snapshot.slug.startsWith('ox-') &&
     !snapshot.slug.startsWith('ox-base-')
