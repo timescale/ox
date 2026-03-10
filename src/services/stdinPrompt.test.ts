@@ -65,6 +65,36 @@ describe('resolvePromptInput', () => {
     });
   });
 
+  test('reads from stdin when prompt is "-"', async () => {
+    const result = await resolvePromptInput(
+      '-',
+      createStdin(['prompt from stdin'], false),
+    );
+    expect(result).toEqual({
+      prompt: 'prompt from stdin',
+      source: 'stdin',
+    });
+  });
+
+  test('returns none when prompt is "-" but stdin is empty/TTY', async () => {
+    const result = await resolvePromptInput('-', createStdin([], true));
+    expect(result).toEqual({
+      prompt: undefined,
+      source: 'none',
+    });
+  });
+
+  test('reads from stdin when prompt is " - " (padded)', async () => {
+    const result = await resolvePromptInput(
+      ' - ',
+      createStdin(['padded dash prompt'], false),
+    );
+    expect(result).toEqual({
+      prompt: 'padded dash prompt',
+      source: 'stdin',
+    });
+  });
+
   test('falls through to stdin when positional prompt is blank', async () => {
     const result = await resolvePromptInput(
       '   ',

@@ -74,9 +74,9 @@ withBranchOptions(program)
         return;
       }
 
-      // Redirected stdin was consumed to get the prompt, so we cannot launch
-      // the prompt TUI and expect it to remain interactive.
-      if (resolved.source === 'stdin') {
+      // If stdin is not a TTY (pipe, file redirect, /dev/null), the TUI
+      // cannot read keyboard input.  Fall back to the non-TUI flow.
+      if (!process.stdin.isTTY) {
         await branchAction(resolved.prompt, options);
         return;
       }

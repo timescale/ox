@@ -45,11 +45,21 @@ export async function resolvePromptInput(
   prompt: string | undefined,
   stdin?: Readable & { isTTY?: boolean },
 ): Promise<ResolvedPromptInput> {
+  // Explicit `-` means "read from stdin"
+  if (prompt?.trim() === '-') {
+    const stdinPrompt = await readPromptFromStdin(stdin);
+    if (stdinPrompt) {
+      return { prompt: stdinPrompt, source: 'stdin' };
+    }
+    return { prompt: undefined, source: 'none' };
+  }
+
   const argPrompt = prompt?.trim();
   if (argPrompt) {
     return { prompt: argPrompt, source: 'arg' };
   }
 
+  // Auto-detect: fall through to stdin if available
   const stdinPrompt = await readPromptFromStdin(stdin);
   if (stdinPrompt) {
     return { prompt: stdinPrompt, source: 'stdin' };
