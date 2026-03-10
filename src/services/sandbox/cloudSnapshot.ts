@@ -165,25 +165,7 @@ export async function ensureCloudSnapshot(options: {
       });
     }
 
-    // 5. Best-effort: cache alpine image in the snapshot.
-    // This is NOT part of the steps array because Docker Hub image
-    // changes should not invalidate the snapshot hash.
-    onProgress?.({
-      type: 'installing',
-      message: 'Caching Docker base image',
-    });
-    try {
-      await sandboxExec(sandbox, 'docker pull alpine:latest', {
-        label: 'Cache alpine image',
-      });
-    } catch (err) {
-      log.warn(
-        { err },
-        'Failed to cache alpine image — Docker will pull at runtime',
-      );
-    }
-
-    // 11. Kill sandbox and wait for volume detachment (required before snapshotting)
+    // Kill sandbox and wait for volume detachment (required before snapshotting)
     onProgress?.({
       type: 'snapshotting',
       message: 'Detaching volume',

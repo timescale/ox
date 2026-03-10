@@ -39,8 +39,6 @@ export interface CloudBuildStep {
  * declarative and easy to review in a single file.  The content hash of the
  * commands determines the snapshot slug, avoiding unnecessary rebuilds.
  *
- * NOTE: The best-effort `docker pull alpine:latest` step is intentionally
- * excluded — it's a cache optimization that should not affect the hash.
  */
 export const CLOUD_BASE_STEPS: readonly CloudBuildStep[] = YAML.parse(
   CLOUD_BASE_STEPS_YAML,

@@ -9,9 +9,6 @@
 # IMPORTANT: Changing any `command` or `sudo` value changes the content hash,
 # which triggers a base snapshot rebuild for all cloud users.  Only modify
 # when you actually want to change the base environment.
-#
-# The best-effort `docker pull alpine:latest` step is intentionally excluded —
-# it is a cache optimisation that should not affect the hash.
 # ============================================================================
 
 - label: Verify environment
