@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
+import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
+  type: 'text',
+};
 import {
   buildOxLabels,
+  computeDockerfileHash,
   formatCpuPercent,
   formatMemUsage,
-  resetEnsuredImageOverride,
   resolveSandboxImage,
   toVolumeArgs,
 } from './docker';
@@ -156,11 +159,6 @@ describe('buildOxLabels', () => {
 });
 
 describe('docker service', () => {
-  // Reset module-level image cache to avoid cross-test pollution
-  beforeEach(() => {
-    resetEnsuredImageOverride();
-  });
-
   describe('resolveSandboxImage', () => {
     test('returns a valid image config', async () => {
       // Pass empty config to avoid reading from filesystem
@@ -172,10 +170,12 @@ describe('docker service', () => {
     });
 
     test('returns GHCR image by default (no config)', async () => {
-      // With no config, should return GHCR sandbox-slim image
+      // With no config, should return GHCR sandbox image with content hash
       const config = await resolveSandboxImage({});
       expect(config.needsBuild).toBe(false);
-      expect(config.image).toMatch(/ghcr\.io\/timescale\/ox\/sandbox-slim/);
+      expect(config.image).toMatch(
+        /ghcr\.io\/timescale\/ox\/sandbox:[a-f0-9]{12}/,
+      );
     });
 
     test('returns consistent values for same config', async () => {
@@ -185,11 +185,11 @@ describe('docker service', () => {
       expect(config1.needsBuild).toBe(config2.needsBuild);
     });
 
-    test('always returns version-tagged image (not :latest)', async () => {
+    test('returns content-hash-tagged image (not :latest or version)', async () => {
       const config = await resolveSandboxImage({});
-      // Should contain a version tag, not :latest
+      const hash = computeDockerfileHash(SLIM_DOCKERFILE);
       expect(config.image).not.toContain(':latest');
-      expect(config.image).toMatch(/sandbox-slim:\d+\.\d+\.\d+/);
+      expect(config.image).toBe(`ghcr.io/timescale/ox/sandbox:${hash}`);
     });
   });
 });

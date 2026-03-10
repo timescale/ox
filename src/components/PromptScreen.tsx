@@ -203,7 +203,7 @@ export function PromptScreen({
     initialMountDir ?? (forceMountMode ? process.cwd() : null),
   );
   const imageReady = useReadinessStore((s) => s.sandboxBaseImage === 'ready');
-  const modelsMap = useAgentModels(null, imageReady);
+  const modelsMap = useAgentModels(null, imageReady, agent);
   // Ref so callbacks can read the latest modelsMap without depending on the
   // object reference (which changes when models finish loading).
   const modelsMapRef = useRef(modelsMap);

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { $, spawn } from 'bun';
 import { nanoid } from 'nanoid';
 import { Deferred } from '../types/deferred';
-import { printArgs, resolveSandboxImage } from './docker';
+import { ensureDockerImage, printArgs } from './docker';
 import { writeFileToContainer } from './dockerFiles';
 import { log } from './logger';
 
@@ -98,7 +98,7 @@ export const runInDocker = async ({
     return abortedStubResult();
   }
 
-  const resolvedImage = dockerImage ?? (await resolveSandboxImage()).image;
+  const resolvedImage = dockerImage ?? (await ensureDockerImage());
 
   // Check after potentially slow image resolution.
   if (signal?.aborted) {

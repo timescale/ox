@@ -1,0 +1,122 @@
+name: Publish Sandbox Images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "sandbox/**"
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  # Compute the content hash and agent versions once, share with build jobs
+  compute-tags:
+    name: Compute Image Tags
+    runs-on: ubuntu-latest
+    outputs:
+      base-hash: ${{ steps.hash.outputs.base-hash }}
+      base-image: ${{ steps.hash.outputs.base-image }}
+      claude-tag: ${{ steps.tags.outputs.claude-tag }}
+      opencode-tag: ${{ steps.tags.outputs.opencode-tag }}
+      codex-tag: ${{ steps.tags.outputs.codex-tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install dependencies
+        run: ./bun install
+      - name: Compute base hash
+        id: hash
+        run: |
+          HASH=$(./bun index.ts sandbox hash)
+          echo "base-hash=$HASH" >> "$GITHUB_OUTPUT"
+          IMAGE=$(./bun index.ts sandbox hash --image)
+          echo "base-image=$IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Compute agent tags
+        id: tags
+        run: |
+          echo "claude-tag=$(./bun index.ts sandbox hash --image --agent claude)" >> "$GITHUB_OUTPUT"
+          echo "opencode-tag=$(./bun index.ts sandbox hash --image --agent opencode)" >> "$GITHUB_OUTPUT"
+          echo "codex-tag=$(./bun index.ts sandbox hash --image --agent codex)" >> "$GITHUB_OUTPUT"
+
+  # Build and push the base sandbox image
+  publish-base:
+    name: Publish Base Image
+    needs: compute-tags
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push base image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./sandbox
+          file: ./sandbox/slim.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.compute-tags.outputs.base-image }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/timescale/ox
+            org.opencontainers.image.description=Ox sandbox base image
+          cache-from: type=gha,scope=sandbox-base
+          cache-to: type=gha,mode=max,scope=sandbox-base
+
+  # Build and push per-agent overlay images
+  publish-agents:
+    name: Publish ${{ matrix.agent }} Agent Image
+    needs: [compute-tags, publish-base]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - agent: claude
+            tag: claude-tag
+          - agent: opencode
+            tag: opencode-tag
+          - agent: codex
+            tag: codex-tag
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve agent version
+        id: agent-version
+        run: |
+          VERSION=$(jq -r '.${{ matrix.agent == 'claude' && 'claudeCode' || matrix.agent }}' sandbox/versions.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build and push agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./sandbox
+          file: ./sandbox/agent.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.compute-tags.outputs[matrix.tag] }}
+          build-args: |
+            BASE_IMAGE=${{ needs.compute-tags.outputs.base-image }}
+            AGENT_NAME=${{ matrix.agent }}
+            AGENT_VERSION=${{ steps.agent-version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/timescale/ox
+            org.opencontainers.image.description=Ox sandbox with ${{ matrix.agent }} agent
+          cache-from: type=gha,scope=sandbox-${{ matrix.agent }}
+          cache-to: type=gha,mode=max,scope=sandbox-${{ matrix.agent }}
