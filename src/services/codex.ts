@@ -8,6 +8,7 @@ import { file } from 'bun';
 import type { CodexAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { readCache, writeCache } from './cache';
+import { readConfigValue } from './config';
 import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
@@ -290,25 +291,51 @@ export const runCodexInDocker = async ({
   };
 };
 
-export const checkCodexCredentials = async (): Promise<boolean> => {
-  const proc = await runCodexInDocker({
+export const checkCodexCredentials = async (
+  model?: string,
+): Promise<boolean> => {
+  const statusProc = await runCodexInDocker({
     cmdArgs: ['login', 'status'],
     shouldThrow: false,
   });
-  const exitCode = await proc.exited;
-  const output = proc.text().trim();
-  log.debug({ exitCode, output }, 'checkCodexCredentials login status');
+  const statusExitCode = await statusProc.exited;
+  const statusOutput = statusProc.text().trim();
+  log.trace(
+    { exitCode: statusExitCode, output: statusOutput },
+    'codex login status',
+  );
+  if (statusExitCode !== 0 || statusOutput.includes('Not logged in')) {
+    log.debug('Codex credentials are missing or invalid');
+    return false;
+  }
 
-  // Wait for any refreshed credentials to be captured back from the
-  // container and written into the in-memory cache.  Without this, a
-  // subsequent getCodexAuthJson() call (e.g. from startContainer →
-  // getCredentialFiles) could return the stale pre-refresh tokens, causing
-  // "refresh_token_reused" errors in async sessions.
-  await proc.credsCaptured;
-
-  // `codex login status` prints "Logged in using ..." when valid,
-  // "Not logged in" when invalid
-  return exitCode === 0 && !output.includes('Not logged in');
+  const effectiveModel = model ?? (await readConfigValue('agentModels'))?.codex;
+  const testProc = await runCodexInDocker({
+    cmdArgs: [
+      'exec',
+      '--skip-git-repo-check',
+      ...(effectiveModel ? ['--model', effectiveModel] : []),
+      'just output `true`, and nothing else',
+    ],
+    shouldThrow: false,
+  });
+  const testExitCode = await testProc.exited;
+  const valid = testExitCode === 0;
+  if (valid) {
+    log.debug('checkCodexCredentials (valid)');
+    await testProc.credsCaptured;
+    return true;
+  }
+  log.debug(
+    {
+      exitCode: testExitCode,
+      output: testProc.text().trim(),
+      errText: testProc.errorText().trim(),
+      model: effectiveModel,
+    },
+    'checkCodexCredentials (invalid)',
+  );
+  return false;
 };
 
 /**

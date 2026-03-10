@@ -283,7 +283,7 @@ const readHostConfigApiKey = async (): Promise<string | null> => {
       log.debug('Found claude API key in home directory');
       return config.primaryApiKey;
     }
-    log.debug('Claude config present in home directory, but no API key.');
+    log.trace('Claude config present in home directory, but no API key.');
   } catch (err) {
     log.debug({ err }, 'Failed to read claude config from file.');
   }
@@ -299,9 +299,9 @@ const readOxApiKeyCache = async (): Promise<string | null> => {
       log.debug('Found claude API key in ox keyring');
       return key;
     }
-    log.debug('Claude credentials present in ox keyring, but invalid.');
-  } catch {
-    log.debug('No .claude.json/primaryApiKey found in ox keyring');
+    log.trace('No .claude.json/primaryApiKey found in ox keyring');
+  } catch (err) {
+    log.error({ err }, 'getOxSecret failed');
   }
   return null;
 };
@@ -487,14 +487,42 @@ export const runClaudeInDocker = async ({
 export const checkClaudeCredentials = async (
   model = 'haiku',
 ): Promise<boolean> => {
-  const proc = await runClaudeInDocker({
+  const statusProc = await runClaudeInDocker({
+    cmdArgs: ['auth', 'status'],
+    shouldThrow: false,
+  });
+  const statusExitCode = await statusProc.exited;
+  const status = statusProc.json() as { loggedIn: boolean } | null;
+  const validStatus = statusExitCode === 0 && status?.loggedIn;
+  if (!validStatus) {
+    log.debug(
+      { exitCode: statusExitCode, status },
+      'claude auth status (invalid)',
+    );
+    return false;
+  }
+
+  const testProc = await runClaudeInDocker({
     cmdArgs: ['--model', model, '-p', 'just output `true`, and nothing else'],
     shouldThrow: false,
   });
-  const exitCode = await proc.exited;
-  const output = proc.text().trim();
-  log.debug({ exitCode, output, model }, 'checkClaudeCredentials');
-  return exitCode === 0;
+  const exitCode = await testProc.exited;
+  const valid = exitCode === 0;
+  if (valid) {
+    log.debug('checkClaudeCredentials (valid)');
+    await testProc.credsCaptured;
+    return true;
+  }
+  log.debug(
+    {
+      exitCode,
+      output: testProc.text().trim(),
+      errText: testProc.errorText().trim(),
+      model,
+    },
+    'checkClaudeCredentials (invalid)',
+  );
+  return false;
 };
 
 /**

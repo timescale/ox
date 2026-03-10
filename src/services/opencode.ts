@@ -5,7 +5,7 @@ import { Deferred } from '../types/deferred';
 import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
-import { readConfig } from './config';
+import { readConfig, readConfigValue } from './config';
 import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
@@ -297,23 +297,22 @@ export const runOpencodeInDocker = async ({
 export const checkOpencodeCredentials = async (
   model?: string,
 ): Promise<boolean> => {
-  const proc = await runOpencodeInDocker({
+  const listProc = await runOpencodeInDocker({
     cmdArgs: ['auth', 'list'],
     shouldThrow: false,
   });
-  const exitCode = await proc.exited;
-  const output = proc.text().trim();
+  const exitCode = await listProc.exited;
+  const output = listProc.text().trim();
   const match = output.match(/(\d+)\s+credentials/);
   const numCreds = match?.[1] ? parseInt(match[1], 10) : 0;
-  log.debug(
-    { exitCode, output, numCreds },
-    'checkOpencodeCredentials auth list',
-  );
+  log.trace({ exitCode, output, numCreds }, 'opencode auth list');
   if (exitCode || !numCreds) {
+    log.debug('opencode auth list failed or no credentials found');
     return false;
   }
-  const effectiveModel = model ?? (await readConfig())?.model;
-  const proc2 = await runOpencodeInDocker({
+  const effectiveModel =
+    model ?? (await readConfigValue('agentModels'))?.opencode;
+  const testProc = await runOpencodeInDocker({
     cmdArgs: [
       'run',
       ...(effectiveModel ? ['--model', effectiveModel] : []),
@@ -321,14 +320,24 @@ export const checkOpencodeCredentials = async (
     ],
     shouldThrow: false,
   });
-  const exitCode2 = await proc2.exited;
-  const output2 = proc2.text().trim();
-  const errText = proc2.errorText().trim();
+  const testExitCode = await testProc.exited;
+  const errText = testProc.errorText().trim();
+  const valid = testExitCode === 0 && !errText.includes('Error');
+  if (valid) {
+    log.debug('checkOpencodeCredentials (valid)');
+    await testProc.credsCaptured;
+    return true;
+  }
   log.debug(
-    { exitCode: exitCode2, output: output2, errText, model: effectiveModel },
-    'checkOpencodeCredentials test run',
+    {
+      exitCode: testExitCode,
+      output: testProc.text().trim(),
+      errText,
+      model: effectiveModel,
+    },
+    'checkOpencodeCredentials (invalid)',
   );
-  return exitCode2 === 0 && !errText.includes('Error');
+  return false;
 };
 
 /**
