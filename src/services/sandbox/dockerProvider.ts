@@ -21,6 +21,7 @@ import {
   stopContainer,
   streamContainerLogs,
 } from '../docker.ts';
+import { readFileFromContainer, writeFileToContainer } from '../dockerFiles.ts';
 import { log } from '../logger.ts';
 import type {
   AttachOptions,
@@ -260,5 +261,32 @@ export class DockerSandboxProvider implements SandboxProvider {
   ): Promise<Map<string, SandboxStats>> {
     const stats = await getContainerStats(sessionIds, signal);
     return mapDockerStats(stats);
+  }
+
+  async readFile(sessionId: string, path: string): Promise<string | null> {
+    try {
+      return await readFileFromContainer(sessionId, path);
+    } catch (err) {
+      log.debug(
+        { err, sessionId, path },
+        'Failed to read file from Docker container',
+      );
+      return null;
+    }
+  }
+
+  async writeFile(
+    sessionId: string,
+    path: string,
+    content: string,
+  ): Promise<void> {
+    try {
+      await writeFileToContainer(sessionId, path, content);
+    } catch (err) {
+      log.debug(
+        { err, sessionId, path },
+        'Failed to write file to Docker container',
+      );
+    }
   }
 }
