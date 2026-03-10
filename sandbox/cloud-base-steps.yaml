@@ -17,12 +17,12 @@
 
 - label: Install system packages
   message: Installing system packages
-  detail: git, curl, ca-certificates, zip, unzip, tar, gzip, jq, tmux
+  detail: git, ripgrep, curl, ca-certificates, zip, unzip, tar, gzip, jq, tmux
   sudo: true
   command: >-
     DEBIAN_FRONTEND=noninteractive apt-get update &&
     DEBIAN_FRONTEND=noninteractive apt-get install -y
-    git curl ca-certificates zip unzip tar gzip jq openssh-client tmux
+    git ripgrep curl ca-certificates zip unzip tar gzip jq openssh-client tmux
 
 - label: Install GitHub CLI
   message: Installing GitHub CLI
