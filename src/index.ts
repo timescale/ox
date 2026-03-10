@@ -33,6 +33,10 @@ import {
   trackImmediate,
 } from './services/analytics';
 import { log } from './services/logger';
+import {
+  isMultiWordPrompt,
+  resolvePromptInput,
+} from './services/stdinPrompt.ts';
 import { checkForUpdate, isCompiledBinary } from './services/updater';
 import { printErr, resetTerminal } from './utils/shell.ts';
 
@@ -47,11 +51,16 @@ program
 withBranchOptions(program)
   .argument('[prompt]', 'Natural language description of the task')
   .action(async (prompt, options) => {
-    log.debug({ options, prompt }, 'Root ox command invoked');
-    if (prompt) {
+    const resolved = await resolvePromptInput(prompt);
+    log.debug(
+      { options, prompt: resolved.prompt, promptSource: resolved.source },
+      'Root ox command invoked',
+    );
+
+    if (resolved.prompt) {
       // Guard against accidentally running with an invalid command as prompt
       // Prompt must contain at least one space (more than one word)
-      if (!prompt.includes(' ')) {
+      if (!isMultiWordPrompt(resolved.prompt)) {
         console.error(
           `Error: Prompt must be more than one word. Did you mean to run a command?\n`,
         );
@@ -61,15 +70,25 @@ withBranchOptions(program)
 
       // -p (print) or -i (interactive) flags: use non-TUI flow
       if (options.print || options.interactive) {
-        await branchAction(prompt, options);
+        await branchAction(resolved.prompt, options);
         return;
       }
+
+      // Redirected stdin was consumed to get the prompt, so we cannot launch
+      // the prompt TUI and expect it to remain interactive.
+      if (resolved.source === 'stdin') {
+        await branchAction(resolved.prompt, options);
+        return;
+      }
+    } else if (!process.stdin.isTTY) {
+      console.error('Error: no prompt provided on stdin');
+      process.exit(1);
     }
 
     // Default: use unified TUI starting at 'starting' view
     await runSessionsTui({
-      initialView: prompt ? 'starting' : 'prompt',
-      initialPrompt: prompt,
+      initialView: resolved.prompt ? 'starting' : 'prompt',
+      initialPrompt: resolved.prompt,
       initialAgent: options.agent,
       initialModel: options.model,
       serviceId: options.serviceId,
