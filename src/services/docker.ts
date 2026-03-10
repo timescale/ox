@@ -20,7 +20,7 @@ import INSTALL_TIGER from '../../sandbox/agents/install-tiger.sh' with {
   type: 'text',
 };
 // Import Dockerfile as text - Bun's bundler embeds this in the binary
-import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
+import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import toolVersions from '../../sandbox/versions.json' with { type: 'json' };
@@ -400,7 +400,7 @@ export async function ensureAgentOverlay(
  * Tag is the content hash of the Dockerfile.
  */
 export function getGhcrBaseTag(): string {
-  const hash = computeDockerfileHash(SLIM_DOCKERFILE);
+  const hash = computeDockerfileHash(BASE_DOCKERFILE);
   return `${GHCR_IMAGE_NAME}:${hash}`;
 }
 
@@ -409,7 +409,7 @@ export function getGhcrBaseTag(): string {
  * Tag format: <dockerfile-hash>-<agent>-<agent-version>
  */
 export function getGhcrAgentTag(agent: AgentType): string {
-  const hash = computeDockerfileHash(SLIM_DOCKERFILE);
+  const hash = computeDockerfileHash(BASE_DOCKERFILE);
   const version = getAgentVersion(agent);
   return `${GHCR_IMAGE_NAME}:${hash}-${agent}-${version}`;
 }
@@ -420,11 +420,11 @@ export function getGhcrAgentTag(agent: AgentType): string {
  */
 async function getDockerfileContent(
   which?: string | boolean | null,
-): Promise<{ content: string; variant: 'slim' | 'custom' } | null> {
+): Promise<{ content: string; variant: 'base' | 'custom' } | null> {
   if (!which) return null;
 
-  if (which === true || which === 'slim') {
-    return { content: SLIM_DOCKERFILE, variant: 'slim' };
+  if (which === true) {
+    return { content: BASE_DOCKERFILE, variant: 'base' };
   }
 
   // Custom path - read file
@@ -441,7 +441,7 @@ async function getDockerfileInfo(
   image: string;
   tag: string;
   content: string;
-  variant: 'slim' | 'custom';
+  variant: 'base' | 'custom';
 }> {
   const result = await getDockerfileContent(which);
   if (!result) return null;
@@ -917,7 +917,7 @@ export async function ensureDockerImage(
   }
 
   // Final fallback: build the slim image locally
-  const info = await getDockerfileInfo('slim');
+  const info = await getDockerfileInfo(true);
   if (!info) {
     throw new Error(
       'Failed to get Dockerfile content for embedded slim image.',

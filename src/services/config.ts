@@ -41,12 +41,12 @@ export interface OxConfig {
   /**
    * Build sandbox image from Dockerfile instead of pulling.
    * - false/undefined (default): pull from GHCR, don't build
-   * - true | 'slim': build using embedded slim.Dockerfile
-   * - other string: path to custom Dockerfile to build from
+   * - true: build using embedded base.Dockerfile
+   * - string: path to custom Dockerfile to build from
    *
    * When set, takes precedence over sandboxBaseImage.
    */
-  buildSandboxFromDockerfile?: boolean | 'slim' | string;
+  buildSandboxFromDockerfile?: boolean | string;
 
   /**
    * Relative paths to overlay with isolated Docker volume mounts (mount mode only).

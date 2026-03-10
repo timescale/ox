@@ -1,6 +1,6 @@
 import { Command, Option } from 'commander';
-// Import the embedded slim Dockerfile to compute its hash
-import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
+// Import the embedded base Dockerfile to compute its hash
+import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import {
@@ -27,7 +27,7 @@ export const sandboxCommand = new Command('sandbox')
           agent?: 'claude' | 'opencode' | 'codex';
           image?: boolean;
         }) => {
-          const hash = computeDockerfileHash(SLIM_DOCKERFILE);
+          const hash = computeDockerfileHash(BASE_DOCKERFILE);
 
           if (options.image) {
             if (options.agent) {

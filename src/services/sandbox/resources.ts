@@ -6,7 +6,7 @@
 // the resource cleanup workflow.
 // ============================================================================
 
-import SLIM_DOCKERFILE from '../../../sandbox/slim.Dockerfile' with {
+import BASE_DOCKERFILE from '../../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import type { AgentType } from '../config.ts';
@@ -513,7 +513,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
   }
   log.debug({ imageCount: images.length }, 'Docker images fetched');
 
-  const currentDockerfileHash = computeDockerfileHash(SLIM_DOCKERFILE);
+  const currentDockerfileHash = computeDockerfileHash(BASE_DOCKERFILE);
   const localBaseImage = `ox-sandbox:md5-${currentDockerfileHash}`;
 
   // Build the set of current GHCR tags (base + all agent variants)

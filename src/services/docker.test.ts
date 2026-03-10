@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
+import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import {
@@ -187,7 +187,7 @@ describe('docker service', () => {
 
     test('returns content-hash-tagged image (not :latest or version)', async () => {
       const config = await resolveSandboxImage({});
-      const hash = computeDockerfileHash(SLIM_DOCKERFILE);
+      const hash = computeDockerfileHash(BASE_DOCKERFILE);
       expect(config.image).not.toContain(':latest');
       expect(config.image).toBe(`ghcr.io/timescale/ox/sandbox:${hash}`);
     });

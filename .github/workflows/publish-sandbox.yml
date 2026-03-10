@@ -62,7 +62,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./sandbox
-          file: ./sandbox/slim.Dockerfile
+          file: ./sandbox/base.Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ needs.compute-tags.outputs.base-image }}
