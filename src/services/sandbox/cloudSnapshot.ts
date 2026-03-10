@@ -22,9 +22,9 @@ export type SnapshotBuildProgress =
 
 export function getBaseSnapshotSlug(): string {
   // Content-hash based: slug only changes when base build steps change.
-  // Format: ox-cloud-{12-char-hash}, truncated to 32 chars.
+  // Format: ox-base-{12-char-hash}, truncated to 32 chars.
   const hash = computeCloudBaseHash();
-  return `ox-cloud-${hash}`.slice(0, 32).replace(/-+$/, '');
+  return `ox-base-${hash}`.slice(0, 32).replace(/-+$/, '');
 }
 
 /**

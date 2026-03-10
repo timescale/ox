@@ -99,7 +99,7 @@ interface ImageClassificationContext {
 // ============================================================================
 
 /** Known Ox snapshot slug prefixes. */
-const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'ox-cloud-', 'ox-', 'oxn-'];
+const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'ox-', 'oxn-'];
 
 /** Known Ox volume slug prefixes. */
 const OX_VOLUME_PREFIXES = ['oxb-', 'oxa-', 'oxe-', 'oxs-', 'oxr-'];
@@ -109,8 +109,8 @@ const OX_VOLUME_PREFIXES = ['oxb-', 'oxa-', 'oxe-', 'oxs-', 'oxr-'];
  * Returns null for non-Ox snapshots (unrecognized slug prefix).
  *
  * Rules:
- * - `ox-base-*` / `ox-cloud-*` → "Base Snapshot": `current` if matches getBaseSnapshotSlug(), else `old`
- * - `ox-*` (not `ox-base-*` or `ox-cloud-*`) → "Agent Snapshot": `current` if in currentAgentSlugs, else `old`
+ * - `ox-base-*` → "Base Snapshot": `current` if matches getBaseSnapshotSlug(), else `old`
+ * - `ox-*` (not `ox-base-*`) → "Agent Snapshot": `current` if in currentAgentSlugs, else `old`
  * - `oxn-*` → "Session Snapshot": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
  * - Other prefixes → null (not an Ox resource, skip)
@@ -135,11 +135,8 @@ export function classifyCloudSnapshot(
     sourceVolumeSlug: snapshot.volume.slug,
   };
 
-  // Base snapshots (legacy ox-base-* and new ox-cloud-*)
-  if (
-    snapshot.slug.startsWith('ox-base-') ||
-    snapshot.slug.startsWith('ox-cloud-')
-  ) {
+  // Base snapshots (ox-base-*)
+  if (snapshot.slug.startsWith('ox-base-')) {
     return {
       ...base,
       category: 'Base Snapshot',
@@ -147,11 +144,10 @@ export function classifyCloudSnapshot(
     };
   }
 
-  // Agent overlay snapshots (ox-{hash}-{agent}-{agentVer}, but NOT ox-base-* or ox-cloud-*)
+  // Agent overlay snapshots (ox-{hash}-{agent}-{agentVer}, but NOT ox-base-*)
   if (
     snapshot.slug.startsWith('ox-') &&
-    !snapshot.slug.startsWith('ox-base-') &&
-    !snapshot.slug.startsWith('ox-cloud-')
+    !snapshot.slug.startsWith('ox-base-')
   ) {
     return {
       ...base,
