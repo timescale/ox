@@ -45,18 +45,21 @@ export async function resolvePromptInput(
   prompt: string | undefined,
   stdin?: Readable & { isTTY?: boolean },
 ): Promise<ResolvedPromptInput> {
+  const trimmed = prompt?.trim();
+
   // Explicit `-` means "read from stdin"
-  if (prompt?.trim() === '-') {
+  if (trimmed === '-') {
     const stdinPrompt = await readPromptFromStdin(stdin);
     if (stdinPrompt) {
       return { prompt: stdinPrompt, source: 'stdin' };
     }
-    return { prompt: undefined, source: 'none' };
+    throw new Error(
+      'Expected prompt on stdin (got "-") but stdin is empty or a TTY',
+    );
   }
 
-  const argPrompt = prompt?.trim();
-  if (argPrompt) {
-    return { prompt: argPrompt, source: 'arg' };
+  if (trimmed) {
+    return { prompt: trimmed, source: 'arg' };
   }
 
   // Auto-detect: fall through to stdin if available
@@ -69,5 +72,5 @@ export async function resolvePromptInput(
 }
 
 export function isMultiWordPrompt(prompt: string): boolean {
-  return prompt.trim().split(/\s+/).length > 1;
+  return /\S\s+\S/.test(prompt);
 }

@@ -76,12 +76,10 @@ describe('resolvePromptInput', () => {
     });
   });
 
-  test('returns none when prompt is "-" but stdin is empty/TTY', async () => {
-    const result = await resolvePromptInput('-', createStdin([], true));
-    expect(result).toEqual({
-      prompt: undefined,
-      source: 'none',
-    });
+  test('throws when prompt is "-" but stdin is empty/TTY', async () => {
+    await expect(
+      resolvePromptInput('-', createStdin([], true)),
+    ).rejects.toThrow('Expected prompt on stdin');
   });
 
   test('reads from stdin when prompt is " - " (padded)', async () => {
