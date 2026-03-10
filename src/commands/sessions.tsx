@@ -770,7 +770,7 @@ function SessionsApp({
 
       if (targetView === 'detail' && session) {
         goToDetail(session);
-      } else if (targetView === 'starting' && prompt) {
+      } else if (targetView === 'starting' && prompt != null) {
         const agent = initialAgent ?? cfg.agent ?? 'opencode';
         const model = initialModel ?? cfg.model ?? '';
 
