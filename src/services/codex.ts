@@ -28,7 +28,7 @@ const containerPaths = {
   configToml: join(CONTAINER_HOME, '.codex', 'config.toml'),
 };
 
-const codexCredsValid = (creds?: CodexAuthJson | null): boolean => {
+export const codexCredsValid = (creds?: CodexAuthJson | null): boolean => {
   if (!creds) return false;
   // API key auth
   if (creds.auth_mode === 'apikey' && creds.OPENAI_API_KEY) return true;
@@ -52,44 +52,69 @@ const codexCredsValid = (creds?: CodexAuthJson | null): boolean => {
  * Read codex credentials from the host system's config directory.
  * This is a read-only source — codex itself manages this file.
  */
-const readHostCredentials = async (): Promise<CodexAuthJson | null> => {
-  try {
-    const hostAuth = file(homePaths.authJson);
-    if (!(await hostAuth.exists())) {
-      log.debug('Codex auth.json not found in host config directory');
-      return null;
+export const readHostCodexCredentials =
+  async (): Promise<CodexAuthJson | null> => {
+    try {
+      const hostAuth = file(homePaths.authJson);
+      if (!(await hostAuth.exists())) {
+        log.debug('Codex auth.json not found in host config directory');
+        return null;
+      }
+      const creds = (await hostAuth.json()) as CodexAuthJson;
+      if (codexCredsValid(creds)) {
+        log.debug('Found valid codex credentials in host config directory');
+        return creds;
+      }
+      log.debug(
+        'Codex auth.json present in host config directory, but invalid.',
+      );
+    } catch (err) {
+      log.debug({ err }, 'Failed to read codex auth.json from host.');
     }
-    const creds = (await hostAuth.json()) as CodexAuthJson;
-    if (codexCredsValid(creds)) {
-      log.debug('Found valid codex credentials in host config directory');
-      return creds;
-    }
-    log.debug('Codex auth.json present in host config directory, but invalid.');
-  } catch (err) {
-    log.debug({ err }, 'Failed to read codex auth.json from host.');
-  }
-  return null;
-};
+    return null;
+  };
 
 const OX_CODEX_ACCOUNT = 'codex/auth.json';
 
-const readOxCredentialCache = async (): Promise<CodexAuthJson | null> => {
-  try {
-    const raw = await getOxSecret(OX_CODEX_ACCOUNT);
-    const creds = JSON.parse(raw || '{}') as CodexAuthJson;
-    if (codexCredsValid(creds)) {
-      log.debug('Found valid codex credentials in ox keyring');
-      return creds;
+export const readOxCodexCredentialCache =
+  async (): Promise<CodexAuthJson | null> => {
+    try {
+      const raw = await getOxSecret(OX_CODEX_ACCOUNT);
+      const creds = JSON.parse(raw || '{}') as CodexAuthJson;
+      if (codexCredsValid(creds)) {
+        log.debug('Found valid codex credentials in ox keyring');
+        return creds;
+      }
+      log.debug('Codex credentials present in ox keyring, but invalid.');
+    } catch {
+      log.debug('No codex/auth.json found in ox keyring');
     }
-    log.debug('Codex credentials present in ox keyring, but invalid.');
-  } catch {
-    log.debug('No codex/auth.json found in ox keyring');
-  }
-  return null;
+    return null;
+  };
+
+/**
+ * Write Codex credentials to the ox keyring cache and in-memory cache.
+ */
+export const writeOxCodexCredentials = async (
+  creds: CodexAuthJson,
+): Promise<void> => {
+  await setOxSecret(OX_CODEX_ACCOUNT, JSON.stringify(creds));
+  writeCache('codexAuthJson', creds);
 };
 
-const writeOxCredentialCache = async (creds: CodexAuthJson): Promise<void> => {
-  await setOxSecret(OX_CODEX_ACCOUNT, JSON.stringify(creds));
+/**
+ * Write Codex credentials back to the host config file.
+ * Best-effort — logs errors but does not throw.
+ */
+export const writeHostCodexCredentials = async (
+  creds: CodexAuthJson,
+): Promise<void> => {
+  try {
+    await Bun.write(homePaths.authJson, JSON.stringify(creds, null, 2));
+    log.debug('Wrote codex credentials to host file');
+  } catch (err) {
+    log.warn({ err }, 'Failed to write codex credentials to host file');
+  }
 };
 
 /**
@@ -100,9 +125,9 @@ const writeOxCredentialCache = async (creds: CodexAuthJson): Promise<void> => {
  * behaviour in the codex CLI.
  */
 export const hasValidCodexFileCredentials = async (): Promise<boolean> => {
-  const host = await readHostCredentials();
+  const host = await readHostCodexCredentials();
   if (codexCredsValid(host)) return true;
-  const cached = await readOxCredentialCache();
+  const cached = await readOxCodexCredentialCache();
   return !!(cached && codexCredsValid(cached));
 };
 
@@ -111,8 +136,8 @@ export const hasValidCodexFileCredentials = async (): Promise<boolean> => {
  * If neither source has valid creds, check for OPENAI_API_KEY env var.
  */
 const mergeCredentials = async (): Promise<CodexAuthJson> => {
-  const host = await readHostCredentials();
-  const cached = await readOxCredentialCache();
+  const host = await readHostCodexCredentials();
+  const cached = await readOxCodexCredentialCache();
 
   // Prefer host if valid, otherwise cached
   if (host && codexCredsValid(host)) {
@@ -160,8 +185,7 @@ const captureCodexCredentialsFromContainer = async (
     const creds = JSON.parse(content) as CodexAuthJson;
     if (codexCredsValid(creds)) {
       log.debug('Valid codex credentials found in container');
-      await writeOxCredentialCache(creds);
-      writeCache('codexAuthJson', creds);
+      await writeOxCodexCredentials(creds);
       return true;
     }
     log.debug('Invalid codex credentials found in container');
