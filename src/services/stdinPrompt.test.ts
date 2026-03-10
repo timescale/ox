@@ -64,6 +64,17 @@ describe('resolvePromptInput', () => {
       source: 'none',
     });
   });
+
+  test('falls through to stdin when positional prompt is blank', async () => {
+    const result = await resolvePromptInput(
+      '   ',
+      createStdin(['fallback prompt'], false),
+    );
+    expect(result).toEqual({
+      prompt: 'fallback prompt',
+      source: 'stdin',
+    });
+  });
 });
 
 describe('isMultiWordPrompt', () => {

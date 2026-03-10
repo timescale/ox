@@ -5,25 +5,45 @@ export interface ResolvedPromptInput {
   source: 'arg' | 'stdin' | 'none';
 }
 
+/**
+ * Read prompt text from stdin when it is redirected (pipe or file).
+ *
+ * When no custom stream is provided we use `Bun.stdin.text()` instead of
+ * iterating `process.stdin` with `for await`.  A transitive dependency
+ * (`build-strap/src/prompt.js`) performs `import { stdin } from 'process'`
+ * at module-evaluation time, which triggers a Bun bug that eagerly drains
+ * file-backed stdin before user code can read it.  `Bun.stdin` is not
+ * affected by this bug.
+ *
+ * The optional `stdin` parameter is retained so tests can inject a fake
+ * `Readable` stream.
+ */
 export async function readPromptFromStdin(
-  stdin: Readable & { isTTY?: boolean } = process.stdin,
+  stdin?: Readable & { isTTY?: boolean },
 ): Promise<string | undefined> {
-  if (stdin.isTTY) {
+  if (stdin) {
+    if (stdin.isTTY) {
+      return undefined;
+    }
+    let text = '';
+    for await (const chunk of stdin) {
+      text += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString();
+    }
+    const prompt = text.trim();
+    return prompt.length > 0 ? prompt : undefined;
+  }
+
+  // Default path: use Bun.stdin to avoid the eager-drain bug.
+  if (process.stdin.isTTY) {
     return undefined;
   }
-
-  let text = '';
-  for await (const chunk of stdin) {
-    text += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString();
-  }
-
-  const prompt = text.trim();
-  return prompt.length > 0 ? prompt : undefined;
+  const text = (await Bun.stdin.text()).trim();
+  return text.length > 0 ? text : undefined;
 }
 
 export async function resolvePromptInput(
   prompt: string | undefined,
-  stdin: Readable & { isTTY?: boolean } = process.stdin,
+  stdin?: Readable & { isTTY?: boolean },
 ): Promise<ResolvedPromptInput> {
   const argPrompt = prompt?.trim();
   if (argPrompt) {

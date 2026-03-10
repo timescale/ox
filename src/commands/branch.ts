@@ -279,7 +279,11 @@ export const branchCommand = withBranchOptions(
 ).action(async (prompt: string | undefined, options: BranchOptions) => {
   const resolved = await resolvePromptInput(prompt);
   if (!resolved.prompt) {
-    console.error('Error: prompt is required');
+    console.error(
+      !process.stdin.isTTY
+        ? 'Error: prompt is required (stdin was redirected but empty)'
+        : 'Error: prompt is required',
+    );
     process.exit(1);
   }
 

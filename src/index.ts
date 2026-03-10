@@ -81,7 +81,9 @@ withBranchOptions(program)
         return;
       }
     } else if (!process.stdin.isTTY) {
-      console.error('Error: no prompt provided on stdin');
+      console.error(
+        'Error: prompt is required (stdin was redirected but empty)',
+      );
       process.exit(1);
     }
 
