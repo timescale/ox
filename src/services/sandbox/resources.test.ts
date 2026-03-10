@@ -560,10 +560,8 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
-      currentGhcrTags: new Set([
-        'ghcr.io/timescale/ox/sandbox-slim:0.12.0',
-        'ghcr.io/timescale/ox/sandbox-slim:latest',
-      ]),
+      currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -582,6 +580,7 @@ describe('classifyDockerImage', () => {
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -589,15 +588,16 @@ describe('classifyDockerImage', () => {
     expect(result.category).toBe('Local Build');
   });
 
-  test('current agent overlay image matches base hash with agent suffix', () => {
+  test('current agent overlay image matches base hash and agent version', () => {
     const image = makeImage({
       repository: 'ox-sandbox',
-      tag: 'md5-abcdef123456-claude-2.1.70',
+      tag: 'md5-abcdef123456-claude-2.1.71',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
+      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -608,12 +608,13 @@ describe('classifyDockerImage', () => {
   test('old agent overlay image has different base hash', () => {
     const image = makeImage({
       repository: 'ox-sandbox',
-      tag: 'md5-oldoldhash999-claude-2.1.70',
+      tag: 'md5-oldoldhash999-claude-2.1.71',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
+      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -621,18 +622,33 @@ describe('classifyDockerImage', () => {
     expect(result.category).toBe('Local Build');
   });
 
-  test('current GHCR image matches version tag', () => {
+  test('old agent overlay has current base hash but old agent version', () => {
     const image = makeImage({
-      repository: 'ghcr.io/timescale/ox/sandbox-slim',
-      tag: '0.12.0',
+      repository: 'ox-sandbox',
+      tag: 'md5-abcdef123456-claude-2.1.70',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
-      currentGhcrTags: new Set([
-        'ghcr.io/timescale/ox/sandbox-slim:0.12.0',
-        'ghcr.io/timescale/ox/sandbox-slim:latest',
-      ]),
+      currentGhcrTags: new Set(),
+      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      activeContainerIdPrefixes: new Set(),
+    });
+
+    expect(result.status).toBe('old');
+    expect(result.category).toBe('Local Build');
+  });
+
+  test('current GHCR image matches content hash tag', () => {
+    const image = makeImage({
+      repository: 'ghcr.io/timescale/ox/sandbox',
+      tag: 'abcdef123456',
+    });
+
+    const result = classifyDockerImage(image, {
+      currentDockerfileHash: 'abcdef123456',
+      currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -640,18 +656,19 @@ describe('classifyDockerImage', () => {
     expect(result.category).toBe('GHCR Image');
   });
 
-  test('current GHCR image matches latest tag', () => {
+  test('current GHCR agent image matches tag', () => {
     const image = makeImage({
-      repository: 'ghcr.io/timescale/ox/sandbox-slim',
-      tag: 'latest',
+      repository: 'ghcr.io/timescale/ox/sandbox',
+      tag: 'abcdef123456-claude-2.1.71',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set([
-        'ghcr.io/timescale/ox/sandbox-slim:0.12.0',
-        'ghcr.io/timescale/ox/sandbox-slim:latest',
+        'ghcr.io/timescale/ox/sandbox:abcdef123456',
+        'ghcr.io/timescale/ox/sandbox:abcdef123456-claude-2.1.71',
       ]),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -661,16 +678,14 @@ describe('classifyDockerImage', () => {
 
   test('old GHCR image does not match current tags', () => {
     const image = makeImage({
-      repository: 'ghcr.io/timescale/ox/sandbox-slim',
-      tag: '0.10.0',
+      repository: 'ghcr.io/timescale/ox/sandbox',
+      tag: 'oldoldhash9999',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
-      currentGhcrTags: new Set([
-        'ghcr.io/timescale/ox/sandbox-slim:0.12.0',
-        'ghcr.io/timescale/ox/sandbox-slim:latest',
-      ]),
+      currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -678,22 +693,20 @@ describe('classifyDockerImage', () => {
     expect(result.category).toBe('GHCR Image');
   });
 
-  test('GHCR full variant is also classified', () => {
+  test('legacy GHCR sandbox-slim images are classified as old', () => {
     const image = makeImage({
-      repository: 'ghcr.io/timescale/ox/sandbox-full',
+      repository: 'ghcr.io/timescale/ox/sandbox-slim',
       tag: '0.12.0',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
-      currentGhcrTags: new Set([
-        'ghcr.io/timescale/ox/sandbox-full:0.12.0',
-        'ghcr.io/timescale/ox/sandbox-full:latest',
-      ]),
+      currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
-    expect(result.status).toBe('current');
+    expect(result.status).toBe('old');
     expect(result.category).toBe('GHCR Image');
   });
 
@@ -707,6 +720,7 @@ describe('classifyDockerImage', () => {
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(['abc123def456']),
     });
 
@@ -724,6 +738,7 @@ describe('classifyDockerImage', () => {
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -742,6 +757,7 @@ describe('classifyDockerImage', () => {
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
+      currentLocalOverlayTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -758,13 +774,14 @@ describe('classifyDockerImage', () => {
     });
     const image2 = makeImage({
       id: 'sha256:sameid',
-      repository: 'ghcr.io/timescale/ox/sandbox-slim',
-      tag: '0.12.0',
+      repository: 'ghcr.io/timescale/ox/sandbox',
+      tag: 'abcdef123456',
     });
 
     const ctx = {
       currentDockerfileHash: 'abcdef123456',
-      currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox-slim:0.12.0']),
+      currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
+      currentLocalOverlayTags: new Set<string>(),
       activeContainerIdPrefixes: new Set<string>(),
     };
 
@@ -774,7 +791,7 @@ describe('classifyDockerImage', () => {
     // IDs must be unique even when Docker image IDs are the same
     expect(r1.id).not.toBe(r2.id);
     expect(r1.id).toBe('ox-sandbox:md5-abcdef123456');
-    expect(r2.id).toBe('ghcr.io/timescale/ox/sandbox-slim:0.12.0');
+    expect(r2.id).toBe('ghcr.io/timescale/ox/sandbox:abcdef123456');
   });
 });
 

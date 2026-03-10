@@ -138,6 +138,9 @@ export async function getModelsForAgent(
 export const useAgentModels = (
   refreshKey: number | string | null = null,
   enabled = true,
+  /** When set, only fetch dynamic models (opencode) when this agent is selected.
+   *  Pass null to eagerly fetch all agents (config wizard behavior). */
+  activeAgent: AgentType | null = null,
 ): Record<AgentType, null | readonly Model[]> => {
   const [map, setMap] = useState<Record<AgentType, null | readonly Model[]>>({
     claude: CLAUDE_MODELS,
@@ -147,6 +150,9 @@ export const useAgentModels = (
 
   useEffect(() => {
     if (!enabled) return;
+    // Only fetch opencode models when opencode is selected (or when no
+    // activeAgent filter is set, e.g. in the config wizard).
+    if (activeAgent != null && activeAgent !== 'opencode') return;
     // Reset opencode models to null to show loading state during refresh
     // refreshKey is used to trigger re-fetching models after adding a provider
     if (refreshKey) {
@@ -161,7 +167,7 @@ export const useAgentModels = (
         opencode: models,
       }));
     });
-  }, [refreshKey, enabled]);
+  }, [refreshKey, enabled, activeAgent]);
 
   return map;
 };

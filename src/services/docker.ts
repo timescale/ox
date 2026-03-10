@@ -6,7 +6,6 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
-import packageJson from '../../package.json' with { type: 'json' };
 // Import agent install scripts as text - embedded in the binary
 import INSTALL_CLAUDE from '../../sandbox/agents/install-claude.sh' with {
   type: 'text',
@@ -20,11 +19,8 @@ import INSTALL_OPENCODE from '../../sandbox/agents/install-opencode.sh' with {
 import INSTALL_TIGER from '../../sandbox/agents/install-tiger.sh' with {
   type: 'text',
 };
-// Import both Dockerfiles as text - Bun's bundler embeds these in the binary
-import FULL_DOCKERFILE from '../../sandbox/full.Dockerfile' with {
-  type: 'text',
-};
-import SLIM_DOCKERFILE from '../../sandbox/slim.Dockerfile' with {
+// Import Dockerfile as text - Bun's bundler embeds this in the binary
+import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import toolVersions from '../../sandbox/versions.json' with { type: 'json' };
@@ -45,7 +41,6 @@ import {
   type OxConfig,
   projectConfigDir,
   readConfig,
-  userConfigDir,
 } from './config';
 import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
 import { getGhConfigFiles } from './gh';
@@ -248,43 +243,10 @@ const DOCKER_IMAGE_NAME = 'ox-sandbox';
 const GHCR_BASE = 'ghcr.io/timescale/ox';
 
 // ============================================================================
-// Pull TTL - avoid excessive pulls by tracking last pull time
+// Image name for GHCR
 // ============================================================================
 
-/** How long before we re-pull an image tag (4 hours) */
-const PULL_TTL_MS = 4 * 60 * 60 * 1000;
-
-function getPullStatusPath(): string {
-  return join(userConfigDir(), 'pull-status.json');
-}
-
-interface PullStatus {
-  [imageTag: string]: number; // timestamp (ms) of last successful pull
-}
-
-const readPullStatus = (): Promise<PullStatus> =>
-  Bun.file(getPullStatusPath())
-    .json()
-    .catch(() => ({}));
-
-async function recordPullTime(imageTag: string): Promise<void> {
-  try {
-    const status = await readPullStatus();
-    status[imageTag] = Date.now();
-    await Bun.write(getPullStatusPath(), JSON.stringify(status));
-  } catch (error) {
-    log.error({ error, imageTag }, 'Failed to record pull time');
-  }
-}
-
-async function shouldPull(imageTag: string): Promise<boolean> {
-  const status = await readPullStatus();
-  const lastPull = status[imageTag];
-  if (lastPull == null) return true;
-  return Date.now() - lastPull > PULL_TTL_MS;
-}
-
-type DockerfileVariant = 'slim' | 'full';
+const GHCR_IMAGE_NAME = `${GHCR_BASE}/sandbox`;
 
 export function computeDockerfileHash(content: string): string {
   const hasher = new Bun.CryptoHasher('md5');
@@ -342,11 +304,10 @@ export function getAgentOverlayTag(
 /**
  * Ensure an agent-specific overlay image exists on top of the base image.
  *
- * The overlay is created by:
- * 1. Running a temporary container from the base image
- * 2. Writing the agent + tiger install scripts into it
- * 3. Executing them
- * 4. Committing the container as a new image
+ * Resolution order:
+ * 1. Check if overlay exists locally
+ * 2. Try to pull from GHCR (pre-built agent image)
+ * 3. Build locally via docker run + exec + commit
  *
  * The overlay image tag encodes the base hash, agent name, and version
  * so that any change to the base or agent version triggers a rebuild.
@@ -364,7 +325,28 @@ export async function ensureAgentOverlay(
     return overlayTag;
   }
 
-  log.info({ overlayTag, baseImage, agent }, 'Building agent overlay image');
+  // Try to pull pre-built agent image from GHCR
+  const ghcrAgentTag = getGhcrAgentTag(agent);
+  log.debug({ ghcrAgentTag, agent }, 'Trying to pull agent image from GHCR');
+  options?.onProgress?.({
+    type: 'pulling',
+    message: `Pulling ${agent} agent image`,
+  });
+  if (await tryPullImage(ghcrAgentTag)) {
+    // Tag the GHCR image with the local overlay tag for consistency
+    if (ghcrAgentTag !== overlayTag) {
+      await $`docker tag ${ghcrAgentTag} ${overlayTag}`.quiet().nothrow();
+      invalidateImageExistsCache(overlayTag);
+    }
+    log.info({ overlayTag, agent }, 'Agent overlay image pulled from GHCR');
+    return overlayTag;
+  }
+
+  // Fall back to building locally
+  log.info(
+    { overlayTag, baseImage, agent },
+    'Building agent overlay image locally',
+  );
   options?.onProgress?.({
     type: 'building',
     message: `Installing ${agent} agent`,
@@ -398,6 +380,7 @@ export async function ensureAgentOverlay(
     // 4. Clean up temp files and commit
     await $`docker exec ${containerName} rm -f /tmp/install-agent.sh /tmp/install-tiger.sh`.quiet();
     await $`docker commit ${containerName} ${overlayTag}`.quiet();
+    invalidateImageExistsCache(overlayTag);
 
     log.info({ overlayTag }, 'Agent overlay image built successfully');
     return overlayTag;
@@ -412,15 +395,23 @@ export async function ensureAgentOverlay(
   }
 }
 
-export function getGhcrImageTags(variant: DockerfileVariant): {
-  version: string;
-  latest: string;
-} {
-  const imageName = `${GHCR_BASE}/sandbox-${variant}`;
-  return {
-    version: `${imageName}:${packageJson.version}`,
-    latest: `${imageName}:latest`,
-  };
+/**
+ * Get the GHCR image tag for the base sandbox image.
+ * Tag is the content hash of the Dockerfile.
+ */
+export function getGhcrBaseTag(): string {
+  const hash = computeDockerfileHash(BASE_DOCKERFILE);
+  return `${GHCR_IMAGE_NAME}:${hash}`;
+}
+
+/**
+ * Get the GHCR image tag for an agent overlay image.
+ * Tag format: <dockerfile-hash>-<agent>-<agent-version>
+ */
+export function getGhcrAgentTag(agent: AgentType): string {
+  const hash = computeDockerfileHash(BASE_DOCKERFILE);
+  const version = getAgentVersion(agent);
+  return `${GHCR_IMAGE_NAME}:${hash}-${agent}-${version}`;
 }
 
 /**
@@ -429,19 +420,15 @@ export function getGhcrImageTags(variant: DockerfileVariant): {
  */
 async function getDockerfileContent(
   which?: string | boolean | null,
-): Promise<{ content: string; variant: DockerfileVariant | 'custom' } | null> {
+): Promise<{ content: string; variant: 'base' | 'custom' } | null> {
   if (!which) return null;
 
-  if (which === true || which === 'slim') {
-    return { content: SLIM_DOCKERFILE, variant: 'slim' };
-  }
-
-  if (which === 'full') {
-    return { content: FULL_DOCKERFILE, variant: 'full' };
+  if (which === true) {
+    return { content: BASE_DOCKERFILE, variant: 'base' };
   }
 
   // Custom path - read file
-  const file = Bun.file(which);
+  const file = Bun.file(typeof which === 'string' ? which : '');
   if (!(await file.exists())) {
     throw new Error(`Dockerfile not found: ${which}`);
   }
@@ -454,7 +441,7 @@ async function getDockerfileInfo(
   image: string;
   tag: string;
   content: string;
-  variant: DockerfileVariant | 'custom';
+  variant: 'base' | 'custom';
 }> {
   const result = await getDockerfileContent(which);
   if (!result) return null;
@@ -479,22 +466,6 @@ export interface SandboxImageConfig {
   needsBuild: boolean;
   /** Dockerfile content if building */
   dockerfileContent?: string;
-  /** Which GHCR variant to use for cache ('slim' | 'full') */
-  cacheVariant: DockerfileVariant;
-}
-
-/**
- * Module-level cache for the image name that `ensureDockerImage` actually
- * resolved (which may differ from the versioned tag returned by the default
- * resolution logic — e.g. when falling back to `:latest`).
- * Once set, `resolveSandboxImage` returns this image so that all downstream
- * callers (runInDocker, ghAuth, etc.) use the image that is actually present.
- */
-let ensuredImageOverride: string | null = null;
-
-/** Reset the cached image override. Exported for testing only. */
-export function resetEnsuredImageOverride(): void {
-  ensuredImageOverride = null;
 }
 
 /**
@@ -503,7 +474,7 @@ export function resetEnsuredImageOverride(): void {
  * Priority:
  * 1. buildSandboxFromDockerfile - build from Dockerfile (highest)
  * 2. sandboxBaseImage - use explicit image
- * 3. Default - pull GHCR sandbox-slim image
+ * 3. Default - pull GHCR sandbox image by content hash
  *
  * @param configOverride - Optional config to use instead of reading from filesystem (useful for testing)
  */
@@ -521,14 +492,10 @@ export async function resolveSandboxImage(
       throw new Error('Failed to get Dockerfile content');
     }
 
-    const variant: DockerfileVariant =
-      dockerfile.variant === 'full' ? 'full' : 'slim';
-
     return {
       image: dockerfile.image,
       needsBuild: true,
       dockerfileContent: dockerfile.content,
-      cacheVariant: variant,
     };
   }
 
@@ -537,48 +504,59 @@ export async function resolveSandboxImage(
     return {
       image: config.sandboxBaseImage,
       needsBuild: false,
-      cacheVariant: 'slim', // Not used when needsBuild is false
     };
   }
 
-  // Default: use GHCR sandbox-slim image.
-  // If ensureDockerImage has already resolved the actual image (e.g. fell back
-  // to :latest because the versioned tag wasn't available), use that. Otherwise
-  // return the version-tagged image — ensureDockerImage handles pulling and
-  // falling back to :latest. We intentionally don't fall back to :latest in the
-  // cold path, because that would cause dockerImageExists() to return true and
-  // skip the pull flow entirely — meaning the versioned image would never be pulled.
-  if (ensuredImageOverride) {
-    return {
-      image: ensuredImageOverride,
-      needsBuild: false,
-      cacheVariant: 'slim',
-    };
-  }
-
-  const ghcrTags = getGhcrImageTags('slim');
-
+  // Default: use GHCR sandbox image tagged by Dockerfile content hash.
+  // The hash is deterministic — if the Dockerfile hasn't changed, the tag
+  // is the same across versions. Once pulled, it never needs refreshing.
   return {
-    image: ghcrTags.version,
+    image: getGhcrBaseTag(),
     needsBuild: false,
-    cacheVariant: 'slim',
   };
 }
 
 // ============================================================================
+// In-memory cache for imageExists — avoids redundant `docker image ls` calls
+// during startup when multiple code paths check the same image in quick
+// succession. Entries expire after IMAGE_EXISTS_CACHE_TTL_MS.
+const IMAGE_EXISTS_CACHE_TTL_MS = 10_000;
+const imageExistsCache = new Map<string, { exists: boolean; ts: number }>();
+
 /**
  * Check if a specific Docker image exists locally.
+ * Results are cached briefly to avoid redundant docker CLI calls.
  */
 async function imageExists(imageName: string): Promise<boolean> {
+  const cached = imageExistsCache.get(imageName);
+  if (cached && Date.now() - cached.ts < IMAGE_EXISTS_CACHE_TTL_MS) {
+    log.trace(
+      { imageName, exists: cached.exists, cached: true },
+      'imageExists',
+    );
+    return cached.exists;
+  }
+
   try {
     const proc = await $`docker image ls --format json ${imageName}`.quiet();
     const output = proc.json();
     const exists =
       proc.exitCode === 0 && imageName === `${output.Repository}:${output.Tag}`;
     log.debug({ imageName, exists }, 'imageExists');
+    imageExistsCache.set(imageName, { exists, ts: Date.now() });
     return exists;
   } catch {
+    imageExistsCache.set(imageName, { exists: false, ts: Date.now() });
     return false;
+  }
+}
+
+/** Invalidate cached imageExists result (e.g. after pulling or building). */
+function invalidateImageExistsCache(imageName?: string): void {
+  if (imageName) {
+    imageExistsCache.delete(imageName);
+  } else {
+    imageExistsCache.clear();
   }
 }
 
@@ -596,6 +574,8 @@ export interface DockerImageInfo {
 export async function listOxImages(): Promise<DockerImageInfo[]> {
   const patterns = [
     'ox-sandbox',
+    `${GHCR_BASE}/sandbox`,
+    // Legacy patterns for cleanup of old images
     `${GHCR_BASE}/sandbox-slim`,
     `${GHCR_BASE}/sandbox-full`,
     'ox-resume',
@@ -750,48 +730,30 @@ async function tryPullImage(
 
   const exitCode = await proc.exited;
   if (exitCode === 0) {
-    await recordPullTime(imageTag);
-    return true;
+    invalidateImageExistsCache(imageTag);
   }
-  return false;
+  return exitCode === 0;
 }
 
 type ProgressCallback = (message: string, layers?: PullLayer[]) => void;
 
 /**
  * Pull GHCR image for use as build cache.
- * Tries version-tagged image first, falls back to latest.
- * Returns the image tag that was successfully pulled, or null if all pulls failed.
+ * Uses the content-hash-based tag. Returns the image tag if pulled, or null.
  */
 async function pullGhcrImageForCache(
-  ghcrTags: { version: string; latest: string },
   onProgress?: ProgressCallback,
 ): Promise<string | null> {
-  // Try version-tagged image first (closer cache match)
-  onProgress?.('Pulling versioned sandbox image');
+  const ghcrTag = getGhcrBaseTag();
+  onProgress?.('Pulling sandbox image for cache');
   if (
-    await tryPullImage(ghcrTags.version, (layers) =>
-      onProgress?.('Pulling versioned sandbox image', layers),
+    await tryPullImage(ghcrTag, (layers) =>
+      onProgress?.('Pulling sandbox image for cache', layers),
     )
   ) {
-    return ghcrTags.version;
+    return ghcrTag;
   }
-  log.warn(
-    { image: ghcrTags.version },
-    'Versioned GHCR image not found, falling back to latest',
-  );
-
-  // Fall back to latest
-  onProgress?.('Pulling latest sandbox image');
-  if (
-    await tryPullImage(ghcrTags.latest, (layers) =>
-      onProgress?.('Pulling latest sandbox image', layers),
-    )
-  ) {
-    return ghcrTags.latest;
-  }
-  log.error({ image: ghcrTags.latest }, 'Latest GHCR image not found');
-
+  log.warn({ image: ghcrTag }, 'GHCR sandbox image not found for cache');
   return null;
 }
 
@@ -825,6 +787,7 @@ async function buildDockerImage(
   if (exitCode !== 0) {
     throw new Error(`Docker build failed with exit code ${exitCode}`);
   }
+  invalidateImageExistsCache(imageName);
 }
 
 export type PullLayerState = 'waiting' | 'downloading' | 'complete' | 'exists';
@@ -850,7 +813,7 @@ export interface EnsureDockerImageOptions {
  * Handles three flows based on configuration:
  * 1. buildSandboxFromDockerfile - build from Dockerfile (uses GHCR for cache)
  * 2. sandboxBaseImage - pull explicit image (fails if unavailable)
- * 3. Default - pull GHCR sandbox-slim image (version first, then latest)
+ * 3. Default - pull GHCR sandbox image
  *
  * @returns The resolved image name that was ensured
  */
@@ -863,170 +826,141 @@ export async function ensureDockerImage(
 
   onProgress?.({ type: 'checking' });
 
-  const resolved = await (async (): Promise<string> => {
-    // Flow 1: Build from Dockerfile
-    if (imageConfig.needsBuild) {
-      // Check if image already exists locally
-      if (await imageExists(imageConfig.image)) {
-        onProgress?.({ type: 'exists' });
-        return imageConfig.image;
-      }
-
-      // Try to pull GHCR image for cache
-      onProgress?.({
-        type: 'pulling-cache',
-        message: 'Pulling sandbox image for cache',
-      });
-      const ghcrTags = getGhcrImageTags(imageConfig.cacheVariant);
-      const cacheImage = await pullGhcrImageForCache(
-        ghcrTags,
-        (message, layers) =>
-          onProgress?.({ type: 'pulling-cache', message, layers }),
-      );
-
-      // Build from Dockerfile
-      onProgress?.({
-        type: 'building',
-        message: 'Building sandbox docker image',
-      });
-      if (!imageConfig.dockerfileContent) {
-        throw new Error('Dockerfile content is required for building');
-      }
-      await buildDockerImage(
-        imageConfig.image,
-        imageConfig.dockerfileContent,
-        cacheImage,
-      );
-
-      onProgress?.({ type: 'done' });
+  // Flow 1: Build from Dockerfile
+  if (imageConfig.needsBuild) {
+    // Check if image already exists locally
+    if (await imageExists(imageConfig.image)) {
+      onProgress?.({ type: 'exists' });
       return imageConfig.image;
     }
 
-    // Flow 2: sandboxBaseImage configured - must pull, fail if unavailable
-    if (config.sandboxBaseImage) {
-      // Check if already exists locally
-      if (await imageExists(imageConfig.image)) {
-        onProgress?.({ type: 'exists' });
-        return imageConfig.image;
-      }
+    // Try to pull GHCR image for cache
+    onProgress?.({
+      type: 'pulling-cache',
+      message: 'Pulling sandbox image for cache',
+    });
+    const cacheImage = await pullGhcrImageForCache((message, layers) =>
+      onProgress?.({ type: 'pulling-cache', message, layers }),
+    );
 
+    // Build from Dockerfile
+    onProgress?.({
+      type: 'building',
+      message: 'Building sandbox docker image',
+    });
+    if (!imageConfig.dockerfileContent) {
+      throw new Error('Dockerfile content is required for building');
+    }
+    await buildDockerImage(
+      imageConfig.image,
+      imageConfig.dockerfileContent,
+      cacheImage,
+    );
+
+    onProgress?.({ type: 'done' });
+    return imageConfig.image;
+  }
+
+  // Flow 2: sandboxBaseImage configured - must pull, fail if unavailable
+  if (config.sandboxBaseImage) {
+    // Check if already exists locally
+    if (await imageExists(imageConfig.image)) {
+      onProgress?.({ type: 'exists' });
+      return imageConfig.image;
+    }
+
+    onProgress?.({
+      type: 'pulling',
+      message: `Pulling ${imageConfig.image}`,
+    });
+    const pulled = await tryPullImage(imageConfig.image, (layers) =>
       onProgress?.({
         type: 'pulling',
         message: `Pulling ${imageConfig.image}`,
-      });
-      const pulled = await tryPullImage(imageConfig.image, (layers) =>
-        onProgress?.({
-          type: 'pulling',
-          message: `Pulling ${imageConfig.image}`,
-          layers,
-        }),
+        layers,
+      }),
+    );
+    if (!pulled) {
+      throw new Error(
+        `Failed to pull configured sandbox image: ${imageConfig.image}`,
       );
-      if (!pulled) {
-        throw new Error(
-          `Failed to pull configured sandbox image: ${imageConfig.image}`,
-        );
-      }
-      onProgress?.({ type: 'done' });
-      return imageConfig.image;
     }
+    onProgress?.({ type: 'done' });
+    return imageConfig.image;
+  }
 
-    // Flow 3: Default - pull GHCR image (version first, then latest)
-    const ghcrTags = getGhcrImageTags('slim');
+  // Flow 3: Default - pull GHCR image by content hash
+  // Hash-based tags are immutable: once pulled, never needs refreshing.
 
-    // Check if versioned image exists locally (exact version match, no pull needed)
-    if (await imageExists(ghcrTags.version)) {
-      onProgress?.({ type: 'exists' });
-      return ghcrTags.version;
-    }
+  // Check if image exists locally (no pull needed)
+  if (await imageExists(imageConfig.image)) {
+    onProgress?.({ type: 'exists' });
+    return imageConfig.image;
+  }
 
-    // Try to pull versioned image
-    onProgress?.({
-      type: 'pulling',
-      message: 'Pulling versioned sandbox image',
-    });
-    if (
-      await tryPullImage(ghcrTags.version, (layers) =>
-        onProgress?.({
-          type: 'pulling',
-          message: 'Pulling versioned sandbox image',
-          layers,
-        }),
-      )
-    ) {
-      onProgress?.({ type: 'done' });
-      return ghcrTags.version;
-    }
-
-    // Versioned image not available — fall back to :latest
-    // If :latest exists locally, re-pull it if the TTL has expired to ensure freshness
-    const latestExistsLocally = await imageExists(ghcrTags.latest);
-    if (latestExistsLocally && (await shouldPull(ghcrTags.latest))) {
+  // Try to pull from GHCR
+  onProgress?.({
+    type: 'pulling',
+    message: 'Pulling sandbox image',
+  });
+  if (
+    await tryPullImage(imageConfig.image, (layers) =>
       onProgress?.({
         type: 'pulling',
-        message: 'Refreshing latest sandbox image',
-      });
-      await tryPullImage(ghcrTags.latest, (layers) =>
-        onProgress?.({
-          type: 'pulling',
-          message: 'Refreshing latest sandbox image',
-          layers,
-        }),
-      );
-      // Use the local image regardless of whether the refresh pull succeeded
-      onProgress?.({ type: 'done' });
-      return ghcrTags.latest;
-    }
-    if (latestExistsLocally) {
-      // TTL has not expired — use the local image as-is
-      onProgress?.({ type: 'exists' });
-      return ghcrTags.latest;
-    }
-
-    // :latest doesn't exist locally either — pull it
-    onProgress?.({
-      type: 'pulling',
-      message: 'Pulling latest sandbox image',
-    });
-    if (
-      await tryPullImage(ghcrTags.latest, (layers) =>
-        onProgress?.({
-          type: 'pulling',
-          message: 'Pulling latest sandbox image',
-          layers,
-        }),
-      )
-    ) {
-      onProgress?.({ type: 'done' });
-      return ghcrTags.latest;
-    }
-
-    // Final fallback: build the slim image locally
-    const info = await getDockerfileInfo('slim');
-    if (!info) {
-      throw new Error('Failed to get Dockerfile content embedded slim image.');
-    }
-    await buildDockerImage(info.image, info.content);
+        message: 'Pulling sandbox image',
+        layers,
+      }),
+    )
+  ) {
     onProgress?.({ type: 'done' });
-    return info.image;
-  })();
+    return imageConfig.image;
+  }
 
-  // Cache the resolved image so subsequent calls to resolveSandboxImage()
-  // return the image that is actually available locally, rather than the
-  // versioned tag that may not exist (e.g. when we fell back to :latest).
-  ensuredImageOverride = resolved;
-  return resolved;
+  // Final fallback: build the base image locally
+  const info = await getDockerfileInfo(true);
+  if (!info) {
+    throw new Error(
+      'Failed to get Dockerfile content for embedded base image.',
+    );
+  }
+  onProgress?.({
+    type: 'building',
+    message: 'Building sandbox docker image',
+  });
+  await buildDockerImage(info.image, info.content);
+  onProgress?.({ type: 'done' });
+  return info.image;
 }
+
+// In-flight promise map to deduplicate concurrent ensureDockerImageForAgent
+// calls for the same agent (e.g. prebuildAgentImage and credential check
+// both firing when imageReady becomes true).
+const agentImageInFlight = new Map<AgentType, Promise<string>>();
 
 /**
  * Ensure the base Docker image + agent overlay image are both available.
  * Returns the agent-specific overlay image tag, ready to use for containers.
+ *
+ * Concurrent calls for the same agent coalesce into a single resolution.
  */
 export async function ensureDockerImageForAgent(
   agent: AgentType,
   options: EnsureDockerImageOptions = {},
 ): Promise<string> {
-  const baseImage = await ensureDockerImage(options);
-  return ensureAgentOverlay(baseImage, agent, options);
+  const existing = agentImageInFlight.get(agent);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    const baseImage = await ensureDockerImage(options);
+    return ensureAgentOverlay(baseImage, agent, options);
+  })();
+
+  agentImageInFlight.set(agent, promise);
+  try {
+    return await promise;
+  } finally {
+    agentImageInFlight.delete(agent);
+  }
 }
 
 // ============================================================================

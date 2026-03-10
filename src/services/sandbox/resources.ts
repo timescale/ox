@@ -6,7 +6,7 @@
 // the resource cleanup workflow.
 // ============================================================================
 
-import SLIM_DOCKERFILE from '../../../sandbox/slim.Dockerfile' with {
+import BASE_DOCKERFILE from '../../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import type { AgentType } from '../config.ts';
@@ -14,7 +14,9 @@ import { getDenoToken } from '../deno.ts';
 import {
   computeDockerfileHash,
   type DockerImageInfo,
-  getGhcrImageTags,
+  getAgentOverlayTag,
+  getGhcrAgentTag,
+  getGhcrBaseTag,
   listOxSessions as listDockerContainers,
   listOxImages,
 } from '../docker.ts';
@@ -84,6 +86,8 @@ interface VolumeClassificationContext {
 interface ImageClassificationContext {
   currentDockerfileHash: string;
   currentGhcrTags: Set<string>;
+  /** Full local overlay tags that are current (e.g. 'md5-{hash}-claude-2.1.71') */
+  currentLocalOverlayTags: Set<string>;
   /** Container ID prefixes (12-char) for active containers */
   activeContainerIdPrefixes: Set<string>;
 }
@@ -322,12 +326,11 @@ export function classifyDockerImage(
 
   // Local builds (ox-sandbox:md5-*)
   if (image.repository === 'ox-sandbox' && image.tag.startsWith('md5-')) {
-    // Agent overlays have tags like 'md5-{hash}-{agent}-{version}'.
-    // Base images have tags like 'md5-{hash}'. Both are "current" if hash matches.
+    // Base images have tags like 'md5-{hash}' — current if hash matches.
+    // Agent overlays have tags like 'md5-{hash}-{agent}-{version}' — current
+    // only if both the base hash AND agent version match.
     const isCurrentBase = image.tag === `md5-${ctx.currentDockerfileHash}`;
-    const isCurrentOverlay = image.tag.startsWith(
-      `md5-${ctx.currentDockerfileHash}-`,
-    );
+    const isCurrentOverlay = ctx.currentLocalOverlayTags.has(image.tag);
     return {
       ...base,
       category: 'Local Build',
@@ -335,8 +338,8 @@ export function classifyDockerImage(
     };
   }
 
-  // GHCR images (ghcr.io/timescale/ox/sandbox-*)
-  if (image.repository.startsWith('ghcr.io/timescale/ox/sandbox-')) {
+  // GHCR images (ghcr.io/timescale/ox/sandbox or legacy sandbox-slim/sandbox-full)
+  if (image.repository.startsWith('ghcr.io/timescale/ox/sandbox')) {
     const fullTag = `${image.repository}:${image.tag}`;
     return {
       ...base,
@@ -510,17 +513,26 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
   }
   log.debug({ imageCount: images.length }, 'Docker images fetched');
 
-  const currentDockerfileHash = computeDockerfileHash(SLIM_DOCKERFILE);
+  const currentDockerfileHash = computeDockerfileHash(BASE_DOCKERFILE);
+  const localBaseImage = `ox-sandbox:md5-${currentDockerfileHash}`;
 
-  // Build the set of current GHCR tags for both variants
-  const slimTags = getGhcrImageTags('slim');
-  const fullTags = getGhcrImageTags('full');
+  // Build the set of current GHCR tags (base + all agent variants)
+  const agents = ['claude', 'opencode', 'codex'] as const;
   const currentGhcrTags = new Set([
-    slimTags.version,
-    slimTags.latest,
-    fullTags.version,
-    fullTags.latest,
+    getGhcrBaseTag(),
+    ...agents.map((agent) => getGhcrAgentTag(agent)),
   ]);
+
+  // Build the set of current local overlay tags (md5-{hash}-{agent}-{version})
+  // so that overlays with old agent versions are classified as 'old'.
+  const currentLocalOverlayTags = new Set(
+    agents.map((agent) => {
+      const fullTag = getAgentOverlayTag(localBaseImage, agent);
+      // getAgentOverlayTag returns 'ox-sandbox:md5-{hash}-{agent}-{ver}',
+      // but the tag portion (after ':') is what we match against image.tag.
+      return fullTag.split(':')[1] ?? fullTag;
+    }),
+  );
 
   // Build set of container ID prefixes for matching resume images.
   // Resume image tags use the format: <containerId-12>-<nanoid-6>,
@@ -536,6 +548,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
       classifyDockerImage(image, {
         currentDockerfileHash,
         currentGhcrTags,
+        currentLocalOverlayTags,
         activeContainerIdPrefixes,
       }),
     );
