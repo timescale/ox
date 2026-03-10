@@ -545,6 +545,28 @@ describe('classifyCloudVolume', () => {
 
     expect(result.sourceVolumeSlug).toBe('oxa-build-abc123');
   });
+
+  test('volume baseSnapshotSlug is populated from DenoVolume.baseSnapshot', () => {
+    const volume = makeVolume({
+      slug: 'oxa-build-abc123',
+      baseSnapshot: { id: 'snp_abc', slug: 'ox-base-0-17-0-a1b2c3' },
+    });
+
+    const result = assertResource(classifyCloudVolume(volume, { ...emptyCtx }));
+
+    expect(result.baseSnapshotSlug).toBe('ox-base-0-17-0-a1b2c3');
+  });
+
+  test('volume baseSnapshotSlug is undefined when no baseSnapshot', () => {
+    const volume = makeVolume({
+      slug: 'oxb-build-abc123',
+      baseSnapshot: null,
+    });
+
+    const result = assertResource(classifyCloudVolume(volume, { ...emptyCtx }));
+
+    expect(result.baseSnapshotSlug).toBeUndefined();
+  });
 });
 
 // ============================================================================
@@ -865,7 +887,7 @@ describe('getCleanupTargets', () => {
     expect(ids).not.toContain('5');
   });
 
-  test('orders snapshots before volumes before images', () => {
+  test('returns all eligible resources regardless of kind order', () => {
     const resources: SandboxResource[] = [
       {
         id: 'img',
@@ -896,9 +918,10 @@ describe('getCleanupTargets', () => {
     const targets = getCleanupTargets(resources);
 
     expect(targets).toHaveLength(3);
-    expect(targets[0]?.kind).toBe('snapshot');
-    expect(targets[1]?.kind).toBe('volume');
-    expect(targets[2]?.kind).toBe('image');
+    const ids = targets.map((t) => t.id);
+    expect(ids).toContain('img');
+    expect(ids).toContain('vol');
+    expect(ids).toContain('snap');
   });
 
   test('returns empty array when no cleanup targets exist', () => {
@@ -932,69 +955,277 @@ describe('getCleanupTargets', () => {
 });
 
 // ============================================================================
-// groupResourcesByKind
+// groupResourcesByKind (topological sort)
 // ============================================================================
 
 describe('groupResourcesByKind', () => {
-  function makeResource(
-    kind: 'snapshot' | 'volume' | 'image',
-    name: string,
-  ): SandboxResource {
-    return {
-      id: name,
-      provider: kind === 'image' ? 'docker' : 'cloud',
-      kind,
-      name,
-      category: 'Test',
-      status: 'old',
-    };
+  /** Helper to get the group index a resource name appears in */
+  function groupIndexOf(groups: SandboxResource[][], name: string): number {
+    return groups.findIndex((g) => g.some((r) => r.name === name));
   }
-
-  test('groups resources by kind in dependency order', () => {
-    const resources = [
-      makeResource('volume', 'vol-1'),
-      makeResource('snapshot', 'snap-1'),
-      makeResource('image', 'img-1'),
-      makeResource('snapshot', 'snap-2'),
-      makeResource('volume', 'vol-2'),
-    ];
-
-    const groups = groupResourcesByKind(resources);
-    expect(groups).toHaveLength(3);
-
-    // First group: snapshots
-    expect(groups[0]?.map((r) => r.name)).toEqual(['snap-1', 'snap-2']);
-    // Second group: volumes
-    expect(groups[1]?.map((r) => r.name)).toEqual(['vol-1', 'vol-2']);
-    // Third group: images
-    expect(groups[2]?.map((r) => r.name)).toEqual(['img-1']);
-  });
-
-  test('returns single group when all same kind', () => {
-    const resources = [
-      makeResource('volume', 'vol-1'),
-      makeResource('volume', 'vol-2'),
-    ];
-
-    const groups = groupResourcesByKind(resources);
-    expect(groups).toHaveLength(1);
-    expect(groups[0]).toHaveLength(2);
-  });
-
-  test('omits kinds with no resources', () => {
-    const resources = [
-      makeResource('snapshot', 'snap-1'),
-      makeResource('image', 'img-1'),
-    ];
-
-    const groups = groupResourcesByKind(resources);
-    expect(groups).toHaveLength(2);
-    expect(groups[0]?.[0]?.kind).toBe('snapshot');
-    expect(groups[1]?.[0]?.kind).toBe('image');
-  });
 
   test('handles empty input', () => {
     const groups = groupResourcesByKind([]);
     expect(groups).toHaveLength(0);
+  });
+
+  test('resources with no dependencies are all in one group', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: 'snap-1',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'snap-1',
+        category: 'Test',
+        status: 'old',
+      },
+      {
+        id: 'img-1',
+        provider: 'docker',
+        kind: 'image',
+        name: 'img-1',
+        category: 'Test',
+        status: 'old',
+      },
+      {
+        id: 'vol-1',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'vol-1',
+        category: 'Test',
+        status: 'old',
+      },
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    // No dependency links → everything can be deleted in parallel
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(3);
+  });
+
+  test('volume with baseSnapshotSlug is deleted before its base snapshot', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: 'snap-base',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'ox-base-0-17-1',
+        category: 'Base Snapshot',
+        status: 'old',
+      },
+      {
+        id: 'vol-agent',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'oxa-build-abc',
+        category: 'Agent Build Volume',
+        status: 'old',
+        baseSnapshotSlug: 'ox-base-0-17-1',
+      },
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    expect(groups).toHaveLength(2);
+    // Volume must come first (it depends on the snapshot)
+    expect(groups[0]?.map((r) => r.name)).toEqual(['oxa-build-abc']);
+    expect(groups[1]?.map((r) => r.name)).toEqual(['ox-base-0-17-1']);
+  });
+
+  test('snapshot with sourceVolumeSlug is deleted before its source volume', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: 'vol-build',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'oxb-build-xyz',
+        category: 'Build Volume',
+        status: 'old',
+      },
+      {
+        id: 'snap-from-vol',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'ox-base-0-17-1',
+        category: 'Base Snapshot',
+        status: 'old',
+        sourceVolumeSlug: 'oxb-build-xyz',
+      },
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    expect(groups).toHaveLength(2);
+    // Snapshot must come first (it depends on the volume)
+    expect(groups[0]?.map((r) => r.name)).toEqual(['ox-base-0-17-1']);
+    expect(groups[1]?.map((r) => r.name)).toEqual(['oxb-build-xyz']);
+  });
+
+  test('full chain: build vol → base snap → agent vol → agent snap → session vol', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: 'vol-build',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'oxb-build-001',
+        category: 'Build Volume',
+        status: 'old',
+      },
+      {
+        id: 'snap-base',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'ox-base-0-17-1-abc',
+        category: 'Base Snapshot',
+        status: 'old',
+        sourceVolumeSlug: 'oxb-build-001',
+      },
+      {
+        id: 'vol-agent',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'oxa-agent-002',
+        category: 'Agent Build Volume',
+        status: 'old',
+        baseSnapshotSlug: 'ox-base-0-17-1-abc',
+      },
+      {
+        id: 'snap-agent',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'ox-0-17-1-claude-2-1-71',
+        category: 'Agent Snapshot',
+        status: 'old',
+        sourceVolumeSlug: 'oxa-agent-002',
+      },
+      {
+        id: 'vol-session',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'oxs-session-003',
+        category: 'Session Volume',
+        status: 'old',
+        baseSnapshotSlug: 'ox-0-17-1-claude-2-1-71',
+      },
+    ];
+
+    const groups = groupResourcesByKind(resources);
+
+    // The chain is:
+    //   oxs-session-003 (vol, depends on ox-0-17-1-claude-2-1-71)
+    //   → ox-0-17-1-claude-2-1-71 (snap, depends on oxa-agent-002)
+    //   → oxa-agent-002 (vol, depends on ox-base-0-17-1-abc)
+    //   → ox-base-0-17-1-abc (snap, depends on oxb-build-001)
+    //   → oxb-build-001 (vol, no deps in set)
+    //
+    // So deletion order should be: session vol → agent snap → agent vol → base snap → build vol
+
+    // Verify ordering: each resource must be in an earlier group than its dependency
+    const sessionVolIdx = groupIndexOf(groups, 'oxs-session-003');
+    const agentSnapIdx = groupIndexOf(groups, 'ox-0-17-1-claude-2-1-71');
+    const agentVolIdx = groupIndexOf(groups, 'oxa-agent-002');
+    const baseSnapIdx = groupIndexOf(groups, 'ox-base-0-17-1-abc');
+    const buildVolIdx = groupIndexOf(groups, 'oxb-build-001');
+
+    expect(sessionVolIdx).toBeLessThan(agentSnapIdx);
+    expect(agentSnapIdx).toBeLessThan(agentVolIdx);
+    expect(agentVolIdx).toBeLessThan(baseSnapIdx);
+    expect(baseSnapIdx).toBeLessThan(buildVolIdx);
+  });
+
+  test('independent resources are grouped together for parallel deletion', () => {
+    // Two independent chains + a standalone image
+    const resources: SandboxResource[] = [
+      // Chain 1: vol-A depends on snap-A
+      {
+        id: 'snap-A',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'snap-A',
+        category: 'Base Snapshot',
+        status: 'old',
+      },
+      {
+        id: 'vol-A',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'vol-A',
+        category: 'Agent Build Volume',
+        status: 'old',
+        baseSnapshotSlug: 'snap-A',
+      },
+      // Chain 2: vol-B depends on snap-B
+      {
+        id: 'snap-B',
+        provider: 'cloud',
+        kind: 'snapshot',
+        name: 'snap-B',
+        category: 'Base Snapshot',
+        status: 'old',
+      },
+      {
+        id: 'vol-B',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'vol-B',
+        category: 'Agent Build Volume',
+        status: 'old',
+        baseSnapshotSlug: 'snap-B',
+      },
+      // Standalone image (no cloud dependencies)
+      {
+        id: 'img-1',
+        provider: 'docker',
+        kind: 'image',
+        name: 'img-1',
+        category: 'Local Build',
+        status: 'old',
+      },
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    expect(groups).toHaveLength(2);
+
+    // First group: both volumes + the image (all have no blocking deps)
+    const firstNames = groups[0]?.map((r) => r.name).sort();
+    expect(firstNames).toEqual(['img-1', 'vol-A', 'vol-B']);
+
+    // Second group: both snapshots (now unblocked)
+    const secondNames = groups[1]?.map((r) => r.name).sort();
+    expect(secondNames).toEqual(['snap-A', 'snap-B']);
+  });
+
+  test('dependency on resource NOT in cleanup set is ignored', () => {
+    // Volume depends on a snapshot that is NOT being cleaned up (e.g. still current)
+    const resources: SandboxResource[] = [
+      {
+        id: 'vol-1',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'oxa-build-001',
+        category: 'Agent Build Volume',
+        status: 'orphaned',
+        baseSnapshotSlug: 'ox-base-current', // not in cleanup set
+      },
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(1);
+  });
+
+  test('single resource returns single group', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: 'vol-1',
+        provider: 'cloud',
+        kind: 'volume',
+        name: 'vol-1',
+        category: 'Test',
+        status: 'old',
+      },
+    ];
+
+    const groups = groupResourcesByKind(resources);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(1);
   });
 });
