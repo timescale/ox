@@ -813,7 +813,7 @@ export interface EnsureDockerImageOptions {
  * Handles three flows based on configuration:
  * 1. buildSandboxFromDockerfile - build from Dockerfile (uses GHCR for cache)
  * 2. sandboxBaseImage - pull explicit image (fails if unavailable)
- * 3. Default - pull GHCR sandbox-slim image (version first, then latest)
+ * 3. Default - pull GHCR sandbox image
  *
  * @returns The resolved image name that was ensured
  */
@@ -916,11 +916,11 @@ export async function ensureDockerImage(
     return imageConfig.image;
   }
 
-  // Final fallback: build the slim image locally
+  // Final fallback: build the base image locally
   const info = await getDockerfileInfo(true);
   if (!info) {
     throw new Error(
-      'Failed to get Dockerfile content for embedded slim image.',
+      'Failed to get Dockerfile content for embedded base image.',
     );
   }
   onProgress?.({
