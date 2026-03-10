@@ -51,7 +51,13 @@ program
 withBranchOptions(program)
   .argument('[prompt]', 'Natural language description of the task')
   .action(async (prompt, options) => {
-    const resolved = await resolvePromptInput(prompt);
+    let resolved: Awaited<ReturnType<typeof resolvePromptInput>>;
+    try {
+      resolved = await resolvePromptInput(prompt);
+    } catch (err) {
+      console.error(`Error: ${(err as Error).message}`);
+      process.exit(1);
+    }
     log.debug(
       { options, prompt: resolved.prompt, promptSource: resolved.source },
       'Root ox command invoked',

@@ -277,7 +277,13 @@ export const branchCommand = withBranchOptions(
     )
     .argument('[prompt]', 'Natural language description of the task'),
 ).action(async (prompt: string | undefined, options: BranchOptions) => {
-  const resolved = await resolvePromptInput(prompt);
+  let resolved: Awaited<ReturnType<typeof resolvePromptInput>>;
+  try {
+    resolved = await resolvePromptInput(prompt);
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
   if (!resolved.prompt) {
     console.error(
       !process.stdin.isTTY

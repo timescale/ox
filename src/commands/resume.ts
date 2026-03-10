@@ -16,7 +16,13 @@ export async function resumeAction(
   prompt: string | undefined,
   options: { detach?: boolean; shell?: boolean },
 ): Promise<void> {
-  const resolved = await resolvePromptInput(prompt);
+  let resolved: Awaited<ReturnType<typeof resolvePromptInput>>;
+  try {
+    resolved = await resolvePromptInput(prompt);
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
 
   if (options.detach && !resolved.prompt) {
     log.error('Prompt is required for detached resume');
