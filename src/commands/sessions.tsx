@@ -31,6 +31,7 @@ import {
   projectConfig,
   readConfig,
 } from '../services/config';
+import { credentialWatcher } from '../services/credentialWatcher.ts';
 import { type ForkResult, forkDatabase } from '../services/db';
 import { getDenoToken } from '../services/deno';
 import { ensureDockerImage, type PullLayer } from '../services/docker';
@@ -1332,6 +1333,7 @@ export async function runSessionsTui({
       if (bgStore.pendingCount > 0) {
         await bgStore.waitForAll();
       }
+      credentialWatcher.stop();
       break;
     }
 
