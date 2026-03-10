@@ -17,6 +17,7 @@ import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
 import type { SandboxProviderType } from '../services/sandbox';
 import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
+import { resolvePromptInput } from '../services/stdinPrompt.ts';
 import { ensureGitignore } from '../utils/shell.ts';
 import { configAction } from './config';
 
@@ -274,11 +275,34 @@ export const branchCommand = withBranchOptions(
     .description(
       'Create a feature branch with isolated DB fork and start agent sandbox',
     )
-    .argument('<prompt>', 'Natural language description of the task'),
-).action(async (prompt: string, options: BranchOptions) => {
+    .argument('[prompt]', 'Natural language description of the task'),
+).action(async (prompt: string | undefined, options: BranchOptions) => {
+  let resolved: Awaited<ReturnType<typeof resolvePromptInput>>;
+  try {
+    resolved = await resolvePromptInput(prompt);
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  if (!resolved.prompt) {
+    console.error(
+      !process.stdin.isTTY
+        ? 'Error: prompt is required (stdin was redirected but empty)'
+        : 'Error: prompt is required',
+    );
+    process.exit(1);
+  }
+
   // -p (print) or -i (interactive) flags: use non-TUI flow
   if (options.print || options.interactive) {
-    await branchAction(prompt, options);
+    await branchAction(resolved.prompt, options);
+    return;
+  }
+
+  // Redirected stdin was consumed to get the prompt, so we cannot launch
+  // the prompt TUI and expect it to remain interactive.
+  if (resolved.source === 'stdin') {
+    await branchAction(resolved.prompt, options);
     return;
   }
 
@@ -309,7 +333,7 @@ export const branchCommand = withBranchOptions(
   const { runSessionsTui } = await import('./sessions.tsx');
   await runSessionsTui({
     initialView: 'starting',
-    initialPrompt: prompt,
+    initialPrompt: resolved.prompt,
     initialAgent: options.agent,
     initialModel: options.model,
     serviceId: options.serviceId,

@@ -9,13 +9,22 @@ import {
   getSandboxProvider,
   listAllSessions,
 } from '../services/sandbox';
+import { resolvePromptInput } from '../services/stdinPrompt.ts';
 
 export async function resumeAction(
   containerId: string,
   prompt: string | undefined,
   options: { detach?: boolean; shell?: boolean },
 ): Promise<void> {
-  if (options.detach && (!prompt || prompt.trim().length === 0)) {
+  let resolved: Awaited<ReturnType<typeof resolvePromptInput>>;
+  try {
+    resolved = await resolvePromptInput(prompt);
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  if (options.detach && !resolved.prompt) {
     log.error('Prompt is required for detached resume');
     console.error('Error: prompt is required for detached resume');
     process.exit(1);
@@ -69,7 +78,7 @@ export async function resumeAction(
     }
     const result = await provider.resume(targetId, {
       mode,
-      prompt,
+      prompt: resolved.prompt,
     });
     if (mode === 'detached') {
       log.info(
