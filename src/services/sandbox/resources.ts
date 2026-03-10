@@ -56,6 +56,8 @@ export interface SandboxResource {
   createdAt?: string;
   /** For snapshots: the slug of the source volume this snapshot was taken from */
   sourceVolumeSlug?: string;
+  /** For volumes: the slug of the snapshot this volume was forked from */
+  baseSnapshotSlug?: string;
   /** For volumes: slugs of snapshots that depend on this volume */
   childSnapshotSlugs?: string[];
 }
@@ -234,6 +236,7 @@ export function classifyCloudVolume(
     size: volume.allocatedSize,
     region: volume.region,
     bootable: volume.bootable,
+    baseSnapshotSlug: volume.baseSnapshot?.slug ?? undefined,
     childSnapshotSlugs,
   };
 
@@ -671,24 +674,13 @@ export async function listAllResources(): Promise<SandboxResource[]> {
 // Cleanup Helpers
 // ============================================================================
 
-/** Sort order for resource kinds during cleanup: snapshots first, then volumes, then images */
-const KIND_ORDER: Record<ResourceKind, number> = {
-  container: 0,
-  snapshot: 1,
-  volume: 2,
-  image: 3,
-};
-
 /**
- * Filter resources to only those eligible for cleanup (old + orphaned),
- * ordered with snapshots before volumes before images.
+ * Filter resources to only those eligible for cleanup (old + orphaned).
  */
 export function getCleanupTargets(
   resources: SandboxResource[],
 ): SandboxResource[] {
-  return resources
-    .filter((r) => r.status === 'old' || r.status === 'orphaned')
-    .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
+  return resources.filter((r) => r.status === 'old' || r.status === 'orphaned');
 }
 
 /**
@@ -748,35 +740,89 @@ export async function deleteResource(resource: SandboxResource): Promise<void> {
 }
 
 /**
- * Group resources by kind, maintaining the dependency order
- * (snapshots → volumes → images). Each group is a batch that
- * can be deleted in parallel, but the groups themselves must
- * be executed sequentially.
+ * Topologically sort resources into sequential deletion groups.
+ *
+ * Dependency rules (must delete dependent before dependency):
+ * - A volume's `baseSnapshot` must outlive the volume → delete volume first
+ * - A snapshot's source `volume` must outlive the snapshot → delete snapshot first
+ * - Docker containers depend on their image → delete container first
+ *
+ * Resources in the same group have no inter-dependencies and can be deleted
+ * in parallel. Groups must be processed sequentially.
  */
 export function groupResourcesByKind(
   resources: SandboxResource[],
 ): SandboxResource[][] {
-  const sorted = [...resources].sort(
-    (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind],
-  );
+  if (resources.length === 0) return [];
 
-  const groups: SandboxResource[][] = [];
-  let currentKind: ResourceKind | null = null;
-  let currentGroup: SandboxResource[] = [];
+  // Build a lookup from resource name (slug) to resource, since dependency
+  // links use slugs. We key on `name` which is the slug for cloud resources
+  // and `repository:tag` for docker images.
+  const byName = new Map<string, SandboxResource>();
+  for (const r of resources) {
+    byName.set(r.name, r);
+  }
 
-  for (const resource of sorted) {
-    if (resource.kind !== currentKind) {
-      if (currentGroup.length > 0) {
-        groups.push(currentGroup);
+  // Build adjacency: blockedBy[name] = set of names that must be deleted
+  // BEFORE `name` can be deleted (i.e. `name` is blocked until those are gone).
+  const blockedBy = new Map<string, Set<string>>();
+  for (const r of resources) {
+    blockedBy.set(r.name, new Set<string>());
+  }
+  for (const r of resources) {
+    if (r.kind === 'volume' && r.baseSnapshotSlug) {
+      // Volume must be deleted before its base snapshot.
+      // → the snapshot is blocked by the volume.
+      const snapshotDeps = blockedBy.get(r.baseSnapshotSlug);
+      if (snapshotDeps) {
+        snapshotDeps.add(r.name);
       }
-      currentGroup = [resource];
-      currentKind = resource.kind;
-    } else {
-      currentGroup.push(resource);
+    }
+
+    if (r.kind === 'snapshot' && r.sourceVolumeSlug) {
+      // Snapshot must be deleted before its source volume.
+      // → the volume is blocked by the snapshot.
+      const volumeDeps = blockedBy.get(r.sourceVolumeSlug);
+      if (volumeDeps) {
+        volumeDeps.add(r.name);
+      }
     }
   }
-  if (currentGroup.length > 0) {
-    groups.push(currentGroup);
+
+  // Kahn's algorithm: iteratively collect resources whose blockers have
+  // all been processed into groups (layers).
+  const remaining = new Set(resources.map((r) => r.name));
+  const groups: SandboxResource[][] = [];
+
+  while (remaining.size > 0) {
+    // Find all resources whose blockers have all been placed in
+    // earlier groups (i.e. already removed from `remaining`).
+    const ready: string[] = [];
+    for (const name of remaining) {
+      const b = blockedBy.get(name);
+      if (!b || [...b].every((blocker) => !remaining.has(blocker))) {
+        ready.push(name);
+      }
+    }
+
+    // Safety: if nothing is ready we have a cycle. Break it by picking
+    // all remaining resources (shouldn't happen with well-formed data).
+    if (ready.length === 0) {
+      const fallback = [...remaining]
+        .map((n) => byName.get(n))
+        .filter((r): r is SandboxResource => r != null);
+      if (fallback.length > 0) groups.push(fallback);
+      break;
+    }
+
+    const group = ready
+      .map((n) => byName.get(n))
+      .filter((r): r is SandboxResource => r != null);
+    groups.push(group);
+
+    for (const name of ready) {
+      remaining.delete(name);
+    }
   }
 
   return groups;
