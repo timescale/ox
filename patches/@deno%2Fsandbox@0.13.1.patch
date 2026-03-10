@@ -573,3 +573,31 @@ index fb16fcef772172196761b1e7eea7e1363f50895f..c39b591a5e559bbad0d611d3f90dea8a
 +    // framing entirely via node:https (no Bun WebSocket involved).
 +    return createRpcWebSocket(options.endpoint, headers, null, options);
 +}
+diff --git a/esm/sandbox.js b/esm/sandbox.js
+index 5f5aef19a79e4e0b2e881b4771af2c11ae6a618c..f8a65ca8338d95f39cf818b8be9d631f1db27fd7 100644
+--- a/esm/sandbox.js
++++ b/esm/sandbox.js
+@@ -425,9 +425,6 @@ export class Sandbox {
+     }
+     /** Disposes the sandbox instance. */
+     [(_Sandbox_client = new WeakMap(), _Sandbox_fs = new WeakMap(), _Sandbox_deno = new WeakMap(), _Sandbox_env = new WeakMap(), _Sandbox_sandboxId = new WeakMap(), _Sandbox_token = new WeakMap(), _Sandbox_org = new WeakMap(), _Sandbox_sandboxEndpoint = new WeakMap(), _Sandbox_ready = new WeakMap(), _Sandbox_debug = new WeakMap(), _Sandbox_ssh = new WeakMap(), _Sandbox_url = new WeakMap(), _Sandbox_instances = new WeakSet(), _Sandbox_initializeSandbox = async function _Sandbox_initializeSandbox(mode, fullOpts) {
+-        if (process.versions?.bun) {
+-            console.warn("[@deno/sandbox] WARNING: Bun is not supported. Bun's native WebSocket does not support the 'upgrade' event, which is required for sandbox connections. Please use Deno or Node.js instead. See https://github.com/oven-sh/bun/issues/5951");
+-        }
+         const { token, org, apiEndpoint } = getTokenAndApiEndpoint(fullOpts);
+         const { sandboxEndpoint } = getSandboxEndpoint(fullOpts);
+         const url = new URL(sandboxEndpoint);
+diff --git a/script/sandbox.js b/script/sandbox.js
+index 143fffe34c25f3b64f5969d6ab15a2b5ef0af1c3..587cf5de3b90f2c63f30ed08c649d3ca67e5ecf2 100644
+--- a/script/sandbox.js
++++ b/script/sandbox.js
+@@ -434,9 +434,6 @@ class Sandbox {
+     }
+     /** Disposes the sandbox instance. */
+     [(_Sandbox_client = new WeakMap(), _Sandbox_fs = new WeakMap(), _Sandbox_deno = new WeakMap(), _Sandbox_env = new WeakMap(), _Sandbox_sandboxId = new WeakMap(), _Sandbox_token = new WeakMap(), _Sandbox_org = new WeakMap(), _Sandbox_sandboxEndpoint = new WeakMap(), _Sandbox_ready = new WeakMap(), _Sandbox_debug = new WeakMap(), _Sandbox_ssh = new WeakMap(), _Sandbox_url = new WeakMap(), _Sandbox_instances = new WeakSet(), _Sandbox_initializeSandbox = async function _Sandbox_initializeSandbox(mode, fullOpts) {
+-        if (node_process_1.default.versions?.bun) {
+-            console.warn("[@deno/sandbox] WARNING: Bun is not supported. Bun's native WebSocket does not support the 'upgrade' event, which is required for sandbox connections. Please use Deno or Node.js instead. See https://github.com/oven-sh/bun/issues/5951");
+-        }
+         const { token, org, apiEndpoint } = (0, client_js_1.getTokenAndApiEndpoint)(fullOpts);
+         const { sandboxEndpoint } = (0, client_js_1.getSandboxEndpoint)(fullOpts);
+         const url = new URL(sandboxEndpoint);
