@@ -7,7 +7,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
 import { baseConfig, captureClaudeCredentialsFromContainer } from './claude';
-import { resolveSandboxImage } from './docker';
+import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
 import { log } from './logger';
 
@@ -63,7 +63,7 @@ const MANUAL_LOGIN_HINT = 'Try running: ox claude /login';
  * Uses `claude /login` to go directly into the login flow.
  */
 export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
-  const sandbox = await resolveSandboxImage();
+  const agentImage = await ensureDockerImageForAgent('claude');
 
   log.debug('Starting Claude login via Bun Terminal API');
 
@@ -83,7 +83,7 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
   // This pre-populates hasCompletedOnboarding (skips theme selection, etc.)
   log.debug('Creating detached auth container');
   const createResult =
-    await $`docker run -d -it --rm --entrypoint /.ox/signalEntrypoint.sh --name ${containerName} ${sandbox.image} claude /login`
+    await $`docker run -d -it --rm --entrypoint /.ox/signalEntrypoint.sh --name ${containerName} ${agentImage} claude /login`
       .quiet()
       .nothrow();
   if (createResult.exitCode) {
@@ -121,10 +121,10 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
     return null;
   }
 
-  // Signal ready so the entrypoint starts `claude /login`
-  await writeFileToContainer(containerId, '/.ox/signal/.ready', '1');
-
-  // Phase 2: Attach to the container with a PTY to interact with the login flow
+  // Phase 2: Attach to the container with a PTY to interact with the login flow.
+  // IMPORTANT: We must attach BEFORE signaling ready, otherwise the entrypoint
+  // starts `claude /login` which may exit before the attach connects, causing
+  // "You cannot attach to a stopped container" errors.
   log.debug('Attaching to auth container');
   const proc = Bun.spawn(['docker', 'attach', containerId], {
     terminal: {
@@ -186,6 +186,11 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
       },
     },
   });
+
+  // Signal ready so the entrypoint starts `claude /login`.
+  // This must happen AFTER attaching so the PTY is connected before the process
+  // starts producing output.
+  await writeFileToContainer(containerId, '/.ox/signal/.ready', '1');
 
   // Wait for login menu to appear
   // Note: stripVTControlCharacters removes escape codes but cursor movement
