@@ -64,6 +64,7 @@ set -g status off
 # passthrough so TUI apps (OpenCode, Claude) render correctly
 set -g default-terminal "xterm-256color"
 set -ga terminal-overrides ",xterm-256color:Tc"
+set-window-option -g mode-keys vi
 TMUX_EOF
 
 # Switch to non-root user for environment setup
