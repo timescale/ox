@@ -132,6 +132,13 @@ export const runInDocker = async ({
   log.debug(
     {
       containerName,
+      cmd: `${cmdName} ${printArgs(cmdArgs)}`,
+    },
+    'runInDocker',
+  );
+  log.trace(
+    {
+      containerName,
       dockerArgs,
       cmdArgs,
       cmdName,
@@ -298,11 +305,26 @@ export const runInDocker = async ({
       proc.exited.finally(deferredRemoved.resolve);
     });
   }
+  deferredResult.promise.then((proc) => {
+    proc.exited.then((code) => {
+      const success = code === 0;
+      log[success ? 'trace' : 'debug'](
+        {
+          containerName,
+          code,
+          ...(success
+            ? {}
+            : { text: proc.text(), errorText: proc.errorText() }),
+        },
+        `runInDocker container exited (${success ? 'success' : 'failure'})`,
+      );
+    });
+  });
 
   return deferredResult.promise;
 };
 
 const dockerContainerRm = async (containerId: string, shouldThrow = true) => {
-  log.debug({ containerId }, 'dockerContainerRm');
+  log.trace({ containerId }, 'dockerContainerRm');
   await $`docker container rm ${containerId}`.quiet().throws(shouldThrow);
 };

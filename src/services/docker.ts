@@ -321,7 +321,7 @@ export async function ensureAgentOverlay(
 
   // Check if overlay already exists locally
   if (await imageExists(overlayTag)) {
-    log.debug({ overlayTag, agent }, 'Agent overlay image already exists');
+    log.debug(`${agent} overlay image already exists`);
     return overlayTag;
   }
 
@@ -542,7 +542,7 @@ async function imageExists(imageName: string): Promise<boolean> {
     const output = proc.json();
     const exists =
       proc.exitCode === 0 && imageName === `${output.Repository}:${output.Tag}`;
-    log.debug({ imageName, exists }, 'imageExists');
+    log.debug({ imageName }, `imageExists (${exists})`);
     imageExistsCache.set(imageName, { exists, ts: Date.now() });
     return exists;
   } catch {

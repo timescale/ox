@@ -21,6 +21,7 @@ export type {
 
 import { track } from '../analytics.ts';
 import { readConfig } from '../config.ts';
+import { credentialWatcher } from '../credentialWatcher.ts';
 import { log } from '../logger.ts';
 import { CloudSandboxProvider } from './cloudProvider.ts';
 import { DockerSandboxProvider } from './dockerProvider.ts';
@@ -59,6 +60,12 @@ function withAnalytics(inner: SandboxProvider): SandboxProvider {
       });
       throw err;
     }
+    // Register with credential watcher
+    try {
+      credentialWatcher.register(session, inner);
+    } catch (err) {
+      log.debug({ err }, 'Failed to register session with credential watcher');
+    }
     track('session_created', {
       provider: inner.type,
       agent: options.agent,
@@ -89,6 +96,12 @@ function withAnalytics(inner: SandboxProvider): SandboxProvider {
       });
       throw err;
     }
+    // Register with credential watcher
+    try {
+      credentialWatcher.register(session, inner);
+    } catch (err) {
+      log.debug({ err }, 'Failed to register session with credential watcher');
+    }
     track('session_resumed', {
       provider: inner.type,
       agent: session.agent,
@@ -101,6 +114,7 @@ function withAnalytics(inner: SandboxProvider): SandboxProvider {
 
   const originalStop = inner.stop.bind(inner);
   inner.stop = async (sessionId: string) => {
+    credentialWatcher.unregister(sessionId);
     try {
       await originalStop(sessionId);
       track('session_stopped', { provider: inner.type, success: true });
@@ -116,6 +130,7 @@ function withAnalytics(inner: SandboxProvider): SandboxProvider {
 
   const originalRemove = inner.remove.bind(inner);
   inner.remove = async (sessionId: string) => {
+    credentialWatcher.unregister(sessionId);
     try {
       await originalRemove(sessionId);
       track('session_removed', { provider: inner.type, success: true });

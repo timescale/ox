@@ -77,7 +77,7 @@ export function openSessionDb(): Database {
   const dir = userConfigDir();
   mkdirSync(dir, { recursive: true });
   const dbPath = join(dir, 'sessions.db');
-  log.debug(`Opening session database at ${dbPath}`);
+  log.trace(`Opening session database at ${dbPath}`);
   const db = new Database(dbPath);
   initSessionSchema(db);
   initPromptHistorySchema(db);

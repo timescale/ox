@@ -260,7 +260,8 @@ export const checkGhCredentials = async (): Promise<boolean> => {
   });
   const exitCode = await proc.exited;
   const output = proc.text().trim();
-  log.debug({ exitCode, output }, 'checkGhCredentials');
+  log.trace({ exitCode, output }, 'checkGhCredentials');
+  log.debug(`checkGhCredentials (${exitCode === 0 ? 'valid' : 'invalid'})`);
   return exitCode === 0;
 };
 

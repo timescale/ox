@@ -10,7 +10,7 @@ import { Deferred } from '../types/deferred';
 import { readCache, writeCache } from './cache';
 import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
-import { getOxSecret, getSecret, setOxSecret } from './keyring';
+import { getOxSecret, getSecret, setOxSecret, setSecret } from './keyring';
 import { log } from './logger';
 import {
   type RunInDockerOptionsBase,
@@ -29,7 +29,9 @@ const containerPaths = {
   configJson: join(CONTAINER_HOME, '.claude.json'),
 };
 
-const claudeCredsValid = (creds?: ClaudeCredentialsJson | null): boolean => {
+export const claudeCredsValid = (
+  creds?: ClaudeCredentialsJson | null,
+): boolean => {
   if (!creds?.claudeAiOauth?.accessToken) return false;
   if (creds.claudeAiOauth.refreshToken) return true; // if we have a refresh token, we can get a new access token
   const expiresAt = creds.claudeAiOauth.expiresAt || 0;
@@ -54,43 +56,44 @@ const readHostOAuthAccount = async (): Promise<ClaudeOAuthAccount | null> => {
   return null;
 };
 
-const readHostCredentials = async (): Promise<ClaudeCredentialsJson | null> => {
-  const { username } = userInfo();
-  try {
-    const raw = await getSecret('Claude Code-credentials', username);
-    if (raw) {
-      const creds = JSON.parse(raw) as ClaudeCredentialsJson;
+export const readHostClaudeCredentials =
+  async (): Promise<ClaudeCredentialsJson | null> => {
+    const { username } = userInfo();
+    try {
+      const raw = await getSecret('Claude Code-credentials', username);
+      if (raw) {
+        const creds = JSON.parse(raw) as ClaudeCredentialsJson;
+        if (claudeCredsValid(creds)) {
+          log.debug('Found valid claude credentials in OS keyring');
+          creds.oauthAccount = await readHostOAuthAccount();
+          return creds;
+        }
+        log.debug('Claude credentials present in OS keyring, but invalid.');
+      }
+    } catch (err) {
+      log.debug({ err }, 'Failed to read claude credentials from OS keyring.');
+    }
+
+    // Look for a file in the home directory
+    try {
+      const hostCredsFile = file(homePaths.credentialsJson);
+      if (!(await hostCredsFile.exists())) return null;
+      const creds = await hostCredsFile.json();
       if (claudeCredsValid(creds)) {
-        log.debug('Found valid claude credentials in OS keyring');
+        log.debug('Found valid claude credentials in home directory');
         creds.oauthAccount = await readHostOAuthAccount();
         return creds;
       }
-      log.debug('Claude credentials present in OS keyring, but invalid.');
+      log.debug('Claude credentials present in home directory, but invalid.');
+    } catch (err) {
+      log.debug({ err }, 'Failed to read claude credentials from file.');
     }
-  } catch (err) {
-    log.debug({ err }, 'Failed to read claude credentials from OS keyring.');
-  }
-
-  // Look for a file in the home directory
-  try {
-    const hostCredsFile = file(homePaths.credentialsJson);
-    if (!(await hostCredsFile.exists())) return null;
-    const creds = await hostCredsFile.json();
-    if (claudeCredsValid(creds)) {
-      log.debug('Found valid claude credentials in home directory');
-      creds.oauthAccount = await readHostOAuthAccount();
-      return creds;
-    }
-    log.debug('Claude credentials present in home directory, but invalid.');
-  } catch (err) {
-    log.debug({ err }, 'Failed to read claude credentials from file.');
-  }
-  return null;
-};
+    return null;
+  };
 
 const OX_CREDS_ACCOUNT = 'claude/.credentials.json';
 
-const readOxCredentialCache =
+export const readOxClaudeCredentialCache =
   async (): Promise<ClaudeCredentialsJson | null> => {
     try {
       const raw = await getOxSecret(OX_CREDS_ACCOUNT);
@@ -105,6 +108,60 @@ const readOxCredentialCache =
     }
     return null;
   };
+
+/**
+ * Write Claude credentials to the ox keyring cache and in-memory cache.
+ */
+export const writeOxClaudeCredentials = async (
+  creds: ClaudeCredentialsJson,
+): Promise<void> => {
+  await setOxSecret(OX_CREDS_ACCOUNT, JSON.stringify(creds));
+  writeCache('claudeCredentialsJson', creds);
+};
+
+/**
+ * Write Claude OAuth credentials back to the host credential sources.
+ * Updates both the OS keyring entry (Claude Code-credentials) and
+ * the file (~/.claude/.credentials.json). Best-effort — logs errors
+ * but does not throw.
+ */
+export const writeHostClaudeCredentials = async (
+  creds: ClaudeCredentialsJson,
+): Promise<void> => {
+  const { username } = userInfo();
+  const credsJson = JSON.stringify(creds);
+
+  // Write to OS keyring
+  try {
+    await setSecret('Claude Code-credentials', username, credsJson);
+    log.debug('Wrote claude credentials to host OS keyring');
+  } catch (err) {
+    log.warn({ err }, 'Failed to write claude credentials to host OS keyring');
+  }
+
+  // Write to host file
+  try {
+    await Bun.write(homePaths.credentialsJson, credsJson);
+    log.debug('Wrote claude credentials to host file');
+  } catch (err) {
+    log.warn({ err }, 'Failed to write claude credentials to host file');
+  }
+
+  // Also update oauthAccount in ~/.claude.json if present in creds
+  if (creds.oauthAccount) {
+    try {
+      const hostConfigFile = file(homePaths.configJson);
+      if (await hostConfigFile.exists()) {
+        const config = (await hostConfigFile.json()) as ClaudeConfigJson;
+        config.oauthAccount = creds.oauthAccount;
+        await Bun.write(homePaths.configJson, JSON.stringify(config, null, 2));
+        log.debug('Updated oauthAccount in host .claude.json');
+      }
+    } catch (err) {
+      log.warn({ err }, 'Failed to update oauthAccount in host .claude.json');
+    }
+  }
+};
 
 const captureClaudeCredentialsJsonFromContainer = async (
   containerId: string,
@@ -133,8 +190,7 @@ const captureClaudeCredentialsJsonFromContainer = async (
         log.debug('No .claude.json found in container for oauthAccount');
       }
 
-      await setOxSecret(OX_CREDS_ACCOUNT, JSON.stringify(creds));
-      writeCache('claudeCredentialsJson', creds);
+      await writeOxClaudeCredentials(creds);
       return true;
     }
     log.debug('Invalid claude credentials found in container');
@@ -227,7 +283,7 @@ const readHostConfigApiKey = async (): Promise<string | null> => {
       log.debug('Found claude API key in home directory');
       return config.primaryApiKey;
     }
-    log.debug('Claude config present in home directory, but no API key.');
+    log.trace('Claude config present in home directory, but no API key.');
   } catch (err) {
     log.debug({ err }, 'Failed to read claude config from file.');
   }
@@ -243,9 +299,9 @@ const readOxApiKeyCache = async (): Promise<string | null> => {
       log.debug('Found claude API key in ox keyring');
       return key;
     }
-    log.debug('Claude credentials present in ox keyring, but invalid.');
-  } catch {
-    log.debug('No .claude.json/primaryApiKey found in ox keyring');
+    log.trace('No .claude.json/primaryApiKey found in ox keyring');
+  } catch (err) {
+    log.error({ err }, 'getOxSecret failed');
   }
   return null;
 };
@@ -285,9 +341,9 @@ export const captureClaudeCredentialsFromContainer = async (
  * host file, or ox keyring), independent of the ANTHROPIC_API_KEY env var.
  */
 export const hasValidClaudeFileCredentials = async (): Promise<boolean> => {
-  const creds = await readHostCredentials();
+  const creds = await readHostClaudeCredentials();
   if (claudeCredsValid(creds)) return true;
-  const oxCreds = await readOxCredentialCache();
+  const oxCreds = await readOxClaudeCredentialCache();
   if (claudeCredsValid(oxCreds)) return true;
   const apiKey = await readHostConfigApiKey();
   if (apiKey) return true;
@@ -305,8 +361,8 @@ export const getClaudeCredentialsJson = async (
       return cached.value;
     }
   }
-  const hostCreds = await readHostCredentials();
-  const oxCreds = await readOxCredentialCache();
+  const hostCreds = await readHostClaudeCredentials();
+  const oxCreds = await readOxClaudeCredentialCache();
   const creds =
     hostCreds?.claudeAiOauth?.expiresAt &&
     oxCreds?.claudeAiOauth?.expiresAt &&
@@ -431,14 +487,42 @@ export const runClaudeInDocker = async ({
 export const checkClaudeCredentials = async (
   model = 'haiku',
 ): Promise<boolean> => {
-  const proc = await runClaudeInDocker({
+  const statusProc = await runClaudeInDocker({
+    cmdArgs: ['auth', 'status'],
+    shouldThrow: false,
+  });
+  const statusExitCode = await statusProc.exited;
+  const status = statusProc.json() as { loggedIn: boolean } | null;
+  const validStatus = statusExitCode === 0 && status?.loggedIn;
+  if (!validStatus) {
+    log.debug(
+      { exitCode: statusExitCode, status },
+      'claude auth status (invalid)',
+    );
+    return false;
+  }
+
+  const testProc = await runClaudeInDocker({
     cmdArgs: ['--model', model, '-p', 'just output `true`, and nothing else'],
     shouldThrow: false,
   });
-  const exitCode = await proc.exited;
-  const output = proc.text().trim();
-  log.debug({ exitCode, output, model }, 'checkClaudeCredentials');
-  return exitCode === 0;
+  const exitCode = await testProc.exited;
+  const valid = exitCode === 0;
+  if (valid) {
+    log.debug('checkClaudeCredentials (valid)');
+    await testProc.credsCaptured;
+    return true;
+  }
+  log.debug(
+    {
+      exitCode,
+      output: testProc.text().trim(),
+      errText: testProc.errorText().trim(),
+      model,
+    },
+    'checkClaudeCredentials (invalid)',
+  );
+  return false;
 };
 
 /**

@@ -22,6 +22,7 @@ import { readConfig } from '../config.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
 import { log } from '../logger.ts';
+import { CloudConnectionPool } from './cloudConnectionPool.ts';
 import {
   ensureAgentCloudSnapshot,
   ensureCloudSnapshot,
@@ -458,9 +459,14 @@ export class CloudSandboxProvider implements SandboxProvider {
 
   private client: DenoApiClient | null = null;
   private region: string;
+  private connectionPool: CloudConnectionPool;
 
   constructor(region?: string) {
     this.region = region ?? 'ord';
+    this.connectionPool = new CloudConnectionPool(async (sessionId) => {
+      const client = await this.getClient();
+      return client.connectSandbox(sessionId);
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -1012,6 +1018,7 @@ export class CloudSandboxProvider implements SandboxProvider {
   }
 
   async remove(sessionId: string): Promise<void> {
+    await this.connectionPool.release(sessionId);
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
 
@@ -1062,6 +1069,7 @@ export class CloudSandboxProvider implements SandboxProvider {
   }
 
   async stop(sessionId: string): Promise<void> {
+    await this.connectionPool.release(sessionId);
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
     const client = await this.getClient();
@@ -1386,5 +1394,45 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
 
     return { lines: generateLines(), stop };
+  }
+
+  // --------------------------------------------------------------------------
+  // File Access (via connection pool)
+  // --------------------------------------------------------------------------
+
+  async readFile(sessionId: string, path: string): Promise<string | null> {
+    try {
+      return await this.connectionPool.withConnection(
+        sessionId,
+        async (sandbox) => sandbox.fs.readTextFile(path),
+      );
+    } catch (err) {
+      log.debug(
+        { err, sessionId, path },
+        'Failed to read file from cloud sandbox',
+      );
+      return null;
+    }
+  }
+
+  async writeFile(
+    sessionId: string,
+    path: string,
+    content: string,
+  ): Promise<void> {
+    try {
+      await this.connectionPool.withConnection(sessionId, async (sandbox) => {
+        const dir = path.substring(0, path.lastIndexOf('/'));
+        if (dir) {
+          await sandbox.fs.mkdir(dir, { recursive: true });
+        }
+        await sandbox.fs.writeTextFile(path, content);
+      });
+    } catch (err) {
+      log.debug(
+        { err, sessionId, path },
+        'Failed to write file to cloud sandbox',
+      );
+    }
   }
 }

@@ -157,4 +157,10 @@ export interface SandboxProvider {
     sessionIds: string[],
     signal?: AbortSignal,
   ): Promise<Map<string, SandboxStats>>;
+
+  /** Read a file from a running sandbox. Returns null if file doesn't exist or sandbox is not running. */
+  readFile(sessionId: string, path: string): Promise<string | null>;
+
+  /** Write a file into a running sandbox. No-op if sandbox is not running. */
+  writeFile(sessionId: string, path: string, content: string): Promise<void>;
 }

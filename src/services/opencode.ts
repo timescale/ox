@@ -5,7 +5,7 @@ import { Deferred } from '../types/deferred';
 import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
-import { readConfig } from './config';
+import { readConfigValue } from './config';
 import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
@@ -26,7 +26,9 @@ const containerPaths = {
   authJson: join(CONTAINER_HOME, '.local', 'share', 'opencode', 'auth.json'),
 };
 
-const authEntryValid = (entry?: AuthEntry | null): entry is AuthEntry => {
+export const opencodeAuthEntryValid = (
+  entry?: AuthEntry | null,
+): entry is AuthEntry => {
   if (!entry) return false;
   if (entry.type === 'api') return !!entry.key;
   if (entry.type === 'oauth') {
@@ -37,13 +39,17 @@ const authEntryValid = (entry?: AuthEntry | null): entry is AuthEntry => {
   return false;
 };
 
-const authCredsValid = (creds?: OpencodeAuthJson | null): boolean => {
+export const opencodeCredsValid = (
+  creds?: OpencodeAuthJson | null,
+): boolean => {
   if (!creds) return false;
-  return Object.values(creds).some(authEntryValid);
+  return Object.values(creds).some(opencodeAuthEntryValid);
 };
 
-const authEntryExpiresAt = (entry?: AuthEntry | null): number => {
-  if (!authEntryValid(entry)) return 0;
+export const opencodeAuthEntryExpiresAt = (
+  entry?: AuthEntry | null,
+): number => {
+  if (!opencodeAuthEntryValid(entry)) return 0;
   if (entry.type === 'oauth' && entry.expires) {
     return entry.expires;
   }
@@ -54,48 +60,69 @@ const authEntryExpiresAt = (entry?: AuthEntry | null): number => {
  * Read opencode credentials from the host system's config directory.
  * This is a read-only source — opencode itself manages this file.
  */
-const readHostCredentials = async (): Promise<OpencodeAuthJson | null> => {
-  try {
-    const hostAuth = file(homePaths.authJson);
-    if (!(await hostAuth.exists())) {
-      log.debug('Opencode auth.json not found in host config directory');
-      return null;
+export const readHostOpencodeCredentials =
+  async (): Promise<OpencodeAuthJson | null> => {
+    try {
+      const hostAuth = file(homePaths.authJson);
+      if (!(await hostAuth.exists())) {
+        log.debug('Opencode auth.json not found in host config directory');
+        return null;
+      }
+      const creds = (await hostAuth.json()) as OpencodeAuthJson;
+      if (opencodeCredsValid(creds)) {
+        log.debug('Found valid opencode credentials in host config directory');
+        return creds;
+      }
+      log.debug(
+        'Opencode auth.json present in host config directory, but invalid.',
+      );
+    } catch (err) {
+      log.debug({ err }, 'Failed to read opencode auth.json from host.');
     }
-    const creds = (await hostAuth.json()) as OpencodeAuthJson;
-    if (authCredsValid(creds)) {
-      log.debug('Found valid opencode credentials in host config directory');
-      return creds;
-    }
-    log.debug(
-      'Opencode auth.json present in host config directory, but invalid.',
-    );
-  } catch (err) {
-    log.debug({ err }, 'Failed to read opencode auth.json from host.');
-  }
-  return null;
-};
+    return null;
+  };
 
 const OX_OPENCODE_ACCOUNT = 'opencode/auth.json';
 
-const readOxCredentialCache = async (): Promise<OpencodeAuthJson | null> => {
-  try {
-    const raw = await getOxSecret(OX_OPENCODE_ACCOUNT);
-    const creds = JSON.parse(raw || '{}') as OpencodeAuthJson;
-    if (authCredsValid(creds)) {
-      log.debug('Found valid opencode credentials in ox keyring');
-      return creds;
+export const readOxOpencodeCredentialCache =
+  async (): Promise<OpencodeAuthJson | null> => {
+    try {
+      const raw = await getOxSecret(OX_OPENCODE_ACCOUNT);
+      const creds = JSON.parse(raw || '{}') as OpencodeAuthJson;
+      if (opencodeCredsValid(creds)) {
+        log.debug('Found valid opencode credentials in ox keyring');
+        return creds;
+      }
+      log.debug('Opencode credentials present in ox keyring, but invalid.');
+    } catch {
+      log.debug('No opencode/auth.json found in ox keyring');
     }
-    log.debug('Opencode credentials present in ox keyring, but invalid.');
-  } catch {
-    log.debug('No opencode/auth.json found in ox keyring');
-  }
-  return null;
-};
+    return null;
+  };
 
-const writeOxCredentialCache = async (
+/**
+ * Write OpenCode credentials to the ox keyring cache and in-memory cache.
+ */
+export const writeOxOpencodeCredentials = async (
   creds: OpencodeAuthJson,
 ): Promise<void> => {
   await setOxSecret(OX_OPENCODE_ACCOUNT, JSON.stringify(creds));
+  writeCache('opencodeAuthJson', creds);
+};
+
+/**
+ * Write OpenCode credentials back to the host config file.
+ * Best-effort — logs errors but does not throw.
+ */
+export const writeHostOpencodeCredentials = async (
+  creds: OpencodeAuthJson,
+): Promise<void> => {
+  try {
+    await Bun.write(homePaths.authJson, JSON.stringify(creds, null, 2));
+    log.debug('Wrote opencode credentials to host file');
+  } catch (err) {
+    log.warn({ err }, 'Failed to write opencode credentials to host file');
+  }
 };
 
 /**
@@ -104,16 +131,17 @@ const writeOxCredentialCache = async (
  * Returns the merged result (or the best available).
  */
 const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
-  const host = (await readHostCredentials()) || {};
-  const cached = (await readOxCredentialCache()) || {};
+  const host = (await readHostOpencodeCredentials()) || {};
+  const cached = (await readOxOpencodeCredentialCache()) || {};
   const merged: OpencodeAuthJson = {};
 
   const keys = new Set([...Object.keys(cached), ...Object.keys(host)]);
   for (const key of keys) {
     if (
-      authEntryValid(cached[key]) &&
-      (!authEntryValid(host[key]) ||
-        authEntryExpiresAt(cached[key]) > authEntryExpiresAt(host[key]))
+      opencodeAuthEntryValid(cached[key]) &&
+      (!opencodeAuthEntryValid(host[key]) ||
+        opencodeAuthEntryExpiresAt(cached[key]) >
+          opencodeAuthEntryExpiresAt(host[key]))
     ) {
       log.debug(`opencode cached "${key}" creds newer than host`);
       merged[key] = cached[key];
@@ -121,7 +149,7 @@ const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
       merged[key] = host[key];
     }
   }
-  if (!authEntryValid(merged.anthropic)) {
+  if (!opencodeAuthEntryValid(merged.anthropic)) {
     const credsJson = await getClaudeCredentialsJson();
     if (credsJson?.claudeAiOauth?.accessToken) {
       merged.anthropic = {
@@ -148,10 +176,10 @@ const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
  * ox keyring), independent of any env vars like ANTHROPIC_API_KEY.
  */
 export const hasValidOpencodeFileCredentials = async (): Promise<boolean> => {
-  const host = await readHostCredentials();
-  if (authCredsValid(host)) return true;
-  const cached = await readOxCredentialCache();
-  return !!(cached && authCredsValid(cached));
+  const host = await readHostOpencodeCredentials();
+  if (opencodeCredsValid(host)) return true;
+  const cached = await readOxOpencodeCredentialCache();
+  return !!(cached && opencodeCredsValid(cached));
 };
 
 export const getOpencodeAuthJson = async (
@@ -177,10 +205,9 @@ const captureOpencodeCredentialsFromContainer = async (
       containerPaths.authJson,
     );
     const creds = JSON.parse(content) as OpencodeAuthJson;
-    if (authCredsValid(creds)) {
+    if (opencodeCredsValid(creds)) {
       log.debug('Valid opencode credentials found in container');
-      await writeOxCredentialCache(creds);
-      writeCache('opencodeAuthJson', creds);
+      await writeOxOpencodeCredentials(creds);
       return true;
     }
     log.debug('Invalid opencode credentials found in container');
@@ -275,23 +302,22 @@ export const runOpencodeInDocker = async ({
 export const checkOpencodeCredentials = async (
   model?: string,
 ): Promise<boolean> => {
-  const proc = await runOpencodeInDocker({
+  const listProc = await runOpencodeInDocker({
     cmdArgs: ['auth', 'list'],
     shouldThrow: false,
   });
-  const exitCode = await proc.exited;
-  const output = proc.text().trim();
+  const exitCode = await listProc.exited;
+  const output = listProc.text().trim();
   const match = output.match(/(\d+)\s+credentials/);
   const numCreds = match?.[1] ? parseInt(match[1], 10) : 0;
-  log.debug(
-    { exitCode, output, numCreds },
-    'checkOpencodeCredentials auth list',
-  );
+  log.trace({ exitCode, output, numCreds }, 'opencode auth list');
   if (exitCode || !numCreds) {
+    log.debug('opencode auth list failed or no credentials found');
     return false;
   }
-  const effectiveModel = model ?? (await readConfig())?.model;
-  const proc2 = await runOpencodeInDocker({
+  const effectiveModel =
+    model ?? (await readConfigValue('agentModels'))?.opencode;
+  const testProc = await runOpencodeInDocker({
     cmdArgs: [
       'run',
       ...(effectiveModel ? ['--model', effectiveModel] : []),
@@ -299,14 +325,24 @@ export const checkOpencodeCredentials = async (
     ],
     shouldThrow: false,
   });
-  const exitCode2 = await proc2.exited;
-  const output2 = proc2.text().trim();
-  const errText = proc2.errorText().trim();
+  const testExitCode = await testProc.exited;
+  const errText = testProc.errorText().trim();
+  const valid = testExitCode === 0 && !errText.includes('Error');
+  if (valid) {
+    log.debug('checkOpencodeCredentials (valid)');
+    await testProc.credsCaptured;
+    return true;
+  }
   log.debug(
-    { exitCode: exitCode2, output: output2, errText, model: effectiveModel },
-    'checkOpencodeCredentials test run',
+    {
+      exitCode: testExitCode,
+      output: testProc.text().trim(),
+      errText,
+      model: effectiveModel,
+    },
+    'checkOpencodeCredentials (invalid)',
   );
-  return exitCode2 === 0 && !errText.includes('Error');
+  return false;
 };
 
 /**
