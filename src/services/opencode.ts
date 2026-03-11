@@ -20,10 +20,12 @@ import { getThemeNames } from './theme.ts';
 
 const homePaths = {
   authJson: join(getXdgData(), 'opencode', 'auth.json'),
+  kvJson: join(getXdgState(), 'opencode', 'kv.json'),
 };
 
 const containerPaths = {
   authJson: join(CONTAINER_HOME, '.local', 'share', 'opencode', 'auth.json'),
+  kvJson: join(CONTAINER_HOME, '.local', 'state', 'opencode', 'kv.json'),
 };
 
 export const opencodeAuthEntryValid = (
@@ -218,16 +220,32 @@ const captureOpencodeCredentialsFromContainer = async (
 };
 
 /**
- * Get the opencode auth config as VirtualFile(s) to write into containers.
+ * Get the opencode config as VirtualFile(s) to write into containers.
+ * Includes auth credentials and the KV state (theme, UI preferences).
  */
 export const getOpencodeConfigFiles = async (): Promise<VirtualFile[]> => {
   const creds = await getOpencodeAuthJson();
-  return [
+  const files: VirtualFile[] = [
     {
       path: containerPaths.authJson,
       value: JSON.stringify(creds),
     },
   ];
+
+  // Include opencode KV state (theme, UI preferences) if present on host
+  try {
+    const kvFile = file(homePaths.kvJson);
+    if (await kvFile.exists()) {
+      files.push({
+        path: containerPaths.kvJson,
+        value: await kvFile.text(),
+      });
+    }
+  } catch {
+    log.debug('Failed to read opencode kv.json for sandbox injection');
+  }
+
+  return files;
 };
 
 export const runOpencodeInDocker = async ({
