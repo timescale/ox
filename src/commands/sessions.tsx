@@ -5,53 +5,35 @@
 import { useKeyboard } from '@opentui/react';
 import { YAML } from 'bun';
 import { Command } from 'commander';
-import { nanoid } from 'nanoid';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ConfigWizard, type ConfigWizardResult } from '../commands/config.tsx';
-import { BackgroundTaskIndicator } from '../components/BackgroundTaskIndicator';
-import { CloudSetup, type CloudSetupResult } from '../components/CloudSetup';
-import { CopyOnSelect } from '../components/CopyOnSelect';
-import { DockerSetup, type DockerSetupResult } from '../components/DockerSetup';
+import { useEffect } from 'react';
+import { BackgroundTaskIndicator } from '../components/BackgroundTaskIndicator.tsx';
+import { CloudSetup } from '../components/CloudSetup.tsx';
+import { CopyOnSelect } from '../components/CopyOnSelect.tsx';
+import { DockerSetup } from '../components/DockerSetup.tsx';
 import { FeedbackModal } from '../components/FeedbackModal.tsx';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
-import { GlobalToast } from '../components/GlobalToast';
-import { PromptScreen } from '../components/PromptScreen';
-import { PullProgress } from '../components/PullProgress';
-import { ResourcesList } from '../components/ResourcesList';
-import { SessionDetail } from '../components/SessionDetail';
-import { SessionsList } from '../components/SessionsList';
-import { ShutdownOverlay } from '../components/ShutdownOverlay';
-import { StartingScreen } from '../components/StartingScreen';
-import { AGENT_INFO_MAP } from '../services/agents';
-import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
-import { checkCodexCredentials, ensureCodexAuth } from '../services/codex';
+import { GlobalToast } from '../components/GlobalToast.tsx';
+import { PromptScreen } from '../components/PromptScreen.tsx';
+import { PullProgress } from '../components/PullProgress.tsx';
+import { ResourcesList } from '../components/ResourcesList.tsx';
+import { SessionDetail } from '../components/SessionDetail.tsx';
+import { SessionsList } from '../components/SessionsList.tsx';
+import { ShutdownOverlay } from '../components/ShutdownOverlay.tsx';
+import { StartingScreen } from '../components/StartingScreen.tsx';
+import { AGENT_INFO_MAP } from '../services/agents.ts';
+import { ensureClaudeAuth } from '../services/claude.ts';
+import { ensureCodexAuth } from '../services/codex.ts';
 import {
   CommandPaletteHost,
-  useCommandStore,
   useRegisterCommands,
 } from '../services/commands.tsx';
-import {
-  type AgentType,
-  type OxConfig,
-  projectConfig,
-  readConfig,
-} from '../services/config';
+import type { AgentType } from '../services/config.ts';
+import { projectConfig, readConfig } from '../services/config.ts';
 import { credentialWatcher } from '../services/credentialWatcher.ts';
-import { type ForkResult, forkDatabase } from '../services/db';
-import { getDenoToken } from '../services/deno';
-import { ensureDockerImage, type PullLayer } from '../services/docker';
-import { checkGhCredentials } from '../services/gh.ts';
-import {
-  generateBranchName,
-  getRepoInfo,
-  type RepoInfo,
-  tryGetRepoInfo,
-} from '../services/git';
-import { log } from '../services/logger';
-import {
-  checkOpencodeCredentials,
-  ensureOpencodeAuth,
-} from '../services/opencode';
+import { ensureDockerImage } from '../services/docker.ts';
+import { tryGetRepoInfo } from '../services/git.ts';
+import { log } from '../services/logger.ts';
+import { ensureOpencodeAuth } from '../services/opencode.ts';
 import {
   getDefaultProvider,
   getProviderForSession,
@@ -60,33 +42,32 @@ import {
   type OxSession,
   type SandboxProvider,
   type SandboxProviderType,
-  type SubmitMode,
-} from '../services/sandbox';
-import { formatRelativeTime } from '../services/sessionDisplay';
+} from '../services/sandbox/index.ts';
+import { formatRelativeTime } from '../services/sessionDisplay.ts';
 import { createTui } from '../services/tui.ts';
 import {
   checkForUpdate,
   isCompiledBinary,
   performUpdate,
-} from '../services/updater';
-import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
+} from '../services/updater.ts';
+import { useBackgroundTaskStore } from '../stores/backgroundTaskStore.ts';
+import { useFeedbackStore } from '../stores/feedbackStore.ts';
 import {
   flushPromptSettings,
   usePromptSettingsStore,
 } from '../stores/promptSettingsStore.ts';
-import {
-  useReadinessStore,
-  waitForAgentAuthCheck,
-} from '../stores/readinessStore.ts';
+import { useReadinessStore } from '../stores/readinessStore.ts';
+import { useRepoStore } from '../stores/repoStore.ts';
 import { type SessionsResult, useRouterStore } from '../stores/routerStore.ts';
-import { useToastStore } from '../stores/toastStore';
+import { useSessionWorkflowStore } from '../stores/sessionWorkflowStore.ts';
+import { useToastStore } from '../stores/toastStore.ts';
 import { Deferred } from '../types/deferred.ts';
 import {
   CLI_SUBPROCESS_OPTS,
-  ensureGitignore,
   enterSubprocessScreen,
   resetTerminal,
 } from '../utils/shell.ts';
+import { ConfigWizard } from './config.tsx';
 
 interface GhAuthRetryState {
   nextView: SessionsAppProps['initialView'];
@@ -94,7 +75,6 @@ interface GhAuthRetryState {
   nextAgent: AgentType;
   nextModel: string;
   nextMountDir?: string;
-  nextIsGitRepo?: boolean;
 }
 
 export async function handleNeedsGhAuth(
@@ -127,7 +107,6 @@ export async function handleNeedsGhAuth(
     nextAgent: agent,
     nextModel: model,
     nextMountDir: result.ghAuthInfo.mountDir,
-    nextIsGitRepo: result.ghAuthInfo.isGitRepo,
   };
 }
 
@@ -167,10 +146,6 @@ interface SessionsAppProps {
   dbFork?: boolean;
   /** Mount local directory instead of git clone */
   initialMountDir?: string;
-  /** Current repo info if in a git repo, null otherwise */
-  currentRepoInfo: RepoInfo | null;
-  /** Whether running from a git repository (affects git/gh operations) */
-  isGitRepo: boolean;
 }
 
 function SessionsApp({
@@ -184,41 +159,37 @@ function SessionsApp({
   serviceId,
   dbFork = true,
   initialMountDir,
-  currentRepoInfo,
-  isGitRepo,
 }: SessionsAppProps) {
   const view = useRouterStore((s) => s.view);
-  const promptKey = useRouterStore((s) => s.promptKey);
-  const [config, setConfig] = useState<OxConfig | null>(null);
 
-  // Use refs to store props/config that we need in async functions
-  // This avoids dependency issues with useCallback/useEffect
-  const configRef = useRef<OxConfig | null>(null);
-  const propsRef = useRef({
+  // Initialize workflow store with provider and props
+  const workflowInit = useSessionWorkflowStore((s) => s.initialize);
+  useEffect(() => {
+    workflowInit({
+      provider,
+      cliSandboxProvider,
+      serviceId,
+      dbFork,
+      initialMountDir,
+      initialView,
+      initialPrompt,
+      initialAgent,
+      initialModel,
+      initialSession,
+    });
+  }, [
+    workflowInit,
+    provider,
+    cliSandboxProvider,
+    serviceId,
+    dbFork,
+    initialMountDir,
     initialView,
     initialPrompt,
     initialAgent,
     initialModel,
     initialSession,
-    serviceId,
-    dbFork,
-    initialMountDir,
-    isGitRepo,
-  });
-
-  // Keep refs up to date
-  configRef.current = config;
-  propsRef.current = {
-    initialView,
-    initialPrompt,
-    initialAgent,
-    initialModel,
-    initialSession,
-    serviceId,
-    dbFork,
-    initialMountDir,
-    isGitRepo,
-  };
+  ]);
 
   // Graceful shutdown: Ctrl+C handler
   const pendingCount = useBackgroundTaskStore((s) => s.pendingCount);
@@ -281,15 +252,10 @@ function SessionsApp({
     };
   }, []);
 
-  // ---- Global Feedback Modal ----
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const suspendCommands = useCommandStore((s) => s.suspend);
-  const resumeCommandsRef = useRef<(() => void) | null>(null);
-  const closeFeedbackModal = useCallback(() => {
-    setShowFeedbackModal(false);
-    resumeCommandsRef.current?.();
-    resumeCommandsRef.current = null;
-  }, []);
+  // ---- Global Feedback Modal (via store) ----
+  const showFeedbackModal = useFeedbackStore((s) => s.isOpen);
+  const openFeedback = useFeedbackStore((s) => s.open);
+  const closeFeedback = useFeedbackStore((s) => s.close);
   useRegisterCommands(
     () => [
       {
@@ -297,619 +263,16 @@ function SessionsApp({
         title: 'Send feedback',
         description: 'Share feedback, report a bug, or request a feature',
         category: 'System',
-        onSelect: () => {
-          resumeCommandsRef.current = suspendCommands();
-          setShowFeedbackModal(true);
-        },
+        onSelect: openFeedback,
       },
     ],
     [],
   );
 
-  // Start session function - handles the full flow of starting an agent
-  const startSession = useCallback(
-    async (
-      prompt: string,
-      agent: AgentType,
-      model: string,
-      mode: SubmitMode = 'async',
-      passedMountDir?: string,
-      selectedProvider?: SandboxProviderType,
-    ) => {
-      const {
-        updateView,
-        goToCloudSetup,
-        goToStarting,
-        goToPrompt,
-        goToDetail,
-      } = useRouterStore.getState();
-      try {
-        // Use selected provider or fall back to the default provider prop
-        const activeProvider = selectedProvider
-          ? getSandboxProvider(selectedProvider)
-          : provider;
-
-        log.debug(
-          {
-            agent,
-            model,
-            prompt,
-            mode,
-            mountDir: passedMountDir,
-            provider: selectedProvider,
-          },
-          'startSession received',
-        );
-
-        const isPlan = mode === 'plan';
-
-        // If using cloud provider, check that setup is complete (token exists)
-        if (activeProvider.type === 'cloud') {
-          const token = await getDenoToken();
-          if (!token) {
-            // Transition to cloud setup view, storing the pending action
-            goToCloudSetup({
-              pendingStart: {
-                prompt,
-                agent,
-                model,
-                mode,
-                mountDir: passedMountDir,
-              },
-            });
-            return;
-          }
-        }
-
-        goToStarting({
-          prompt,
-          agent,
-          model,
-          step: 'Preparing sandbox environment',
-          mode,
-        });
-        await activeProvider.ensureImage({
-          agent,
-          onProgress: (progress) => {
-            if (
-              progress.type === 'pulling' ||
-              progress.type === 'pulling-cache'
-            ) {
-              updateView((v) =>
-                v.type === 'starting'
-                  ? { ...v, step: progress.message, layers: progress.layers }
-                  : v,
-              );
-            } else if (progress.type === 'building') {
-              updateView((v) =>
-                v.type === 'starting'
-                  ? { ...v, step: progress.message, layers: undefined }
-                  : v,
-              );
-            }
-          },
-        });
-
-        // Credential checks always run via Docker containers, so ensure the
-        // Docker image is available even when using a non-Docker sandbox provider.
-        if (activeProvider.type !== 'docker') {
-          await ensureDockerImage({
-            onProgress: (progress) => {
-              if (
-                progress.type === 'pulling' ||
-                progress.type === 'pulling-cache'
-              ) {
-                updateView((v) =>
-                  v.type === 'starting'
-                    ? { ...v, step: progress.message, layers: progress.layers }
-                    : v,
-                );
-              } else if (progress.type === 'building') {
-                updateView((v) =>
-                  v.type === 'starting'
-                    ? { ...v, step: progress.message, layers: undefined }
-                    : v,
-                );
-              }
-            },
-          });
-        }
-
-        // Check agent credentials before starting container
-        // Use cached result from readiness store if available
-        const readiness = useReadinessStore.getState();
-        const cachedAgentAuth =
-          agent === 'claude'
-            ? readiness.claudeAuth
-            : agent === 'codex'
-              ? readiness.codexAuth
-              : readiness.opencodeAuth;
-        let agentAuthValid: boolean;
-        if (cachedAgentAuth === 'ready') {
-          agentAuthValid = true;
-        } else if (cachedAgentAuth === 'invalid') {
-          agentAuthValid = false;
-        } else {
-          updateView((v) =>
-            v.type === 'starting'
-              ? { ...v, step: `Checking ${agent} credentials` }
-              : v,
-          );
-          // If a background readiness check is already in flight, await it
-          // instead of launching a duplicate.  Concurrent checks race on
-          // OAuth token refresh and cause "refresh_token_reused" errors.
-          const pending = waitForAgentAuthCheck(agent);
-          if (pending) {
-            agentAuthValid = await pending;
-          } else {
-            switch (agent) {
-              case 'claude':
-                agentAuthValid = await checkClaudeCredentials(
-                  model || undefined,
-                );
-                break;
-              case 'codex':
-                agentAuthValid = await checkCodexCredentials();
-                break;
-              default:
-                agentAuthValid = await checkOpencodeCredentials(
-                  model || undefined,
-                );
-                break;
-            }
-          }
-        }
-
-        const { isGitRepo: inGitRepo } = propsRef.current;
-
-        // Force mount mode if not in a git repo (Docker only — cloud
-        // sandboxes don't support mount mode and always clone from GitHub).
-        const mountDir =
-          activeProvider.type === 'cloud'
-            ? undefined
-            : (passedMountDir ?? (!inGitRepo ? process.cwd() : undefined));
-
-        // Cloud sandboxes require a git repo (no mount mode support)
-        if (activeProvider.type === 'cloud' && !inGitRepo) {
-          useToastStore
-            .getState()
-            .show(
-              'Cloud sandboxes require a git remote. Use Docker for non-git directories.',
-              'error',
-            );
-          goToPrompt();
-          return;
-        }
-
-        if (!agentAuthValid) {
-          // Exit TUI to run interactive login, then retry
-          useRouterStore.getState().needsAgentAuth({
-            agent,
-            model,
-            prompt,
-            mountDir,
-            isGitRepo: inGitRepo,
-          });
-          return;
-        }
-
-        // Get repo info only if in a git repo
-        let repoInfo: RepoInfo | null = null;
-        if (inGitRepo) {
-          updateView((v) =>
-            v.type === 'starting'
-              ? { ...v, step: 'Getting repository info' }
-              : v,
-          );
-          repoInfo = await getRepoInfo();
-        }
-
-        // Generate branch name: LLM-generated if we have a prompt, fallback otherwise
-        let branchName: string;
-        if (prompt) {
-          updateView((v) =>
-            v.type === 'starting'
-              ? { ...v, step: 'Generating branch name' }
-              : v,
-          );
-          branchName = await generateBranchName({
-            prompt,
-            agent,
-            model,
-          });
-        } else {
-          branchName = `${mode}-${nanoid(6).toLowerCase()}`;
-        }
-
-        // Only ensure gitignore if in a git repo
-        if (inGitRepo) {
-          await ensureGitignore();
-        }
-
-        // Skip DB fork for plan mode
-        const { serviceId: svcId, dbFork: doFork } = propsRef.current;
-        const effectiveServiceId = svcId ?? configRef.current?.tigerServiceId;
-        let forkResult: ForkResult | null = null;
-        if (!isPlan && doFork && effectiveServiceId) {
-          updateView((v) =>
-            v.type === 'starting' ? { ...v, step: 'Forking database' } : v,
-          );
-          forkResult = await forkDatabase(branchName, effectiveServiceId);
-        }
-
-        // Only check GitHub credentials if in a git repo
-        // Use cached result from readiness store if available
-        const cachedGhAuth = useReadinessStore.getState().ghAuth;
-        const ghAuthValid =
-          cachedGhAuth === 'ready'
-            ? true
-            : cachedGhAuth === 'invalid'
-              ? false
-              : await checkGhCredentials();
-        if (inGitRepo && !ghAuthValid) {
-          useRouterStore.getState().needsGhAuth({
-            agent,
-            model,
-            prompt,
-            mountDir,
-            isGitRepo: inGitRepo,
-          });
-          return;
-        }
-
-        const isInteractive = mode === 'interactive' || mode === 'plan';
-        const agentArgs = isPlan
-          ? agent === 'claude'
-            ? ['--permission-mode', 'plan']
-            : ['--agent', 'plan']
-          : undefined;
-
-        updateView((v) =>
-          v.type === 'starting'
-            ? {
-                ...v,
-                step: mountDir
-                  ? 'Starting agent container (mount mode)'
-                  : 'Starting agent container',
-              }
-            : v,
-        );
-        const session = await activeProvider.create({
-          branchName,
-          name: branchName,
-          prompt,
-          repoInfo,
-          agent,
-          model,
-          detach: !isInteractive,
-          interactive: isInteractive,
-          envVars: forkResult?.envVars,
-          mountDir,
-          isGitRepo: inGitRepo,
-          agentArgs,
-          submitMode: mode,
-          onProgress: (step) => {
-            updateView((v) => (v.type === 'starting' ? { ...v, step } : v));
-          },
-        });
-
-        if (isInteractive) {
-          // Exit TUI so the caller can attach to the interactive session
-          useRouterStore
-            .getState()
-            .attachSession(session.id, session, activeProvider.type);
-        } else {
-          goToDetail(session);
-        }
-      } catch (err) {
-        log.error({ err }, 'Failed to start session');
-        useToastStore
-          .getState()
-          .show(
-            `Failed to start: ${err instanceof Error ? err.message : String(err)}`,
-            'error',
-          );
-        useRouterStore.getState().goToPrompt();
-      }
-    },
-    [provider],
-  );
-
-  // Resume session function - handles the full flow of resuming an agent
-  const resumeSessionFlow = useCallback(
-    async (
-      session: OxSession,
-      prompt: string,
-      model: string,
-      mode: SubmitMode = 'async',
-      mountDir?: string,
-      selectedProvider?: SandboxProviderType,
-    ) => {
-      const {
-        updateView,
-        goToCloudSetup,
-        goToResuming,
-        goToDetail,
-        goToPrompt,
-      } = useRouterStore.getState();
-      try {
-        // Use selected provider or fall back to the default provider prop
-        const activeProvider = selectedProvider
-          ? getSandboxProvider(selectedProvider)
-          : provider;
-
-        log.debug(
-          {
-            session: session.name,
-            model,
-            prompt,
-            mode,
-            mountDir,
-            provider: selectedProvider,
-          },
-          'resumeSessionFlow received',
-        );
-
-        const isPlan = mode === 'plan';
-
-        // If using cloud provider, check that setup is complete (token exists)
-        if (activeProvider.type === 'cloud') {
-          const token = await getDenoToken();
-          if (!token) {
-            goToCloudSetup({
-              pendingResume: { session, prompt, model, mode, mountDir },
-            });
-            return;
-          }
-        }
-
-        goToResuming({
-          session,
-          model,
-          step: 'Preparing to resume session',
-          mode,
-        });
-
-        const isInteractive = mode === 'interactive' || mode === 'plan';
-
-        // Build agentArgs for plan mode
-        const agentArgs = isPlan
-          ? session.agent === 'claude'
-            ? ['--permission-mode', 'plan']
-            : ['--agent', 'plan']
-          : undefined;
-
-        const resumeMode = isInteractive ? 'interactive' : 'detached';
-
-        updateView((v) =>
-          v.type === 'resuming' ? { ...v, step: 'Resuming session' } : v,
-        );
-
-        const newSession = await activeProvider.resume(session.id, {
-          mode: resumeMode,
-          prompt: resumeMode === 'detached' ? prompt : undefined,
-          model,
-          mountDir,
-          agentArgs,
-          submitMode: mode,
-          onProgress: (step) => {
-            updateView((v) => (v.type === 'resuming' ? { ...v, step } : v));
-          },
-        });
-
-        if (isInteractive) {
-          // Exit TUI so the caller can attach to the interactive session
-          useRouterStore
-            .getState()
-            .attachSession(newSession.id, newSession, activeProvider.type);
-        } else {
-          goToDetail(newSession);
-        }
-      } catch (err) {
-        log.error({ err }, 'Failed to resume session');
-        useToastStore
-          .getState()
-          .show(
-            `Failed to resume: ${err instanceof Error ? err.message : String(err)}`,
-            'error',
-          );
-        goToPrompt(session);
-      }
-    },
-    [provider],
-  );
-
-  // Start shell session - prepare the shell sandbox and hand off to connect
-  const startShellSession = useCallback(
-    async (
-      shellMountDir?: string,
-      shellIsGitRepo?: boolean,
-      selectedProvider?: SandboxProviderType,
-    ) => {
-      const { updateView, goToStartingShell, goToPrompt, connectShell } =
-        useRouterStore.getState();
-      try {
-        const activeProvider = selectedProvider
-          ? getSandboxProvider(selectedProvider)
-          : provider;
-
-        goToStartingShell('Preparing sandbox environment');
-
-        await activeProvider.ensureImage({
-          onProgress: (progress) => {
-            if (
-              progress.type === 'pulling-cache' ||
-              progress.type === 'building'
-            ) {
-              updateView((v) =>
-                v.type === 'starting-shell'
-                  ? { ...v, step: progress.message }
-                  : v,
-              );
-            }
-          },
-        });
-
-        const shellRepoInfo = shellIsGitRepo ? await tryGetRepoInfo() : null;
-
-        const shell = await activeProvider.createShell({
-          repoInfo: shellRepoInfo,
-          mountDir: shellMountDir,
-          isGitRepo: shellIsGitRepo,
-          onProgress: (step) => {
-            updateView((v) =>
-              v.type === 'starting-shell' ? { ...v, step } : v,
-            );
-          },
-        });
-
-        // Shell is prepared — exit TUI so the outer loop can connect
-        connectShell(shell);
-      } catch (err) {
-        log.error({ err }, 'Failed to start shell');
-        useToastStore
-          .getState()
-          .show(
-            `Failed to start shell: ${err instanceof Error ? err.message : String(err)}`,
-            'error',
-          );
-        goToPrompt();
-      }
-    },
-    [provider],
-  );
-
-  // Navigate to the appropriate view based on initialView and config
-  const navigateToTargetView = useCallback(
-    (cfg: OxConfig) => {
-      const {
-        initialView: targetView,
-        initialPrompt: prompt,
-        initialAgent,
-        initialModel,
-        initialSession: session,
-      } = propsRef.current;
-      const {
-        goToDetail,
-        goToStarting,
-        goToPrompt,
-        goToResources,
-        goToList,
-        updateView,
-      } = useRouterStore.getState();
-
-      if (targetView === 'detail' && session) {
-        goToDetail(session);
-      } else if (targetView === 'starting' && prompt != null) {
-        const agent = initialAgent ?? cfg.agent ?? 'opencode';
-        const model = initialModel ?? cfg.model ?? '';
-
-        // Non-interactive path: wait for readiness before starting session
-        goToStarting({
-          prompt,
-          agent,
-          model,
-          step: 'Preparing environment',
-          mode: 'async',
-        });
-
-        // Wait for Docker + image to be ready, then start
-        const waitAndStart = async () => {
-          const store = useReadinessStore.getState();
-
-          // If checks haven't completed, subscribe and wait
-          if (store.sandboxBaseImage !== 'ready') {
-            await new Promise<void>((resolve, reject) => {
-              const unsub = useReadinessStore.subscribe((s) => {
-                // Update starting screen with progress
-                if (s.dockerRunning === 'starting') {
-                  updateView((v) =>
-                    v.type === 'starting'
-                      ? { ...v, step: 'Starting Docker' }
-                      : v,
-                  );
-                } else if (
-                  s.sandboxBaseImage === 'pulling' ||
-                  s.sandboxBaseImage === 'checking'
-                ) {
-                  const layers = s.basePullLayers;
-                  const done = layers.filter(
-                    (l: PullLayer) =>
-                      l.state === 'complete' || l.state === 'exists',
-                  ).length;
-                  const total = layers.length;
-                  const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
-                  updateView((v) =>
-                    v.type === 'starting'
-                      ? {
-                          ...v,
-                          step: `Pulling sandbox image${suffix}`,
-                          layers: s.basePullLayers,
-                        }
-                      : v,
-                  );
-                } else if (s.sandboxBaseImage === 'ready') {
-                  unsub();
-                  resolve();
-                } else if (
-                  s.sandboxBaseImage === 'error' ||
-                  s.dockerRunning === 'not-running' ||
-                  s.dockerInstalled === 'not-installed'
-                ) {
-                  unsub();
-                  reject(
-                    new Error(s.error ?? 'Docker environment is not available'),
-                  );
-                }
-              });
-            });
-          }
-
-          startSession(prompt, agent, model);
-        };
-
-        waitAndStart().catch((err) => {
-          log.error({ err }, 'Failed to prepare environment');
-          useToastStore
-            .getState()
-            .show(
-              `Failed to prepare environment: ${err instanceof Error ? err.message : String(err)}`,
-              'error',
-            );
-          goToPrompt();
-        });
-      } else if (targetView === 'prompt') {
-        goToPrompt();
-      } else if (targetView === 'resources') {
-        goToResources();
-      } else {
-        goToList();
-      }
-    },
-    [startSession],
-  );
-
-  // Handle docker setup completion (install-only in phase 2)
-  const handleDockerComplete = useCallback((result: DockerSetupResult) => {
-    if (result.type === 'cancelled') {
-      useRouterStore.getState().quit();
-      return;
-    }
-    if (result.type === 'error') {
-      useToastStore
-        .getState()
-        .show(result.error ?? 'Docker setup failed', 'error');
-      useRouterStore.getState().quit();
-      return;
-    }
-
-    // Docker was installed — go back to prompt and re-run checks
-    useRouterStore.getState().goToNewPrompt();
-    useReadinessStore.getState().reset();
-    useReadinessStore.getState().runChecks();
-  }, []);
-
   // Init: navigate to target view immediately, then kick off readiness checks
+  const navigateToTargetView = useSessionWorkflowStore(
+    (s) => s.navigateToTargetView,
+  );
   useEffect(() => {
     if (view.type !== 'init') return;
 
@@ -922,11 +285,9 @@ function SessionsApp({
 
       // Read merged config
       const existingConfig = await readConfig();
-      setConfig(existingConfig);
+      useSessionWorkflowStore.getState().setConfig(existingConfig);
 
       // Initialize prompt settings store from config + CLI flags.
-      // Only pass values that were explicitly provided via CLI flags as
-      // overrides — config-derived defaults are already in the config object.
       await usePromptSettingsStore.getState().initialize(existingConfig, {
         agent: initialAgent as AgentType | undefined,
         model: initialModel,
@@ -934,7 +295,7 @@ function SessionsApp({
       });
 
       // Navigate to target view immediately (prompt screen renders fast)
-      navigateToTargetView(existingConfig);
+      navigateToTargetView(existingConfig, initialView, initialPrompt);
 
       // Kick off readiness checks in the background
       useReadinessStore.getState().runChecks();
@@ -942,6 +303,8 @@ function SessionsApp({
   }, [
     view.type,
     navigateToTargetView,
+    initialView,
+    initialPrompt,
     initialAgent,
     initialModel,
     cliSandboxProvider,
@@ -955,342 +318,89 @@ function SessionsApp({
     }
   }, [dockerInstalled]);
 
-  // Handle config wizard completion
-  const handleConfigComplete = useCallback(
-    async (result: ConfigWizardResult) => {
-      const currentView = useRouterStore.getState().view;
-      const returnToPrompt =
-        currentView.type === 'config' ? currentView.returnToPrompt : undefined;
-
-      if (result.type === 'cancelled') {
-        if (returnToPrompt) {
-          useRouterStore.getState().goToPrompt(returnToPrompt.resumeSession);
-        } else {
-          useRouterStore.getState().quit();
-        }
-        return;
-      }
-      if (result.type === 'error') {
-        useToastStore.getState().show(result.message, 'error');
-        if (returnToPrompt) {
-          useRouterStore.getState().goToPrompt(returnToPrompt.resumeSession);
-        } else {
-          useRouterStore.getState().quit();
-        }
-        return;
-      }
-
-      // Save config (project config)
-      await ensureGitignore();
-      await projectConfig.write(result.config);
-      // Re-read merged config for runtime values
-      const mergedConfig = await readConfig();
-      setConfig(mergedConfig);
-
-      // Initialize prompt settings store if not already initialized
-      // (covers initial setup flow where config wizard runs before prompt)
-      await usePromptSettingsStore.getState().initialize(mergedConfig, {
-        agent: initialAgent as AgentType | undefined,
-        model: initialModel,
-        sandboxProvider: cliSandboxProvider,
-      });
-
-      // Return to the prompt when config was launched from there.
-      if (returnToPrompt) {
-        useRouterStore.getState().goToPrompt(returnToPrompt.resumeSession);
-      } else {
-        // Initial setup flow: continue to the requested target view.
-        navigateToTargetView(mergedConfig);
-      }
-
-      useReadinessStore.getState().runChecks();
-    },
-    [navigateToTargetView, initialAgent, initialModel, cliSandboxProvider],
+  // ---- Route content ----
+  const handleDockerComplete = useSessionWorkflowStore(
+    (s) => s.handleDockerComplete,
   );
-
-  // Handle resume from session detail
-  const handleResume = useCallback(
-    (session: OxSession) => {
-      if (session.interactive) {
-        // Interactive/plan sessions: skip prompt screen — agents don't support
-        // new prompts in continue mode. Resume directly with -c.
-        resumeSessionFlow(
-          session,
-          '', // no prompt for interactive continue
-          session.model ?? '',
-          session.submitMode ?? 'interactive',
-          session.mountDir,
-          session.provider,
-        );
-      } else {
-        // Detached sessions: show prompt screen for new prompt entry
-        useRouterStore.getState().goToPrompt(session);
-      }
-    },
-    [resumeSessionFlow],
+  const handleCloudSetupComplete = useSessionWorkflowStore(
+    (s) => s.handleCloudSetupComplete,
   );
-
-  // Handle cloud setup completion - resume pending start/resume action
-  const handleCloudSetupComplete = useCallback(
-    (result: CloudSetupResult) => {
-      if (result.type === 'cancelled') {
-        useRouterStore.getState().goToPrompt();
-        return;
-      }
-      if (result.type === 'error') {
-        useToastStore
-          .getState()
-          .show(result.error ?? 'Cloud setup failed', 'error');
-        useRouterStore.getState().goToPrompt();
-        return;
-      }
-
-      // Cloud is ready - resume the pending action
-      if (view.type === 'cloud-setup') {
-        if (view.pendingStart) {
-          const { prompt, agent, model, mode, mountDir } = view.pendingStart;
-          startSession(prompt, agent, model, mode, mountDir, 'cloud');
-        } else if (view.pendingResume) {
-          const { session, prompt, model, mode, mountDir } = view.pendingResume;
-          resumeSessionFlow(session, prompt, model, mode, mountDir, 'cloud');
-        } else {
-          useRouterStore.getState().goToPrompt();
-        }
-      } else {
-        useRouterStore.getState().goToPrompt();
-      }
-    },
-    [view, startSession, resumeSessionFlow],
+  const handleConfigComplete = useSessionWorkflowStore(
+    (s) => s.handleConfigComplete,
   );
+  const promptKey = useRouterStore((s) => s.promptKey);
 
-  // ---- Initial Loading View ----
-  if (view.type === 'init') {
-    return (
-      <>
-        <StartingScreen step="Initializing" />
-        <GlobalToast />
-        <BackgroundTaskIndicator />
-        <ShutdownOverlay />
-      </>
-    );
-  }
-
-  // ---- Docker Setup View ----
-  if (view.type === 'docker') {
-    return (
-      <>
+  let content: React.ReactNode;
+  switch (view.type) {
+    case 'init':
+      content = <StartingScreen step="Initializing" />;
+      break;
+    case 'docker':
+      content = (
         <DockerSetup
           title="Docker Setup"
           onComplete={handleDockerComplete}
           showBack={false}
         />
-        <GlobalToast />
-        <BackgroundTaskIndicator />
-        <ShutdownOverlay />
-      </>
-    );
-  }
-
-  // ---- Cloud Setup View ----
-  if (view.type === 'cloud-setup') {
-    return (
-      <>
+      );
+      break;
+    case 'cloud-setup':
+      content = (
         <CloudSetup
           title="Cloud Setup"
           onComplete={handleCloudSetupComplete}
           showBack
           onBack={() => useRouterStore.getState().goToPrompt()}
         />
-        <GlobalToast />
-        <BackgroundTaskIndicator />
-        <ShutdownOverlay />
-      </>
-    );
-  }
-
-  // ---- Config Wizard View ----
-  if (view.type === 'config') {
-    return (
-      <>
-        <ConfigWizard onComplete={handleConfigComplete} />
-        <GlobalToast />
-        <BackgroundTaskIndicator />
-        <ShutdownOverlay />
-      </>
-    );
-  }
-
-  // ---- Prompt Screen View ----
-  if (view.type === 'prompt') {
-    const { resumeSession: resumeSess } = view;
-    return (
-      <>
-        <PromptScreen
-          key={`${resumeSess?.id ?? 'new'}-${promptKey}`}
-          defaultAgent={
-            resumeSess?.agent ?? initialAgent ?? config?.agent ?? 'opencode'
-          }
-          defaultModel={resumeSess?.model ?? initialModel ?? config?.model}
-          defaultSandboxProvider={
-            resumeSess?.provider ?? config?.sandboxProvider ?? provider.type
-          }
-          defaultSubmitMode={resumeSess?.submitMode}
-          resumeSession={resumeSess}
-          initialMountDir={resumeSess?.mountDir ?? initialMountDir}
-          forceMountMode={!isGitRepo}
-          onSubmit={({
-            prompt,
-            agent,
-            model,
-            mode,
-            mountDir,
-            sandboxProvider: selectedProvider,
-          }) => {
-            if (resumeSess) {
-              // Resume flow - use resumeSessionFlow for loading screen
-              resumeSessionFlow(
-                resumeSess,
-                prompt,
-                model,
-                mode,
-                mountDir,
-                selectedProvider,
-              );
-            } else {
-              // Fresh session
-              startSession(
-                prompt,
-                agent,
-                model,
-                mode,
-                mountDir,
-                selectedProvider,
-              );
-            }
-          }}
-          onShell={(shellMountDir, selectedProvider) => {
-            if (resumeSess) {
-              // Shell on resumed container — still needs outer loop for resume + shell
-              useRouterStore
-                .getState()
-                .exitShell(resumeSess.id, resumeSess.provider);
-            } else {
-              // Fresh shell container — prepare in TUI with loading screen
-              startShellSession(
-                shellMountDir,
-                propsRef.current.isGitRepo,
-                selectedProvider,
-              );
-            }
-          }}
-        />
-        <GlobalToast />
-        <ShutdownOverlay />
-        <CommandPaletteHost />
-        {showFeedbackModal && (
-          <FeedbackModal
-            onClose={closeFeedbackModal}
-            onSuccess={() =>
-              useToastStore.getState().show('Feedback sent!', 'success')
-            }
-            onError={(msg) => useToastStore.getState().show(msg, 'error')}
-          />
-        )}
-      </>
-    );
-  }
-
-  // ---- Starting Screen View ----
-  if (view.type === 'starting' || view.type === 'resuming') {
-    const hint =
-      view.mode === 'interactive' || view.mode === 'plan'
-        ? 'Hint: press ctrl+\\ to detach an interactive session'
-        : undefined;
-    const layers = view.type === 'starting' ? view.layers : undefined;
-    return (
-      <>
-        {layers && layers.length > 0 ? (
+      );
+      break;
+    case 'config':
+      content = <ConfigWizard onComplete={handleConfigComplete} />;
+      break;
+    case 'prompt':
+      content = (
+        <PromptScreen key={`${view.resumeSession?.id ?? 'new'}-${promptKey}`} />
+      );
+      break;
+    case 'starting':
+    case 'resuming': {
+      const hint =
+        view.mode === 'interactive' || view.mode === 'plan'
+          ? 'Hint: press ctrl+\\ to detach an interactive session'
+          : undefined;
+      const layers = view.type === 'starting' ? view.layers : undefined;
+      content =
+        layers && layers.length > 0 ? (
           <PullProgress message={view.step} layers={layers} />
         ) : (
           <StartingScreen step={view.step} hint={hint} />
-        )}
-        <GlobalToast />
-        <BackgroundTaskIndicator />
-        <ShutdownOverlay />
-      </>
-    );
+        );
+      break;
+    }
+    case 'starting-shell':
+      content = <StartingScreen step={view.step} />;
+      break;
+    case 'detail':
+      content = <SessionDetail />;
+      break;
+    case 'resources':
+      content = <ResourcesList />;
+      break;
+    default:
+      content = <SessionsList />;
+      break;
   }
 
-  // ---- Starting Shell Screen View ----
-  if (view.type === 'starting-shell') {
-    return (
-      <>
-        <StartingScreen step={view.step} />
-        <GlobalToast />
-        <BackgroundTaskIndicator />
-        <ShutdownOverlay />
-      </>
-    );
-  }
-
-  // ---- Session Detail View ----
-  if (view.type === 'detail') {
-    return (
-      <box flexDirection="column" width="100%" height="100%">
-        <SessionDetail session={view.session} onResume={handleResume} />
-        <GlobalToast />
-        <BackgroundTaskIndicator bottom={1} />
-        <ShutdownOverlay />
-        <CommandPaletteHost />
-        {showFeedbackModal && (
-          <FeedbackModal
-            onClose={closeFeedbackModal}
-            onSuccess={() =>
-              useToastStore.getState().show('Feedback sent!', 'success')
-            }
-            onError={(msg) => useToastStore.getState().show(msg, 'error')}
-          />
-        )}
-      </box>
-    );
-  }
-
-  // ---- Resources View ----
-  if (view.type === 'resources') {
-    return (
-      <>
-        <ResourcesList />
-        <GlobalToast />
-        <BackgroundTaskIndicator />
-        <ShutdownOverlay />
-        <CommandPaletteHost />
-        {showFeedbackModal && (
-          <FeedbackModal
-            onClose={closeFeedbackModal}
-            onSuccess={() =>
-              useToastStore.getState().show('Feedback sent!', 'success')
-            }
-            onError={(msg) => useToastStore.getState().show(msg, 'error')}
-          />
-        )}
-      </>
-    );
-  }
-
-  // ---- Session List View ----
   return (
     <>
-      <SessionsList
-        onResume={handleResume}
-        currentRepo={currentRepoInfo?.fullName}
-      />
+      {content}
       <GlobalToast />
       <BackgroundTaskIndicator />
       <ShutdownOverlay />
       <CommandPaletteHost />
       {showFeedbackModal && (
         <FeedbackModal
-          onClose={closeFeedbackModal}
+          onClose={closeFeedback}
           onSuccess={() =>
             useToastStore.getState().show('Feedback sent!', 'success')
           }
@@ -1320,10 +430,14 @@ export async function runSessionsTui({
     ? getSandboxProvider(sandboxProvider)
     : await getDefaultProvider();
 
-  // Try to detect current repo (returns null if not in a git repo)
+  // Detect current repo and seed the store before rendering.
+  // When `isGitRepo` is explicitly passed (e.g. from auth retry), honour it;
+  // otherwise detect from the git remote.
   const currentRepoInfo = await tryGetRepoInfo();
-  // Use passed isGitRepo if provided, otherwise detect from currentRepoInfo
   const effectiveIsGitRepo = isGitRepo ?? currentRepoInfo !== null;
+  useRepoStore
+    .getState()
+    .initialize(effectiveIsGitRepo ? currentRepoInfo : null);
 
   // Loop: after interactive actions (attach, shell, etc.), return to the TUI
   // instead of exiting the process.
@@ -1333,7 +447,6 @@ export async function runSessionsTui({
   let nextModel = initialModel;
   let nextSession: OxSession | undefined;
   let nextMountDir = mountDir;
-  let nextIsGitRepo = isGitRepo;
 
   // Circuit breaker: prevent infinite auth retry loops.
   const MAX_AUTH_RETRIES = 3;
@@ -1362,8 +475,6 @@ export async function runSessionsTui({
           serviceId={serviceId}
           dbFork={dbFork}
           initialMountDir={nextMountDir}
-          currentRepoInfo={currentRepoInfo}
-          isGitRepo={nextIsGitRepo ?? effectiveIsGitRepo}
         />
       </CopyOnSelect>,
     );
@@ -1379,7 +490,6 @@ export async function runSessionsTui({
     nextModel = undefined;
     nextSession = undefined;
     nextMountDir = mountDir;
-    nextIsGitRepo = isGitRepo;
 
     // Reset auth retry counters when we get a non-auth result,
     // indicating the session progressed past the auth phase.
@@ -1593,7 +703,6 @@ export async function runSessionsTui({
       nextAgent = agent;
       nextModel = model;
       nextMountDir = result.authInfo.mountDir;
-      nextIsGitRepo = result.authInfo.isGitRepo;
     }
 
     // Handle needs-gh-auth action - run interactive GitHub login and retry
@@ -1620,7 +729,6 @@ export async function runSessionsTui({
         nextAgent = agent;
         nextModel = model;
         nextMountDir = retry.nextMountDir;
-        nextIsGitRepo = retry.nextIsGitRepo;
 
         console.log('\nGitHub login successful. Resuming...\n');
 

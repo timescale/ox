@@ -22,8 +22,10 @@ import {
   getStatusText,
 } from '../services/sessionDisplay';
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
+import { useRepoStore } from '../stores/repoStore.ts';
 import { useRouterStore } from '../stores/routerStore.ts';
 import { useSessionStore } from '../stores/sessionStore';
+import { useSessionWorkflowStore } from '../stores/sessionWorkflowStore.ts';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
 import { notifySessionComplete } from '../utils/notify.ts';
@@ -37,12 +39,6 @@ const PR_CACHE_TTL = 60_000;
 
 export type FilterMode = 'all' | 'running' | 'completed';
 export type ScopeMode = 'local' | 'global';
-
-export interface SessionsListProps {
-  onResume?: (session: OxSession) => void;
-  /** Current repo fullName (e.g., "owner/repo") if in a git repo, undefined otherwise */
-  currentRepo?: string;
-}
 
 const FILTER_LABELS: Record<FilterMode, string> = {
   all: 'All',
@@ -59,8 +55,10 @@ const SCOPE_LABELS: Record<ScopeMode, string> = {
 
 const SCOPE_ORDER: ScopeMode[] = ['local', 'global'];
 
-export function SessionsList({ onResume, currentRepo }: SessionsListProps) {
+export function SessionsList() {
   const { theme } = useTheme();
+  const handleResume = useSessionWorkflowStore((s) => s.handleResume);
+  const currentRepo = useRepoStore((s) => s.fullName);
   const { rows, columns } = useWindowSize();
   const isBig = rows >= 30 && columns >= 61;
   const {
@@ -505,10 +503,10 @@ export function SessionsList({ onResume, currentRepo }: SessionsListProps) {
         description: 'Resume the selected session with a new prompt',
         category: 'Session',
         keybind: { key: 'r', ctrl: true },
-        enabled: isStopped && !!onResume,
+        enabled: isStopped && !!handleResume,
         onSelect: () => {
           const s = getSelectedSession();
-          if (s) onResume?.(s);
+          if (s) handleResume?.(s);
         },
       },
       {
@@ -605,7 +603,7 @@ export function SessionsList({ onResume, currentRepo }: SessionsListProps) {
     // that change the set of commands.  Handlers read dynamic state at invocation
     // time via refs / store.getState() so they don't need to be deps.
   }, [
-    onResume,
+    handleResume,
     cycleFilter,
     toggleScope,
     currentRepo,
@@ -948,7 +946,7 @@ export function SessionsList({ onResume, currentRepo }: SessionsListProps) {
           <SessionDetailPanel
             key={selectedSession.id}
             session={selectedSession}
-            onResume={(s) => onResume?.(s)}
+            onResume={(s) => handleResume?.(s)}
             onSessionDeleted={handlePanelSessionDeleted}
             poll={false}
           />
