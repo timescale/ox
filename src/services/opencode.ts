@@ -5,7 +5,7 @@ import { Deferred } from '../types/deferred';
 import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
-import { readConfig, readConfigValue } from './config';
+import { readConfigValue } from './config';
 import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
@@ -26,7 +26,9 @@ const containerPaths = {
   authJson: join(CONTAINER_HOME, '.local', 'share', 'opencode', 'auth.json'),
 };
 
-const authEntryValid = (entry?: AuthEntry | null): entry is AuthEntry => {
+export const opencodeAuthEntryValid = (
+  entry?: AuthEntry | null,
+): entry is AuthEntry => {
   if (!entry) return false;
   if (entry.type === 'api') return !!entry.key;
   if (entry.type === 'oauth') {
@@ -41,11 +43,13 @@ export const opencodeCredsValid = (
   creds?: OpencodeAuthJson | null,
 ): boolean => {
   if (!creds) return false;
-  return Object.values(creds).some(authEntryValid);
+  return Object.values(creds).some(opencodeAuthEntryValid);
 };
 
-const authEntryExpiresAt = (entry?: AuthEntry | null): number => {
-  if (!authEntryValid(entry)) return 0;
+export const opencodeAuthEntryExpiresAt = (
+  entry?: AuthEntry | null,
+): number => {
+  if (!opencodeAuthEntryValid(entry)) return 0;
   if (entry.type === 'oauth' && entry.expires) {
     return entry.expires;
   }
@@ -134,9 +138,10 @@ const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
   const keys = new Set([...Object.keys(cached), ...Object.keys(host)]);
   for (const key of keys) {
     if (
-      authEntryValid(cached[key]) &&
-      (!authEntryValid(host[key]) ||
-        authEntryExpiresAt(cached[key]) > authEntryExpiresAt(host[key]))
+      opencodeAuthEntryValid(cached[key]) &&
+      (!opencodeAuthEntryValid(host[key]) ||
+        opencodeAuthEntryExpiresAt(cached[key]) >
+          opencodeAuthEntryExpiresAt(host[key]))
     ) {
       log.debug(`opencode cached "${key}" creds newer than host`);
       merged[key] = cached[key];
@@ -144,7 +149,7 @@ const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
       merged[key] = host[key];
     }
   }
-  if (!authEntryValid(merged.anthropic)) {
+  if (!opencodeAuthEntryValid(merged.anthropic)) {
     const credsJson = await getClaudeCredentialsJson();
     if (credsJson?.claudeAiOauth?.accessToken) {
       merged.anthropic = {

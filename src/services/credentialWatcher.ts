@@ -20,6 +20,8 @@ import {
 import { CONTAINER_HOME } from './dockerFiles.ts';
 import { log } from './logger.ts';
 import {
+  opencodeAuthEntryExpiresAt,
+  opencodeAuthEntryValid,
   opencodeCredsValid,
   readHostOpencodeCredentials,
   writeHostOpencodeCredentials,
@@ -74,20 +76,9 @@ export function isCredentialFresher(
       if (cExpires === 0 && eExpires > 0) return false;
       return cExpires > eExpires;
     }
-    case 'opencode': {
-      const c = candidate as OpencodeAuthJson;
-      const e = existing as OpencodeAuthJson;
-      const maxExpires = (auth: OpencodeAuthJson): number => {
-        let max = 0;
-        for (const entry of Object.values(auth ?? {})) {
-          if (entry?.type === 'oauth' && entry.expires) {
-            max = Math.max(max, entry.expires);
-          }
-        }
-        return max;
-      };
-      return maxExpires(c) > maxExpires(e);
-    }
+    case 'opencode':
+      // Opencode uses per-key merge via mergeOpencodeCredentials() instead
+      return false;
     case 'codex': {
       const c = candidate as CodexAuthJson;
       const e = existing as CodexAuthJson;
@@ -100,6 +91,43 @@ export function isCredentialFresher(
     default:
       return false;
   }
+}
+
+/**
+ * Per-key merge for OpenCode credentials. Iterates each key in both objects
+ * and picks the fresher OAuth entry per key. Only considers keys that are
+ * OAuth entries in BOTH candidate and existing — API key entries are ignored,
+ * and new keys present only in the candidate are not introduced.
+ *
+ * Returns the merged object if any key was updated from the candidate,
+ * or null if the existing object is already up-to-date.
+ */
+export function mergeOpencodeCredentials(
+  candidate: OpencodeAuthJson,
+  existing: OpencodeAuthJson,
+): OpencodeAuthJson | null {
+  const merged: OpencodeAuthJson = { ...existing };
+  let changed = false;
+
+  for (const key of Object.keys(existing)) {
+    const eEntry = existing[key];
+    const cEntry = candidate[key];
+
+    // Only merge oauth-to-oauth — skip api keys and missing entries
+    if (!cEntry || cEntry.type !== 'oauth') continue;
+    if (!eEntry || eEntry.type !== 'oauth') continue;
+    if (!opencodeAuthEntryValid(cEntry)) continue;
+
+    const cExpires = opencodeAuthEntryExpiresAt(cEntry);
+    const eExpires = opencodeAuthEntryExpiresAt(eEntry);
+
+    if (cExpires > eExpires) {
+      merged[key] = cEntry;
+      changed = true;
+    }
+  }
+
+  return changed ? merged : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,7 +365,23 @@ class CredentialWatcher {
             ? this.parseCredential(hostContent)
             : null;
 
-          if (
+          // For opencode, do per-key merge instead of atomic replacement
+          let toWrite: unknown;
+          if (agentType === 'opencode' && hostParsed) {
+            const merged = mergeOpencodeCredentials(
+              parsed as OpencodeAuthJson,
+              hostParsed as OpencodeAuthJson,
+            );
+            if (!merged) {
+              log.debug(
+                { sessionId, agentType },
+                'credentialWatcher: no fresher opencode entries in session',
+              );
+              sessionFileHashes?.set(filePath, hash);
+              continue;
+            }
+            toWrite = merged;
+          } else if (
             hostParsed &&
             !isCredentialFresher(agentType, parsed, hostParsed)
           ) {
@@ -347,6 +391,8 @@ class CredentialWatcher {
             );
             sessionFileHashes?.set(filePath, hash);
             continue;
+          } else {
+            toWrite = parsed;
           }
 
           log.info(
@@ -356,8 +402,8 @@ class CredentialWatcher {
           sessionFileHashes?.set(filePath, hash);
 
           // Write back to host + ox keyring
-          await this.writeHostCredential(agentType, parsed);
-          await this.writeOxCredential(agentType, parsed);
+          await this.writeHostCredential(agentType, toWrite);
+          await this.writeOxCredential(agentType, toWrite);
 
           // Update host hash so we don't re-detect our own write
           const newHostContent =
@@ -365,7 +411,13 @@ class CredentialWatcher {
           this.hostHashes.set(agentType, computeContentHash(newHostContent));
 
           // Push to other sessions
-          await this.pushToSessions(agentType, parsed, content, sessionId);
+          const serializedToWrite = JSON.stringify(toWrite);
+          await this.pushToSessions(
+            agentType,
+            toWrite,
+            serializedToWrite,
+            sessionId,
+          );
         } catch (err) {
           log.error(
             { err, sessionId, filePath },
@@ -508,21 +560,36 @@ class CredentialWatcher {
             sessionId,
             filePath,
           );
+
+          let contentToWrite = serialized;
           if (currentContent) {
             const currentParsed = this.parseCredential(currentContent);
-            if (
-              currentParsed &&
-              isCredentialFresher(agentType, currentParsed, creds)
-            ) {
-              log.debug(
-                { sessionId, filePath },
-                'credentialWatcher: session already has fresher creds, skipping push',
-              );
-              continue;
+            if (currentParsed) {
+              // For opencode, merge per-key instead of atomic comparison
+              if (agentType === 'opencode') {
+                const merged = mergeOpencodeCredentials(
+                  creds as OpencodeAuthJson,
+                  currentParsed as OpencodeAuthJson,
+                );
+                if (!merged) {
+                  log.debug(
+                    { sessionId, filePath },
+                    'credentialWatcher: no fresher opencode entries to push',
+                  );
+                  continue;
+                }
+                contentToWrite = JSON.stringify(merged);
+              } else if (isCredentialFresher(agentType, currentParsed, creds)) {
+                log.debug(
+                  { sessionId, filePath },
+                  'credentialWatcher: session already has fresher creds, skipping push',
+                );
+                continue;
+              }
             }
           }
 
-          await entry.provider.writeFile(sessionId, filePath, serialized);
+          await entry.provider.writeFile(sessionId, filePath, contentToWrite);
           log.debug(
             { sessionId, filePath },
             'credentialWatcher: pushed credentials to session',
@@ -531,7 +598,7 @@ class CredentialWatcher {
           // Update session hash so we don't re-detect the push in the next poll
           const sessionFileHashes = this.sessionHashes.get(sessionId);
           if (sessionFileHashes) {
-            sessionFileHashes.set(filePath, computeContentHash(serialized));
+            sessionFileHashes.set(filePath, computeContentHash(contentToWrite));
           }
         } catch (err) {
           log.warn(
