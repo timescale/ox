@@ -56,12 +56,15 @@ COPY --chown=${USER_UID}:${USER_GID} <<'TMUX_EOF' /home/${USER_NAME}/.tmux.conf
 bind -n C-\\ detach-client -E true
 # Keep default prefix (ctrl+b) for other tmux commands
 set -g mouse on
+# Forward OSC 52 clipboard writes to the outer terminal when supported
+set -s set-clipboard on
 # Hide status bar — ox manages the session, no need for tmux chrome
 set -g status off
 # True-color support — xterm-256color + Tc flag enables 24-bit RGB
 # passthrough so TUI apps (OpenCode, Claude) render correctly
 set -g default-terminal "xterm-256color"
 set -ga terminal-overrides ",xterm-256color:Tc"
+set-window-option -g mode-keys vi
 TMUX_EOF
 
 # Switch to non-root user for environment setup
