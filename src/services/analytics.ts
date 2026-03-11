@@ -110,7 +110,7 @@ function filterProperties(
  * Get or create a persistent anonymous distinct ID.
  * Stored in the user config directory so it survives across sessions.
  */
-async function getOrCreateDistinctId(): Promise<string> {
+export async function getOrCreateDistinctId(): Promise<string> {
   if (distinctId) return distinctId;
 
   const idPath = join(userConfigDir(), ANALYTICS_ID_FILENAME);

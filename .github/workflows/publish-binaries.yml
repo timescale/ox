@@ -36,10 +36,13 @@ jobs:
         run: ./bun install
 
       - name: Build binary
+        env:
+          OX_FEEDBACK_WEBHOOK_URL: ${{ secrets.OX_FEEDBACK_WEBHOOK_URL }}
         run: |
-          ./bun build ./index.ts --compile --minify --sourcemap \
+          ./bun run scripts/build.ts \
+            --minify --sourcemap \
             --target=${{ matrix.target }} \
-            --outfile ox-${{ matrix.os }}-${{ matrix.arch }}
+            --outfile=ox-${{ matrix.os }}-${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
