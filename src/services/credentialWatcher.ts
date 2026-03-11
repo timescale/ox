@@ -41,15 +41,25 @@ interface RegisteredSession {
   agentType: string;
 }
 
-/** Credential file paths inside the sandbox container */
-const CREDENTIAL_FILES: Record<AgentCredType, string[]> = {
-  claude: [
-    `${CONTAINER_HOME}/.claude/.credentials.json`,
-    `${CONTAINER_HOME}/.claude.json`,
-  ],
-  opencode: [`${CONTAINER_HOME}/.local/share/opencode/auth.json`],
-  codex: [`${CONTAINER_HOME}/.codex/auth.json`],
-};
+/** Home directory inside cloud sandboxes (Deno Deploy uses /home/app). */
+const CLOUD_HOME = '/home/app';
+
+/** Credential file paths inside a sandbox, relative to the given home dir. */
+function credentialFiles(agentType: AgentCredType, home: string): string[] {
+  switch (agentType) {
+    case 'claude':
+      return [`${home}/.claude/.credentials.json`, `${home}/.claude.json`];
+    case 'opencode':
+      return [`${home}/.local/share/opencode/auth.json`];
+    case 'codex':
+      return [`${home}/.codex/auth.json`];
+  }
+}
+
+/** Resolve the sandbox home directory based on provider type. */
+function sandboxHome(provider: SandboxProvider): string {
+  return provider.type === 'cloud' ? CLOUD_HOME : CONTAINER_HOME;
+}
 
 const POLL_INTERVAL_MS = 15_000;
 
@@ -321,8 +331,8 @@ class CredentialWatcher {
       }
 
       const agentType = entry.agentType as AgentCredType;
-      const files = CREDENTIAL_FILES[agentType];
-      if (!files) continue;
+      const home = sandboxHome(entry.provider);
+      const files = credentialFiles(agentType, home);
 
       for (const filePath of files) {
         const release = await this.mutex.acquire(
@@ -546,12 +556,12 @@ class CredentialWatcher {
     serialized: string,
     excludeSessionId?: string,
   ): Promise<void> {
-    const files = CREDENTIAL_FILES[agentType];
-    if (!files) return;
-
     for (const [sessionId, entry] of this.sessions) {
       if (sessionId === excludeSessionId) continue;
       if (entry.agentType !== agentType) continue;
+
+      const home = sandboxHome(entry.provider);
+      const files = credentialFiles(agentType, home);
 
       for (const filePath of files) {
         try {
