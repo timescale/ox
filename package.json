@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "module": "index.ts",
   "scripts": {
-    "build": "./bun build ./index.ts --compile --outfile ./bin/ox",
+    "build": "./bun run scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "test": "./bun test",

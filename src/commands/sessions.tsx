@@ -12,6 +12,7 @@ import { BackgroundTaskIndicator } from '../components/BackgroundTaskIndicator';
 import { CloudSetup, type CloudSetupResult } from '../components/CloudSetup';
 import { CopyOnSelect } from '../components/CopyOnSelect';
 import { DockerSetup, type DockerSetupResult } from '../components/DockerSetup';
+import { FeedbackModal } from '../components/FeedbackModal.tsx';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { GlobalToast } from '../components/GlobalToast';
 import { PromptScreen } from '../components/PromptScreen';
@@ -24,7 +25,11 @@ import { StartingScreen } from '../components/StartingScreen';
 import { AGENT_INFO_MAP } from '../services/agents';
 import { checkClaudeCredentials, ensureClaudeAuth } from '../services/claude';
 import { checkCodexCredentials, ensureCodexAuth } from '../services/codex';
-import { CommandPaletteHost } from '../services/commands.tsx';
+import {
+  CommandPaletteHost,
+  useCommandStore,
+  useRegisterCommands,
+} from '../services/commands.tsx';
 import {
   type AgentType,
   type OxConfig,
@@ -275,6 +280,31 @@ function SessionsApp({
       cancelled = true;
     };
   }, []);
+
+  // ---- Global Feedback Modal ----
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const suspendCommands = useCommandStore((s) => s.suspend);
+  const resumeCommandsRef = useRef<(() => void) | null>(null);
+  const closeFeedbackModal = useCallback(() => {
+    setShowFeedbackModal(false);
+    resumeCommandsRef.current?.();
+    resumeCommandsRef.current = null;
+  }, []);
+  useRegisterCommands(
+    () => [
+      {
+        id: 'system.feedback',
+        title: 'Send feedback',
+        description: 'Share feedback, report a bug, or request a feature',
+        category: 'System',
+        onSelect: () => {
+          resumeCommandsRef.current = suspendCommands();
+          setShowFeedbackModal(true);
+        },
+      },
+    ],
+    [],
+  );
 
   // Start session function - handles the full flow of starting an agent
   const startSession = useCallback(
@@ -1157,6 +1187,15 @@ function SessionsApp({
         <GlobalToast />
         <ShutdownOverlay />
         <CommandPaletteHost />
+        {showFeedbackModal && (
+          <FeedbackModal
+            onClose={closeFeedbackModal}
+            onSuccess={() =>
+              useToastStore.getState().show('Feedback sent!', 'success')
+            }
+            onError={(msg) => useToastStore.getState().show(msg, 'error')}
+          />
+        )}
       </>
     );
   }
@@ -1203,6 +1242,15 @@ function SessionsApp({
         <BackgroundTaskIndicator bottom={1} />
         <ShutdownOverlay />
         <CommandPaletteHost />
+        {showFeedbackModal && (
+          <FeedbackModal
+            onClose={closeFeedbackModal}
+            onSuccess={() =>
+              useToastStore.getState().show('Feedback sent!', 'success')
+            }
+            onError={(msg) => useToastStore.getState().show(msg, 'error')}
+          />
+        )}
       </box>
     );
   }
@@ -1216,6 +1264,15 @@ function SessionsApp({
         <BackgroundTaskIndicator />
         <ShutdownOverlay />
         <CommandPaletteHost />
+        {showFeedbackModal && (
+          <FeedbackModal
+            onClose={closeFeedbackModal}
+            onSuccess={() =>
+              useToastStore.getState().show('Feedback sent!', 'success')
+            }
+            onError={(msg) => useToastStore.getState().show(msg, 'error')}
+          />
+        )}
       </>
     );
   }
@@ -1231,6 +1288,15 @@ function SessionsApp({
       <BackgroundTaskIndicator />
       <ShutdownOverlay />
       <CommandPaletteHost />
+      {showFeedbackModal && (
+        <FeedbackModal
+          onClose={closeFeedbackModal}
+          onSuccess={() =>
+            useToastStore.getState().show('Feedback sent!', 'success')
+          }
+          onError={(msg) => useToastStore.getState().show(msg, 'error')}
+        />
+      )}
     </>
   );
 }

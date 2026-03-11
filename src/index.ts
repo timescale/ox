@@ -18,6 +18,7 @@ import {
   handleCompletionRequest,
 } from './commands/completion';
 import { configCommand } from './commands/config';
+import { feedbackCommand } from './commands/feedback';
 import { ghCommand } from './commands/gh';
 import { logsCommand } from './commands/logs';
 import { opencodeCommand } from './commands/opencode';
@@ -113,6 +114,7 @@ program.addCommand(codexCommand);
 program.addCommand(colorsCommand);
 program.addCommand(completionCommand);
 program.addCommand(configCommand);
+program.addCommand(feedbackCommand);
 program.addCommand(ghCommand);
 program.addCommand(logsCommand);
 program.addCommand(opencodeCommand);

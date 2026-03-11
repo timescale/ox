@@ -32,6 +32,7 @@ import { useRouterStore } from '../stores/routerStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { ActionButton } from './ActionButton.tsx';
 import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
+import { FeedbackModal } from './FeedbackModal';
 import { FilterableSelector } from './FilterableSelector';
 import { Modal } from './Modal';
 import { OxTitle } from './OxTitle';
@@ -191,6 +192,7 @@ export function PromptScreen({
 
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showSlashCommands, setShowSlashCommands] = useState(false);
   const [slashQuery, setSlashQuery] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -351,11 +353,12 @@ export function PromptScreen({
   const suspend = useCommandStore((s) => s.suspend);
   const showCommands = useCommandStore((s) => s.show);
   const isCmdPaletteOpen = useCommandStore((s) => s.isOpen);
+  const isSuspended = useCommandStore((s) => s.suspendCount > 0);
   useEffect(() => {
-    if (showModelSelector || showThemePicker) {
+    if (showModelSelector || showThemePicker || showFeedbackModal) {
       return suspend();
     }
-  }, [showModelSelector, showThemePicker, suspend]);
+  }, [showModelSelector, showThemePicker, showFeedbackModal, suspend]);
 
   // Register commands for the command palette
   useRegisterCommands(
@@ -736,6 +739,18 @@ export function PromptScreen({
           setSubmitMode('plan');
         },
       },
+      {
+        name: 'feedback',
+        description: 'Send feedback to the ox team',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          setShowFeedbackModal(true);
+        },
+      },
     ],
     [
       resumeSession,
@@ -991,7 +1006,11 @@ export function PromptScreen({
               <textarea
                 ref={textareaRef}
                 focused={
-                  !showModelSelector && !showThemePicker && !isCmdPaletteOpen
+                  !showModelSelector &&
+                  !showThemePicker &&
+                  !showFeedbackModal &&
+                  !isCmdPaletteOpen &&
+                  !isSuspended
                 }
                 placeholder='Ask anything... Type "/" for commands'
                 onSubmit={handleSubmit}
@@ -1135,6 +1154,16 @@ export function PromptScreen({
         >
           <ThemePicker onClose={() => setShowThemePicker(false)} />
         </Modal>
+      )}
+      {/* Feedback modal */}
+      {showFeedbackModal && (
+        <FeedbackModal
+          onClose={() => setShowFeedbackModal(false)}
+          onSuccess={() =>
+            setToast({ message: 'Feedback sent. Thanks!', type: 'success' })
+          }
+          onError={(msg) => setToast({ message: msg, type: 'error' })}
+        />
       )}
 
       {/* Toast notifications */}
