@@ -63,6 +63,7 @@ import { type SessionsResult, useRouterStore } from '../stores/routerStore.ts';
 import { useSessionWorkflowStore } from '../stores/sessionWorkflowStore.ts';
 import { useToastStore } from '../stores/toastStore.ts';
 import { Deferred } from '../types/deferred.ts';
+import { somePromise } from '../utils/promise.ts';
 import {
   CLI_SUBPROCESS_OPTS,
   enterSubprocessScreen,
@@ -281,11 +282,7 @@ function SessionsApp({
       // Only run the full config wizard for brand-new users (no config at all).
       // Returning users who open a new project get straight to the prompt —
       // their user-level preferences are sufficient.
-      const [hasProjectConfig, hasUserConfig] = await Promise.all([
-        projectConfig.exists(),
-        userConfig.exists(),
-      ]);
-      if (!hasProjectConfig && !hasUserConfig) {
+      if (!(await somePromise([projectConfig.exists(), userConfig.exists()]))) {
         useRouterStore.getState().goToConfig();
         return;
       }
