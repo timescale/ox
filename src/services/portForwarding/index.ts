@@ -48,6 +48,36 @@ function buildUrl(
 }
 
 // ---------------------------------------------------------------------------
+// URL derivation (no side effects — for reconstructing URLs from config)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive port URLs for a container from config alone (no Caddy/DNS setup).
+ * Used to reconstruct `portUrls` when fetching existing sessions.
+ *
+ * Returns null if no appPorts configured.
+ */
+export async function getPortUrls(
+  containerName: string,
+): Promise<PortUrl[] | null> {
+  try {
+    const config = await readConfig();
+    const portConfig = normalizeAppPorts(config);
+    if (!portConfig) return null;
+
+    // Use cached resolved ports if available, otherwise assume 443
+    const httpsPort = resolvedPorts?.httpsPort ?? 443;
+    return portConfig.ports.map((entry) => ({
+      port: entry.port,
+      subdomain: entry.subdomain,
+      url: buildUrl(containerName, entry.subdomain, httpsPort),
+    }));
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 

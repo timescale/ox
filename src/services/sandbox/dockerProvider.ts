@@ -239,12 +239,32 @@ export class DockerSandboxProvider implements SandboxProvider {
   async list(): Promise<OxSession[]> {
     const sessions = await listOxSessions();
     log.debug({ count: sessions.length }, 'Listed Docker sessions');
-    return sessions.map(mapDockerSession);
+    const mapped = sessions.map(mapDockerSession);
+
+    // Derive port URLs from config for running sessions
+    const { getPortUrls } = await import('../portForwarding/index.ts');
+    for (const session of mapped) {
+      if (session.status === 'running' && session.containerName) {
+        session.portUrls =
+          (await getPortUrls(session.containerName)) ?? undefined;
+      }
+    }
+
+    return mapped;
   }
 
   async get(sessionId: string): Promise<OxSession | null> {
     const session = await dockerGetSession(sessionId);
-    return session ? mapDockerSession(session) : null;
+    if (!session) return null;
+    const mapped = mapDockerSession(session);
+
+    // Derive port URLs from config for running sessions
+    if (mapped.status === 'running' && mapped.containerName) {
+      const { getPortUrls } = await import('../portForwarding/index.ts');
+      mapped.portUrls = (await getPortUrls(mapped.containerName)) ?? undefined;
+    }
+
+    return mapped;
   }
 
   async remove(sessionId: string): Promise<void> {
