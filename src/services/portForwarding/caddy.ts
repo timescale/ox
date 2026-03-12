@@ -98,7 +98,7 @@ export function generateCaddyConfig(
   // Build the HTTPS redirect handler for HTTP server
   const redirectHandler: Record<string, unknown> = {
     handler: 'static_response',
-    status_code: 301,
+    status_code: '301',
     headers: {
       Location: [
         httpsPort === 443
@@ -196,6 +196,7 @@ export async function ensureCaddy(
     -p 127.0.0.1:${httpsPort}:${httpsPort} \
     -p 127.0.0.1:${httpPort}:${httpPort} \
     -v ${CADDY_CONFIG_PATH}:/etc/caddy/config.json:ro \
+    -v ox-caddy-data:/data \
     ${CADDY_IMAGE} \
     caddy run --config /etc/caddy/config.json --adapter json`.quiet();
 
@@ -303,6 +304,7 @@ export async function removeRoutes(sessionId: string): Promise<void> {
 export async function stopCaddy(): Promise<void> {
   log.info('Stopping Caddy container');
   await $`docker rm -f ${CADDY_CONTAINER}`.quiet().nothrow();
+  activeRoutes.clear();
   currentPorts = null;
 }
 
