@@ -467,6 +467,40 @@ export function SessionDetailPanel({
             )}
           </box>
         )}
+        {session.portUrls && session.portUrls.length > 0 && (
+          <box
+            flexDirection="row"
+            columnGap={isWide ? 3 : 2}
+            overflow="hidden"
+            flexWrap="wrap"
+          >
+            {session.portUrls.map((pu) => (
+              <box key={`port-${pu.port}`} flexDirection="row" gap={1}>
+                <text fg={theme.textMuted}>{pu.subdomain ?? 'app'}</text>
+                <text fg={theme.accent}>{pu.url}</text>
+              </box>
+            ))}
+          </box>
+        )}
+        {session.portUrls?.some((pu) => pu.externalUrl) && (
+          <box
+            flexDirection="row"
+            columnGap={isWide ? 3 : 2}
+            overflow="hidden"
+            flexWrap="wrap"
+          >
+            {session.portUrls
+              ?.filter((pu) => pu.externalUrl)
+              .map((pu) => (
+                <box key={`ext-port-${pu.port}`} flexDirection="row" gap={1}>
+                  <text fg={theme.textMuted}>
+                    {pu.subdomain ?? 'app'} (ext)
+                  </text>
+                  <text fg={theme.textMuted}>{pu.externalUrl}</text>
+                </box>
+              ))}
+          </box>
+        )}
 
         {/* Prompt section */}
         {/* Half-height padding top */}
