@@ -44,6 +44,13 @@ export interface OxSession {
   startedAt?: string;
   finishedAt?: string;
   submitMode?: SubmitMode;
+  /** Port forwarding URLs for this session (when appPorts configured) */
+  portUrls?: {
+    port: number;
+    subdomain?: string;
+    url: string;
+    externalUrl?: string;
+  }[];
 }
 
 // Options for creating a new sandbox
