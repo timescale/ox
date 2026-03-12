@@ -18,6 +18,7 @@ import { PullProgress } from '../components/PullProgress.tsx';
 import { ResourcesList } from '../components/ResourcesList.tsx';
 import { SessionDetail } from '../components/SessionDetail.tsx';
 import { SessionsList } from '../components/SessionsList.tsx';
+import { SetupDb } from '../components/SetupDb.tsx';
 import { ShutdownOverlay } from '../components/ShutdownOverlay.tsx';
 import { StartingScreen } from '../components/StartingScreen.tsx';
 import { AGENT_INFO_MAP } from '../services/agents.ts';
@@ -28,7 +29,7 @@ import {
   useRegisterCommands,
 } from '../services/commands.tsx';
 import type { AgentType } from '../services/config.ts';
-import { projectConfig, readConfig } from '../services/config.ts';
+import { projectConfig, readConfig, userConfig } from '../services/config.ts';
 import { credentialWatcher } from '../services/credentialWatcher.ts';
 import { ensureDockerImage } from '../services/docker.ts';
 import { tryGetRepoInfo } from '../services/git.ts';
@@ -62,6 +63,7 @@ import { type SessionsResult, useRouterStore } from '../stores/routerStore.ts';
 import { useSessionWorkflowStore } from '../stores/sessionWorkflowStore.ts';
 import { useToastStore } from '../stores/toastStore.ts';
 import { Deferred } from '../types/deferred.ts';
+import { somePromise } from '../utils/promise.ts';
 import {
   CLI_SUBPROCESS_OPTS,
   enterSubprocessScreen,
@@ -277,8 +279,10 @@ function SessionsApp({
     if (view.type !== 'init') return;
 
     (async () => {
-      // Check if project config exists
-      if (!(await projectConfig.exists())) {
+      // Only run the full config wizard for brand-new users (no config at all).
+      // Returning users who open a new project get straight to the prompt —
+      // their user-level preferences are sufficient.
+      if (!(await somePromise([projectConfig.exists(), userConfig.exists()]))) {
         useRouterStore.getState().goToConfig();
         return;
       }
@@ -328,6 +332,9 @@ function SessionsApp({
   const handleConfigComplete = useSessionWorkflowStore(
     (s) => s.handleConfigComplete,
   );
+  const handleSetupDbComplete = useSessionWorkflowStore(
+    (s) => s.handleSetupDbComplete,
+  );
   const promptKey = useRouterStore((s) => s.promptKey);
 
   let content: React.ReactNode;
@@ -356,6 +363,9 @@ function SessionsApp({
       break;
     case 'config':
       content = <ConfigWizard onComplete={handleConfigComplete} />;
+      break;
+    case 'setup-db':
+      content = <SetupDb onComplete={handleSetupDbComplete} />;
       break;
     case 'prompt':
       content = (

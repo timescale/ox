@@ -526,6 +526,18 @@ export function PromptScreen() {
         },
       },
       {
+        name: 'setup-db',
+        description: 'Configure the Tiger database service for this project',
+        onSelect: () => {
+          setShowSlashCommands(false);
+          setSlashQuery('');
+          if (textareaRef.current) {
+            textareaRef.current.clear();
+          }
+          useRouterStore.getState().goToSetupDb({ resumeSession });
+        },
+      },
+      {
         name: 'theme',
         description: 'Change UI theme',
         onSelect: () => {
