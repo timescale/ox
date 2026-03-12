@@ -3,20 +3,20 @@ import open from 'open';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import { log } from '../services/logger';
-import { getSandboxProvider, type OxSession } from '../services/sandbox';
+import { getSandboxProvider } from '../services/sandbox';
 import { useRouterStore } from '../stores/routerStore.ts';
 import { useSessionStore } from '../stores/sessionStore';
+import { useSessionWorkflowStore } from '../stores/sessionWorkflowStore.ts';
 import { useToastStore } from '../stores/toastStore';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { LogViewer } from './LogViewer';
 import { type ModalType, SessionDetailPanel } from './SessionDetailPanel.tsx';
 
-export interface SessionDetailProps {
-  session: OxSession;
-  onResume: (session: OxSession) => void;
-}
+export function SessionDetail() {
+  const view = useRouterStore((s) => s.view);
+  const session = view.type === 'detail' ? view.session : null;
+  const handleResume = useSessionWorkflowStore((s) => s.handleResume);
 
-export function SessionDetail({ session, onResume }: SessionDetailProps) {
   // Track the live session (updated by SessionDetailPanel polling).
   // The prop `session` is set once when navigating to the detail view and
   // doesn't update, so we maintain our own copy for derived state.
@@ -27,17 +27,17 @@ export function SessionDetail({ session, onResume }: SessionDetailProps) {
   // Modal state shared with SessionDetailPanel (controlled mode).
   const [modal, setModal] = useState<ModalType>(null);
 
-  const isRunning = liveSession.status === 'running';
+  const isRunning = liveSession?.status === 'running';
   const isStopped =
-    liveSession.status === 'exited' || liveSession.status === 'stopped';
-  const providerType = session.provider;
+    liveSession?.status === 'exited' || liveSession?.status === 'stopped';
+  const providerType = session?.provider;
   const sessionProvider = useMemo(
-    () => getSandboxProvider(providerType),
+    () => (providerType ? getSandboxProvider(providerType) : null),
     [providerType],
   );
 
   const handleGitSwitch = useCallback(async () => {
-    const branchName = `ox/${sessionRef.current.branch}`;
+    const branchName = `ox/${sessionRef.current?.branch}`;
     try {
       await Bun.$`git fetch && git switch ${branchName}`.quiet();
       useToastStore
@@ -52,7 +52,7 @@ export function SessionDetail({ session, onResume }: SessionDetailProps) {
 
   const handlePrOpen = useCallback(() => {
     const prInfo =
-      useSessionStore.getState().prCache[sessionRef.current.id]?.prInfo;
+      useSessionStore.getState().prCache[sessionRef.current?.id ?? '']?.prInfo;
     if (!prInfo) {
       useToastStore.getState().show('No PR found for this session', 'warning');
       return;
@@ -105,10 +105,10 @@ export function SessionDetail({ session, onResume }: SessionDetailProps) {
         category: 'Session',
         keybind: { key: 'a', ctrl: true },
         enabled: isRunning,
-        onSelect: () =>
-          useRouterStore
-            .getState()
-            .attach(sessionRef.current.id, sessionRef.current),
+        onSelect: () => {
+          const s = sessionRef.current;
+          if (s) useRouterStore.getState().attach(s.id, s);
+        },
       },
       {
         id: 'session.shell',
@@ -117,10 +117,10 @@ export function SessionDetail({ session, onResume }: SessionDetailProps) {
         category: 'Session',
         keybind: { key: 's', ctrl: true },
         enabled: isRunning,
-        onSelect: () =>
-          useRouterStore
-            .getState()
-            .execShell(sessionRef.current.id, sessionRef.current),
+        onSelect: () => {
+          const s = sessionRef.current;
+          if (s) useRouterStore.getState().execShell(s.id, s);
+        },
       },
       {
         id: 'session.stop',
@@ -138,7 +138,10 @@ export function SessionDetail({ session, onResume }: SessionDetailProps) {
         category: 'Session',
         keybind: { key: 'r', ctrl: true },
         enabled: isStopped,
-        onSelect: () => onResume(sessionRef.current),
+        onSelect: () => {
+          const s = sessionRef.current;
+          if (s) handleResume(s);
+        },
       },
       {
         id: 'session.delete',
@@ -165,7 +168,7 @@ export function SessionDetail({ session, onResume }: SessionDetailProps) {
         onSelect: handleGitSwitch,
       },
     ],
-    [isRunning, isStopped, onResume, handlePrOpen, handleGitSwitch],
+    [isRunning, isStopped, handleResume, handlePrOpen, handleGitSwitch],
   );
 
   // Read palette open state so escape doesn't go back when closing the palette
@@ -182,36 +185,40 @@ export function SessionDetail({ session, onResume }: SessionDetailProps) {
     }
   });
 
-  return (
-    <box flexGrow={1} flexDirection="column" padding={1}>
-      <SessionDetailPanel
-        session={session}
-        onResume={onResume}
-        onSessionDeleted={() => useRouterStore.getState().goToList()}
-        showBack
-        onSessionUpdated={setLiveSession}
-        modal={modal}
-        onModalChange={setModal}
-      />
+  if (!session) return null;
 
-      {/* Logs section (hidden for interactive sessions) */}
-      {!session.interactive && (
-        <box
-          title="Logs"
-          border
-          borderStyle="single"
-          flexGrow={1}
-          flexShrink={1}
-          flexDirection="column"
-        >
-          <LogViewer
-            containerId={session.id}
-            streamLogs={(id) => sessionProvider.streamLogs(id)}
-            isInteractive={session.interactive}
-            onError={handleLogError}
-          />
-        </box>
-      )}
+  return (
+    <box flexDirection="column" width="100%" height="100%">
+      <box flexGrow={1} flexDirection="column" padding={1}>
+        <SessionDetailPanel
+          session={session}
+          onResume={handleResume}
+          onSessionDeleted={() => useRouterStore.getState().goToList()}
+          showBack
+          onSessionUpdated={setLiveSession}
+          modal={modal}
+          onModalChange={setModal}
+        />
+
+        {/* Logs section (hidden for interactive sessions) */}
+        {!session.interactive && sessionProvider && (
+          <box
+            title="Logs"
+            border
+            borderStyle="single"
+            flexGrow={1}
+            flexShrink={1}
+            flexDirection="column"
+          >
+            <LogViewer
+              containerId={session.id}
+              streamLogs={(id) => sessionProvider.streamLogs(id)}
+              isInteractive={session.interactive}
+              onError={handleLogError}
+            />
+          </box>
+        )}
+      </box>
     </box>
   );
 }

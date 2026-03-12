@@ -44,7 +44,6 @@ describe('handleNeedsGhAuth', () => {
       nextAgent: 'opencode',
       nextModel: 'anthropic/claude-3-5-sonnet',
       nextMountDir: '/tmp/repo',
-      nextIsGitRepo: true,
     });
   });
 

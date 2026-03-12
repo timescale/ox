@@ -19,16 +19,14 @@ import {
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import type { AgentType } from '../services/config';
 import { log } from '../services/logger';
-import type {
-  OxSession,
-  SandboxProviderType,
-  SubmitMode,
-} from '../services/sandbox';
+import type { SandboxProviderType, SubmitMode } from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { usePromptHistoryStore } from '../stores/promptHistoryStore.ts';
 import { usePromptSettingsStore } from '../stores/promptSettingsStore.ts';
 import { useReadinessStore } from '../stores/readinessStore.ts';
+import { useRepoStore } from '../stores/repoStore.ts';
 import { useRouterStore } from '../stores/routerStore.ts';
+import { useSessionWorkflowStore } from '../stores/sessionWorkflowStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { ActionButton } from './ActionButton.tsx';
 import { BackgroundTaskIndicator } from './BackgroundTaskIndicator';
@@ -41,29 +39,6 @@ import { Selector } from './Selector';
 import { SlashCommandPopover } from './SlashCommandPopover.tsx';
 import { ThemePicker } from './ThemePicker.tsx';
 import { Toast, type ToastType } from './Toast';
-
-export interface PromptScreenProps {
-  defaultAgent: AgentType;
-  defaultModel?: string | null;
-  defaultSandboxProvider?: SandboxProviderType;
-  /** Default submit mode (preserved from prior session on resume) */
-  defaultSubmitMode?: SubmitMode;
-  resumeSession?: OxSession; // If set, we're resuming this session
-  /** Initial mount directory from CLI flag (enables mount mode if set) */
-  initialMountDir?: string | null;
-  /** If true, mount mode is forced (no GitHub remote available) */
-  forceMountMode?: boolean;
-  onSubmit: (result: {
-    prompt: string;
-    agent: AgentType;
-    model: string;
-    mode: SubmitMode;
-    /** If set, mount this directory instead of git clone */
-    mountDir?: string;
-    sandboxProvider: SandboxProviderType;
-  }) => void;
-  onShell: (mountDir?: string, sandboxProvider?: SandboxProviderType) => void; // Launch bash shell
-}
 
 interface ToastState {
   message: string;
@@ -128,20 +103,27 @@ function findPreferredFallback(targetModels: readonly Model[]): string | null {
   return null;
 }
 
-export function PromptScreen({
-  defaultAgent,
-  defaultModel = null,
-  resumeSession,
-  initialMountDir,
-  forceMountMode = false,
-  onSubmit,
-  onShell,
-}: PromptScreenProps) {
+export function PromptScreen() {
   const { theme } = useTheme();
   const textareaRef = useRef<TextareaRenderable>(null);
   const inputAnchorRef = useRef<BoxRenderable | null>(null);
 
+  // ---- Derive props from stores ----
+  const view = useRouterStore((s) => s.view);
+  const resumeSession = view.type === 'prompt' ? view.resumeSession : undefined;
   const goToList = useRouterStore((s) => s.goToList);
+
+  const config = useSessionWorkflowStore((s) => s.config);
+  const isGitRepo = useRepoStore((s) => s.isGitRepo);
+  const forceMountMode = !isGitRepo;
+  const storeInitialMountDir = useSessionWorkflowStore(
+    (s) => s.initialMountDir,
+  );
+  const initialMountDir = resumeSession?.mountDir ?? storeInitialMountDir;
+  const defaultModel = resumeSession?.model ?? config?.model ?? null;
+  const startSession = useSessionWorkflowStore((s) => s.startSession);
+  const resumeSessionFlow = useSessionWorkflowStore((s) => s.resumeSessionFlow);
+  const startShellSession = useSessionWorkflowStore((s) => s.startShellSession);
 
   // ---- Persisted settings from Zustand store ----
   // When resuming a session, the session's values override the store.
@@ -297,7 +279,6 @@ export function PromptScreen({
     const currentAgent = agent;
     const newAgent =
       AGENTS[(AGENTS.indexOf(currentAgent) + 1) % AGENTS.length] ||
-      defaultAgent ||
       DEFAULT_AGENT;
     // Store handles saving old model + restoring new agent's model
     setAgent(newAgent);
@@ -314,7 +295,7 @@ export function PromptScreen({
         setModelId(fallback);
       }
     }
-  }, [resumeSession, agent, modelId, defaultAgent, setAgent, setModelId]);
+  }, [resumeSession, agent, modelId, setAgent, setModelId]);
 
   // Toggle sandbox provider (extracted so click handler can reuse it)
   const toggleProvider = useCallback(() => {
@@ -401,11 +382,16 @@ export function PromptScreen({
         category: 'System',
         keybind: { key: 's', ctrl: true },
         hidden: true,
-        onSelect: () =>
-          onShell(
-            mountMode ? (mountDir ?? undefined) : undefined,
-            sandboxProvider,
-          ),
+        onSelect: () => {
+          const shellMountDir = mountMode ? (mountDir ?? undefined) : undefined;
+          if (resumeSession) {
+            useRouterStore
+              .getState()
+              .exitShell(resumeSession.id, resumeSession.provider);
+          } else {
+            startShellSession(shellMountDir, isGitRepo, sandboxProvider);
+          }
+        },
       },
       {
         id: 'sessions.view',
@@ -491,7 +477,8 @@ export function PromptScreen({
       submitMode,
       setSandboxProvider,
       setSubmitMode,
-      onShell,
+      isGitRepo,
+      startShellSession,
     ],
   );
 
@@ -819,14 +806,28 @@ export function PromptScreen({
     // Record prompt in history (skips empty and consecutive duplicates)
     usePromptHistoryStore.getState().addEntry(promptText);
 
-    onSubmit({
-      prompt: promptText,
-      agent: agent,
-      model: modelId,
-      mode: submitMode,
-      mountDir: mountMode ? (mountDir ?? process.cwd()) : undefined,
-      sandboxProvider: sandboxProvider,
-    });
+    const effectiveMountDir = mountMode
+      ? (mountDir ?? process.cwd())
+      : undefined;
+    if (resumeSession) {
+      resumeSessionFlow(
+        resumeSession,
+        promptText,
+        modelId,
+        submitMode,
+        effectiveMountDir,
+        sandboxProvider,
+      );
+    } else {
+      startSession(
+        promptText,
+        agent,
+        modelId,
+        submitMode,
+        effectiveMountDir,
+        sandboxProvider,
+      );
+    }
   };
 
   // Use a ref to avoid stale closure issues with @opentui/react's textarea.
