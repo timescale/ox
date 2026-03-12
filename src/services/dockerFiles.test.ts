@@ -5,7 +5,7 @@ import { readFileFromContainer, writeFileToContainer } from './dockerFiles';
 // They spin up a lightweight alpine container for the duration of the suite.
 // Skip in CI where Docker is not available.
 
-describe.skipIf(!!process.env.CI)('dockerFiles', () => {
+describe.skipIf(!!process.env.CI || !Bun.which('docker'))('dockerFiles', () => {
   let containerId: string;
 
   beforeAll(async () => {
