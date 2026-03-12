@@ -690,6 +690,40 @@ export class CloudSandboxProvider implements SandboxProvider {
     const db = openSessionDb();
     upsertSession(db, session);
 
+    // Expose HTTP ports and set up local proxy (if appPorts configured)
+    const { normalizeAppPorts, setupCloudPortForwarding } = await import(
+      '../portForwarding/index.ts'
+    );
+    const config = await readConfig();
+    const portConfig = normalizeAppPorts(config);
+
+    if (portConfig) {
+      onProgress?.('Exposing ports');
+      const externalUrls = new Map<number, string>();
+      for (const entry of portConfig.ports) {
+        try {
+          const url = await sandbox.exposeHttp({ port: entry.port });
+          externalUrls.set(entry.port, url);
+        } catch (err) {
+          log.warn(
+            { err, port: entry.port },
+            'Failed to expose HTTP port (non-fatal)',
+          );
+        }
+      }
+
+      onProgress?.('Configuring port forwarding');
+      const portUrls = await setupCloudPortForwarding(
+        sessionId,
+        session.name,
+        externalUrls,
+      );
+      if (portUrls) {
+        session.portUrls = portUrls;
+        upsertSession(db, session);
+      }
+    }
+
     // 4-7. Provision sandbox (credentials, repo clone, init script, agent)
     if (options.interactive) {
       // Interactive sessions: caller needs SSH ready, so await provisioning
@@ -1019,6 +1053,13 @@ export class CloudSandboxProvider implements SandboxProvider {
 
   async remove(sessionId: string): Promise<void> {
     await this.connectionPool.release(sessionId);
+
+    // Tear down port forwarding (best-effort)
+    const { teardownPortForwarding } = await import(
+      '../portForwarding/index.ts'
+    );
+    await teardownPortForwarding(sessionId);
+
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
 
@@ -1072,6 +1113,13 @@ export class CloudSandboxProvider implements SandboxProvider {
     await this.connectionPool.release(sessionId);
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
+
+    // Tear down port forwarding (best-effort)
+    const { teardownPortForwarding } = await import(
+      '../portForwarding/index.ts'
+    );
+    await teardownPortForwarding(sessionId, session?.name);
+
     const client = await this.getClient();
 
     // 1. Kill sandbox first (detaches the volume so it can be snapshotted)

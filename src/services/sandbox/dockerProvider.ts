@@ -177,7 +177,17 @@ export class DockerSandboxProvider implements SandboxProvider {
       { sessionId: session.containerId, name: session.name },
       'Docker sandbox created',
     );
-    return mapDockerSession(session);
+    const mapped = mapDockerSession(session);
+
+    // Set up port forwarding (best-effort — won't block session creation)
+    onProgress?.('Configuring port forwarding');
+    const { setupPortForwarding } = await import('../portForwarding/index.ts');
+    const portUrls = await setupPortForwarding(containerName, containerName);
+    if (portUrls) {
+      mapped.portUrls = portUrls;
+    }
+
+    return mapped;
   }
 
   async createShell(options: CreateShellSandboxOptions): Promise<ShellSession> {
@@ -213,7 +223,17 @@ export class DockerSandboxProvider implements SandboxProvider {
       { sessionId: session.containerId, name: session.name },
       'Docker sandbox resumed',
     );
-    return mapDockerSession(session);
+    const mapped = mapDockerSession(session);
+
+    // Set up port forwarding (best-effort — won't block session creation)
+    onProgress?.('Configuring port forwarding');
+    const { setupPortForwarding } = await import('../portForwarding/index.ts');
+    const portUrls = await setupPortForwarding(containerName, containerName);
+    if (portUrls) {
+      mapped.portUrls = portUrls;
+    }
+
+    return mapped;
   }
 
   async list(): Promise<OxSession[]> {
@@ -229,11 +249,19 @@ export class DockerSandboxProvider implements SandboxProvider {
 
   async remove(sessionId: string): Promise<void> {
     log.debug({ sessionId }, 'Removing Docker sandbox');
+    const { teardownPortForwarding } = await import(
+      '../portForwarding/index.ts'
+    );
+    await teardownPortForwarding(sessionId, sessionId);
     await removeContainer(sessionId);
   }
 
   async stop(sessionId: string): Promise<void> {
     log.debug({ sessionId }, 'Stopping Docker sandbox');
+    const { teardownPortForwarding } = await import(
+      '../portForwarding/index.ts'
+    );
+    await teardownPortForwarding(sessionId, sessionId);
     await stopContainer(sessionId);
   }
 
