@@ -54,7 +54,8 @@ export type SessionsView =
   | { type: 'starting-shell'; step: string }
   | { type: 'detail'; session: OxSession }
   | { type: 'list' }
-  | { type: 'resources' };
+  | { type: 'resources' }
+  | { type: 'setup-db'; returnToPrompt?: { resumeSession?: OxSession } };
 
 // ============================================================================
 // Result Types (for exiting the TUI)
@@ -160,6 +161,7 @@ interface RouterState {
   goToStartingShell: (step: string) => void;
   goToDocker: () => void;
   goToConfig: (returnToPrompt?: { resumeSession?: OxSession }) => void;
+  goToSetupDb: (returnToPrompt?: { resumeSession?: OxSession }) => void;
 
   // Low-level: for async workflows that do conditional/functional updates
   updateView: (updater: (prev: SessionsView) => SessionsView) => void;
@@ -248,6 +250,10 @@ export const useRouterStore = create<RouterState>()((set, get) => ({
 
   goToConfig: (returnToPrompt) => {
     set({ view: { type: 'config', returnToPrompt } });
+  },
+
+  goToSetupDb: (returnToPrompt) => {
+    set({ view: { type: 'setup-db', returnToPrompt } });
   },
 
   updateView: (updater) => {

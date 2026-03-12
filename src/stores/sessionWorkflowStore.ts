@@ -12,6 +12,7 @@ import { create } from 'zustand';
 import type { ConfigWizardResult } from '../commands/config.tsx';
 import type { CloudSetupResult } from '../components/CloudSetup.tsx';
 import type { DockerSetupResult } from '../components/DockerSetup.tsx';
+import type { SetupDbResult } from '../components/SetupDb.tsx';
 import type { AgentType, OxConfig } from '../services/config.ts';
 import { projectConfig, readConfig } from '../services/config.ts';
 import type { ForkResult } from '../services/db.ts';
@@ -106,6 +107,8 @@ export interface SessionWorkflowState {
   handleDockerComplete: (result: DockerSetupResult) => void;
 
   handleConfigComplete: (result: ConfigWizardResult) => Promise<void>;
+
+  handleSetupDbComplete: (result: SetupDbResult) => void;
 
   handleCloudSetupComplete: (result: CloudSetupResult) => void;
 
@@ -731,6 +734,43 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
       }
 
       useReadinessStore.getState().runChecks();
+    },
+
+    // Handle /setup-db completion — return to prompt with toast feedback
+    handleSetupDbComplete: (result) => {
+      const currentView = useRouterStore.getState().view;
+      const resumeSession =
+        currentView.type === 'setup-db'
+          ? currentView.returnToPrompt?.resumeSession
+          : undefined;
+
+      if (result.type === 'cancelled') {
+        useRouterStore.getState().goToPrompt(resumeSession);
+        return;
+      }
+      if (result.type === 'unavailable') {
+        useToastStore
+          .getState()
+          .show(
+            'Tiger CLI is not installed — cannot configure database service.',
+            'error',
+          );
+        useRouterStore.getState().goToPrompt(resumeSession);
+        return;
+      }
+
+      // Config was already persisted by the SetupDb component.
+      // Re-read merged config so runtime state stays in sync.
+      readConfig().then((mergedConfig) => {
+        set({ config: mergedConfig });
+      });
+
+      const label =
+        result.tigerServiceId === null
+          ? 'Database service set to (None).'
+          : `Database service set to ${result.tigerServiceId}.`;
+      useToastStore.getState().show(label, 'success');
+      useRouterStore.getState().goToPrompt(resumeSession);
     },
 
     // Handle cloud setup completion - resume pending start/resume action
