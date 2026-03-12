@@ -82,6 +82,15 @@ export interface OxConfig {
 
   /** Default interaction mode: 'interactive', 'plan', or 'async' */
   submitMode?: 'async' | 'interactive' | 'plan';
+
+  /** Single port shorthand for app running in sandbox. Sugar for appPorts: [{ port: value }]. */
+  appPort?: number;
+
+  /** Port mappings for apps running in the sandbox. Enables reverse proxy routing via *.ox.local URLs. */
+  appPorts?: { port: number; subdomain?: string }[];
+
+  /** Override the HTTPS port for the local reverse proxy (Caddy). Default: 443 -> 8443 -> 9443 -> random. */
+  proxyPort?: number;
 }
 
 // ============================================================================
@@ -90,11 +99,13 @@ export interface OxConfig {
 
 export type ConfigValueType =
   | 'string'
+  | 'number'
   | 'boolean'
   | 'string|null'
   | 'string[]'
   | 'boolean|string'
-  | 'object';
+  | 'object'
+  | 'object[]';
 
 /** Type metadata for each config key, used for validation and parsing in CLI */
 export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
@@ -111,6 +122,9 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   analytics: 'boolean',
   agentModels: 'object',
   submitMode: 'string',
+  appPort: 'number',
+  appPorts: 'object[]',
+  proxyPort: 'number',
 };
 
 /**
@@ -156,6 +170,14 @@ export function parseConfigValue(
     case 'string':
       return { value: raw };
 
+    case 'number': {
+      const num = Number(raw);
+      if (Number.isNaN(num) || !Number.isInteger(num)) {
+        return { error: `Expected an integer for ${key}, got '${raw}'` };
+      }
+      return { value: num };
+    }
+
     case 'object':
       try {
         const parsed = JSON.parse(raw);
@@ -163,6 +185,17 @@ export function parseConfigValue(
           return { value: parsed };
         }
         return { error: `Expected a JSON object for ${key}, got: ${raw}` };
+      } catch {
+        return { error: `Invalid JSON for ${key}: ${raw}` };
+      }
+
+    case 'object[]':
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return { value: parsed };
+        }
+        return { error: `Expected a JSON array for ${key}, got: ${raw}` };
       } catch {
         return { error: `Invalid JSON for ${key}: ${raw}` };
       }
