@@ -15,6 +15,12 @@ Ox automates the entire workflow of starting a coding task: it creates a feature
 - **Two sandbox providers** -- Run locally with Docker or remotely with cloud sandboxes
 - **Auto-update** -- Keeps itself up to date in the background
 
+## Beta software
+
+Note that ox is currently in rapid development. Expect rough edges and breaking changes.
+
+We'd love to hear feedback from the community. Please create [issues](https://github.com/timescale/ox/issues), send us feedback from the app via `ox feedback`, or submit PRs!
+
 ## Quick Start
 
 ```bash
@@ -141,14 +147,19 @@ sandboxProvider: cloud
 cloudRegion: ord  # ord (Chicago) or ams (Amsterdam)
 ```
 
+Support for additional providers is planned.
+
 ## Agent Support
 
-Ox ships with support for two AI coding agents:
+Ox is designed to support multiple AI coding agents:
 
 | Agent | Description |
 |-------|-------------|
 | **OpenCode** | Open-source coding agent CLI with support for multiple model providers |
 | **Claude Code** | Anthropic's Claude Code CLI |
+| **Codex** | OpenAI's coding agent CLI |
+
+We'd love to support more agents. Let us know your favorite to help us prioritize. Vote on or add to the tickets [here](https://github.com/timescale/ox/milestone/1), send us feedback via `ox feedback`, or submit a PR!
 
 Select an agent per-task or set a default:
 
