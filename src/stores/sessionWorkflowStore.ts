@@ -63,6 +63,7 @@ export interface SessionWorkflowState {
   initialAgent: AgentType | undefined;
   initialModel: string | undefined;
   initialSession: OxSession | undefined;
+  autoSubmitAgentMode: AgentMode | undefined;
   renderer: CliRenderer | null;
   requestSudo: RequestSudoFn | undefined;
 
@@ -78,6 +79,7 @@ export interface SessionWorkflowState {
     initialAgent?: AgentType;
     initialModel?: string;
     initialSession?: OxSession;
+    autoSubmitAgentMode?: AgentMode;
   }) => void;
 
   setConfig: (config: OxConfig) => void;
@@ -143,6 +145,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
     initialAgent: undefined,
     initialModel: undefined,
     initialSession: undefined,
+    autoSubmitAgentMode: undefined,
     renderer: null,
     requestSudo: undefined,
 
@@ -184,6 +187,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         initialAgent: params.initialAgent,
         initialModel: params.initialModel,
         initialSession: params.initialSession,
+        autoSubmitAgentMode: params.autoSubmitAgentMode,
       });
     },
 
@@ -869,7 +873,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           agent,
           model,
           step: 'Preparing environment',
-          mode: 'async',
+          mode: state.autoSubmitAgentMode ?? 'async',
         });
 
         // Wait for Docker + image to be ready, then start
@@ -924,7 +928,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             });
           }
 
-          get().startSession(initialPrompt, agent, model);
+          get().startSession(
+            initialPrompt,
+            agent,
+            model,
+            state.autoSubmitAgentMode,
+          );
         };
 
         waitAndStart().catch((err) => {

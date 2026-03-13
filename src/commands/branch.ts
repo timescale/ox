@@ -8,11 +8,7 @@ import { ensureClaudeAuth } from '../services/claude';
 import { ensureCodexAuth } from '../services/codex';
 import { type AgentType, projectConfig, readConfig } from '../services/config';
 import { type ForkResult, forkDatabase } from '../services/db';
-import {
-  generateBranchName,
-  type RepoInfo,
-  tryGetRepoInfo,
-} from '../services/git';
+import { generateBranchName, tryGetRepoInfo } from '../services/git';
 import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
 import type { SandboxProviderType } from '../services/sandbox';
@@ -26,37 +22,13 @@ interface BranchOptions {
   dbFork: boolean;
   agent?: AgentType;
   model?: string;
-  print: boolean;
+  follow: boolean;
   interactive: boolean;
+  agentMode?: 'async' | 'interactive' | 'plan';
   /** Mount local directory instead of git clone. True = cwd, string = specific path */
   mount?: string | true;
   /** Sandbox provider override (docker or cloud) */
   provider?: SandboxProviderType;
-}
-
-function printSummary(
-  branchName: string,
-  repoInfo: RepoInfo | null,
-  forkResult: ForkResult | null,
-): void {
-  log.info(
-    {
-      branchName,
-      repo: repoInfo?.fullName ?? 'local',
-      database: forkResult?.name,
-      container: `ox-${branchName}`,
-    },
-    'Branch session created',
-  );
-  console.log(`
-${repoInfo ? `Repository: ${repoInfo.fullName}\nBranch: ox/${branchName}` : 'Mode: Local directory (no git repo)'}${
-  forkResult
-    ? `
-Database: ${forkResult.name} (service ID: ${forkResult.service_id})`
-    : ''
-}
-Container: ox-${branchName}
-`);
 }
 
 export async function branchAction(
@@ -64,9 +36,19 @@ export async function branchAction(
   options: BranchOptions,
 ): Promise<void> {
   // Validate mutually exclusive options
-  if (options.print && options.interactive) {
-    log.error('--print and --interactive are mutually exclusive');
-    console.error('Error: --print and --interactive are mutually exclusive');
+  if (options.follow && options.interactive) {
+    log.error('--follow and --interactive are mutually exclusive');
+    console.error('Error: --follow and --interactive are mutually exclusive');
+    process.exit(1);
+  }
+
+  // --follow only works with async agent mode
+  const effectiveAgentMode = options.agentMode ?? 'async';
+  if (options.follow && effectiveAgentMode !== 'async') {
+    log.error('--follow requires --agent-mode=async');
+    console.error(
+      'Error: --follow requires --agent-mode=async (interactive and plan agents need a terminal)',
+    );
     process.exit(1);
   }
 
@@ -85,7 +67,7 @@ export async function branchAction(
     log.info(
       'Not in a git repository. Using mount mode with current directory.',
     );
-    console.log(
+    console.error(
       'Not in a git repository. Using mount mode with current directory.',
     );
     options.mount = true;
@@ -104,7 +86,7 @@ export async function branchAction(
   // Step 3: Read merged config for defaults, run config wizard if no project config exists
   if (!(await projectConfig.exists())) {
     log.info('No project config found. Running config wizard...');
-    console.log('No project config found. Running config wizard...\n');
+    console.error('No project config found. Running config wizard...\n');
     await configAction();
     // Verify project config was created
     if (!(await projectConfig.exists())) {
@@ -112,7 +94,7 @@ export async function branchAction(
       console.error('Config was cancelled or failed. Cannot continue.');
       process.exit(1);
     }
-    console.log(''); // blank line after config
+    console.error(''); // blank line after config
   }
 
   // Read merged config for effective values
@@ -124,48 +106,48 @@ export async function branchAction(
   const effectiveModel: string | undefined = options.model ?? config.model;
 
   // Step 4b: Ensure sandbox image (including agent overlay) is ready
-  console.log('Ensuring sandbox image...');
+  console.error('Ensuring sandbox image...');
   await provider.ensureImage({ agent: effectiveAgent });
 
   // Step 5: Get repo info (if in a git repo)
   if (isGitRepo) {
     log.debug({ repo: repoInfo.fullName }, 'Repository info resolved');
-    console.log('Getting repository info...');
-    console.log(`  Repository: ${repoInfo.fullName}`);
+    console.error('Getting repository info...');
+    console.error(`  Repository: ${repoInfo.fullName}`);
   }
 
   // Step 6: Generate branch name using configured agent and model
   log.debug('Generating branch name');
-  console.log('Generating branch name...');
+  console.error('Generating branch name...');
   const branchName = await generateBranchName({
     prompt,
     agent: effectiveAgent,
     model: effectiveModel,
-    onProgress: console.log,
+    onProgress: console.error,
   });
   log.debug({ branchName }, 'Branch name generated');
-  console.log(`  Branch name: ${branchName}`);
+  console.error(`  Branch name: ${branchName}`);
 
   // Step 7: Fork database (only if explicitly configured with a service ID)
   let forkResult: ForkResult | null = null;
   if (!options.dbFork) {
     log.debug('Skipping database fork (--no-db-fork)');
-    console.log('Skipping database fork (--no-db-fork)');
+    console.error('Skipping database fork (--no-db-fork)');
   } else if (!effectiveServiceId) {
     // Default is to skip fork unless a service ID is explicitly configured
     log.debug('Skipping database fork (no service ID configured)');
-    console.log('Skipping database fork (no service ID configured)');
+    console.error('Skipping database fork (no service ID configured)');
   } else {
     log.info('Forking database (this may take a few minutes)...');
-    console.log('Forking database (this may take a few minutes)...');
+    console.error('Forking database (this may take a few minutes)...');
     forkResult = await forkDatabase(branchName, effectiveServiceId);
     log.info({ name: forkResult.name }, 'Database fork created');
-    console.log(`  Database fork created: ${forkResult.name}`);
+    console.error(`  Database fork created: ${forkResult.name}`);
   }
 
   // Step 8: Ensure agent credentials are valid
   log.debug({ agent: effectiveAgent }, 'Checking agent credentials');
-  console.log(`Checking ${effectiveAgent} credentials...`);
+  console.error(`Checking ${effectiveAgent} credentials...`);
   let authValid: boolean;
   switch (effectiveAgent) {
     case 'claude':
@@ -203,11 +185,14 @@ export async function branchAction(
     { agent: effectiveAgent, model: effectiveModel, mountDir },
     'Starting agent container',
   );
-  console.log(
+  console.error(
     `Starting agent container (using ${effectiveAgent}${effectiveModel ? ` with ${effectiveModel}` : ''})${mountDir ? ' [mount mode]' : ''}...`,
   );
-  // Default to detached mode unless --print or --interactive is specified
-  const detach = !options.print && !options.interactive;
+  const isInteractiveAgent =
+    effectiveAgentMode === 'interactive' || effectiveAgentMode === 'plan';
+  // Follow mode: don't detach (we stream output)
+  // Default (detached): detach the container
+  const detach = !options.follow;
 
   const session = await provider.create({
     branchName,
@@ -217,21 +202,31 @@ export async function branchAction(
     agent: effectiveAgent,
     model: effectiveModel,
     detach,
-    interactive: options.interactive,
+    interactive: isInteractiveAgent,
     envVars: forkResult?.envVars,
     mountDir,
     isGitRepo,
+    agentMode: effectiveAgentMode,
+    agentArgs:
+      effectiveAgentMode === 'plan'
+        ? effectiveAgent === 'claude'
+          ? ['--permission-mode', 'plan']
+          : ['--agent', 'plan']
+        : undefined,
   });
 
-  if (detach) {
-    log.debug({ sessionId: session?.id }, 'Container started');
-    console.log(`  Container started: ${session?.id?.substring(0, 12)}`);
-    // Summary only shown in detached mode
-    printSummary(branchName, repoInfo, forkResult);
-  } else if (options.interactive) {
-    // Interactive mode exited
+  if (options.follow) {
+    // Follow mode: output was already streamed by provider.create() (detach=false)
     log.info({ agent: effectiveAgent }, 'Agent session ended');
-    console.log(`\n${effectiveAgent} session ended.`);
+    console.error(`\n${effectiveAgent} session ended.`);
+    // Exit with agent's exit code
+    const exitCode = session?.exitCode ?? 0;
+    process.exit(exitCode);
+  } else {
+    // Detached mode: print session ID to stdout only
+    if (session?.id) {
+      console.log(session.id);
+    }
   }
 }
 
@@ -254,10 +249,16 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
       'Model to use for the agent (defaults to config)',
     )
     .option(
-      '-p, --print',
-      'Attach container output to console (default: detached)',
+      '-f, --follow',
+      'Stream agent output to terminal (exit when agent finishes)',
     )
-    .option('-i, --interactive', 'Run agent in full TUI mode')
+    .option('-i, --interactive', 'Launch full TUI experience')
+    .addOption(
+      new Option(
+        '-M, --agent-mode <mode>',
+        'Agent mode: async (default), interactive, or plan',
+      ).choices(['async', 'interactive', 'plan']),
+    )
     .option(
       '--mount [dir]',
       'Mount local directory into container instead of git clone (defaults to cwd)',
@@ -293,53 +294,38 @@ export const branchCommand = withBranchOptions(
     process.exit(1);
   }
 
-  // -p (print) or -i (interactive) flags: use non-TUI flow
-  if (options.print || options.interactive) {
-    await branchAction(resolved.prompt, options);
+  // --interactive: launch TUI with auto-submit
+  if (options.interactive) {
+    const repoInfo = await tryGetRepoInfo();
+    const isGitRepo = repoInfo !== null;
+    if (!isGitRepo && !options.mount) {
+      options.mount = true;
+    }
+    const mountDir =
+      options.mount === true
+        ? process.cwd()
+        : typeof options.mount === 'string'
+          ? options.mount
+          : undefined;
+
+    const agentMode = options.agentMode ?? 'interactive';
+
+    const { runSessionsTui } = await import('./sessions.tsx');
+    await runSessionsTui({
+      initialView: 'starting',
+      initialPrompt: resolved.prompt,
+      initialAgent: options.agent,
+      initialModel: options.model,
+      serviceId: options.serviceId,
+      dbFork: options.dbFork,
+      mountDir,
+      isGitRepo,
+      sandboxProvider: options.provider,
+      autoSubmitAgentMode: agentMode,
+    });
     return;
   }
 
-  // Redirected stdin was consumed to get the prompt, so we cannot launch
-  // the prompt TUI and expect it to remain interactive.
-  if (resolved.source === 'stdin') {
-    await branchAction(resolved.prompt, options);
-    return;
-  }
-
-  // Check if we're in a git repository before launching TUI
-  const repoInfo = await tryGetRepoInfo();
-  const isGitRepo = repoInfo !== null;
-
-  // Force mount mode if not in a git repo
-  if (!isGitRepo && !options.mount) {
-    log.info(
-      'Not in a git repository. Using mount mode with current directory.',
-    );
-    console.log(
-      'Not in a git repository. Using mount mode with current directory.',
-    );
-    options.mount = true;
-  }
-
-  // Default: use unified TUI
-  // Resolve mount directory: true means cwd, string means specific path
-  const mountDir =
-    options.mount === true
-      ? process.cwd()
-      : typeof options.mount === 'string'
-        ? options.mount
-        : undefined;
-
-  const { runSessionsTui } = await import('./sessions.tsx');
-  await runSessionsTui({
-    initialView: 'starting',
-    initialPrompt: resolved.prompt,
-    initialAgent: options.agent,
-    initialModel: options.model,
-    serviceId: options.serviceId,
-    dbFork: options.dbFork,
-    mountDir,
-    isGitRepo,
-    sandboxProvider: options.provider,
-  });
+  // --follow or default (detached): non-TUI flow
+  await branchAction(resolved.prompt, options);
 });

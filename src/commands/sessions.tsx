@@ -128,6 +128,11 @@ export interface RunSessionsTuiOptions {
   isGitRepo?: boolean;
   /** Sandbox provider override from CLI flag (overrides config) */
   sandboxProvider?: SandboxProviderType;
+  /**
+   * When set with initialView='starting', auto-submit the prompt with this agent mode.
+   * Skips the prompt screen and goes directly to session creation.
+   */
+  autoSubmitAgentMode?: 'async' | 'interactive' | 'plan';
 }
 
 // ============================================================================
@@ -148,6 +153,7 @@ interface SessionsAppProps {
   dbFork?: boolean;
   /** Mount local directory instead of git clone */
   initialMountDir?: string;
+  autoSubmitAgentMode?: 'async' | 'interactive' | 'plan';
 }
 
 function SessionsApp({
@@ -161,6 +167,7 @@ function SessionsApp({
   serviceId,
   dbFork = true,
   initialMountDir,
+  autoSubmitAgentMode,
 }: SessionsAppProps) {
   const view = useRouterStore((s) => s.view);
 
@@ -178,6 +185,7 @@ function SessionsApp({
       initialAgent,
       initialModel,
       initialSession,
+      autoSubmitAgentMode,
     });
   }, [
     workflowInit,
@@ -191,6 +199,7 @@ function SessionsApp({
     initialAgent,
     initialModel,
     initialSession,
+    autoSubmitAgentMode,
   ]);
 
   // Graceful shutdown: Ctrl+C handler
@@ -435,6 +444,7 @@ export async function runSessionsTui({
   mountDir,
   isGitRepo,
   sandboxProvider,
+  autoSubmitAgentMode,
 }: RunSessionsTuiOptions = {}): Promise<void> {
   const provider = sandboxProvider
     ? getSandboxProvider(sandboxProvider)
@@ -489,6 +499,7 @@ export async function runSessionsTui({
           serviceId={serviceId}
           dbFork={dbFork}
           initialMountDir={nextMountDir}
+          autoSubmitAgentMode={autoSubmitAgentMode}
         />
       </CopyOnSelect>,
     );

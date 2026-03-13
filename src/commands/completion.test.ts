@@ -204,7 +204,7 @@ describe('completion resolution', () => {
     const { completions } = parseCompletionOutput(stdout);
     expect(completions).toContain('--agent');
     expect(completions).toContain('--model');
-    expect(completions).toContain('--print');
+    expect(completions).toContain('--follow');
     expect(completions).toContain('--provider');
   });
 

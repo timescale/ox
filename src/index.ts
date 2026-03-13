@@ -75,29 +75,56 @@ withBranchOptions(program)
         return;
       }
 
-      // -p (print) or -i (interactive) flags: use non-TUI flow
-      if (options.print || options.interactive) {
-        await branchAction(resolved.prompt, options);
+      // --interactive: launch full TUI with auto-submit
+      if (options.interactive) {
+        // Resolve mount for TUI path
+        const { tryGetRepoInfo } = await import('./services/git.ts');
+        const repoInfo = await tryGetRepoInfo();
+        const isGitRepo = repoInfo !== null;
+        if (!isGitRepo && !options.mount) {
+          options.mount = true;
+        }
+        const mountDir =
+          options.mount === true
+            ? process.cwd()
+            : typeof options.mount === 'string'
+              ? options.mount
+              : undefined;
+
+        // -i implies --agent-mode=interactive unless explicitly set
+        const agentMode = options.agentMode ?? 'interactive';
+
+        await runSessionsTui({
+          initialView: 'starting',
+          initialPrompt: resolved.prompt,
+          initialAgent: options.agent,
+          initialModel: options.model,
+          serviceId: options.serviceId,
+          dbFork: options.dbFork,
+          mountDir,
+          isGitRepo,
+          sandboxProvider: options.provider,
+          autoSubmitAgentMode: agentMode,
+        });
         return;
       }
 
-      // If stdin is not a TTY (pipe, file redirect, /dev/null), the TUI
-      // cannot read keyboard input.  Fall back to the non-TUI flow.
-      if (!process.stdin.isTTY) {
-        await branchAction(resolved.prompt, options);
-        return;
-      }
-    } else if (!process.stdin.isTTY) {
+      // --follow or default (detached): use non-TUI flow
+      await branchAction(resolved.prompt, options);
+      return;
+    }
+
+    // No prompt
+    if (!process.stdin.isTTY) {
       console.error(
         'Error: prompt is required (stdin was redirected but empty)',
       );
       process.exit(1);
     }
 
-    // Default: use unified TUI starting at 'starting' view
+    // No prompt + TTY: launch TUI session manager
     await runSessionsTui({
-      initialView: resolved.prompt ? 'starting' : 'prompt',
-      initialPrompt: resolved.prompt,
+      initialView: 'prompt',
       initialAgent: options.agent,
       initialModel: options.model,
       serviceId: options.serviceId,
