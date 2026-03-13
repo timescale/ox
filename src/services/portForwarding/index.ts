@@ -7,6 +7,7 @@ import { log } from '../logger.ts';
 import {
   addRoutes,
   ensureCaddy,
+  getCaddyHttpsPort,
   removeRoutes,
   stopCaddyIfUnused,
 } from './caddy.ts';
@@ -18,7 +19,7 @@ import {
   disconnectFromNetwork,
   ensureNetwork,
 } from './network.ts';
-import { resolveProxyPorts } from './portUtils.ts';
+import { resolveProxyPort } from './portUtils.ts';
 import type { RequestSudoFn } from './sudo.ts';
 import type { PortUrl } from './types.ts';
 
@@ -30,7 +31,7 @@ export type { AppPortEntry, PortUrl, ResolvedPortConfig } from './types.ts';
 // State
 // ---------------------------------------------------------------------------
 
-let resolvedPorts: { httpsPort: number; httpPort: number } | null = null;
+let resolvedHttpsPort: number | null = null;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,8 +67,9 @@ export async function getPortUrls(
     const portConfig = normalizeAppPorts(config);
     if (!portConfig) return null;
 
-    // Use cached resolved ports if available, otherwise assume 443
-    const httpsPort = resolvedPorts?.httpsPort ?? 443;
+    // Use cached port if this process set up port forwarding, otherwise
+    // discover the HTTPS port from the running Caddy container.
+    const httpsPort = resolvedHttpsPort ?? (await getCaddyHttpsPort()) ?? 443;
     return portConfig.ports.map((entry) => ({
       port: entry.port,
       subdomain: entry.subdomain,
@@ -104,12 +106,12 @@ export async function setupPortForwarding(
     await ensureNetwork();
     await connectToNetwork(containerName);
 
-    // 3. Resolve proxy ports (cached), ensure Caddy running
-    if (!resolvedPorts) {
-      resolvedPorts = await resolveProxyPorts(config.proxyPort);
+    // 3. Resolve proxy port (cached), ensure Caddy running
+    if (!resolvedHttpsPort) {
+      resolvedHttpsPort = await resolveProxyPort(config.proxyPort);
     }
-    const { httpsPort, httpPort } = resolvedPorts;
-    await ensureCaddy(httpsPort, httpPort);
+    const httpsPort = resolvedHttpsPort;
+    await ensureCaddy(httpsPort);
 
     // 4. Ensure DNS, ensure cert trusted
     await ensureDns(requestSudo);
@@ -156,12 +158,12 @@ export async function setupCloudPortForwarding(
     // 2. Ensure network (no container to connect for cloud)
     await ensureNetwork();
 
-    // 3. Resolve proxy ports (cached), ensure Caddy running
-    if (!resolvedPorts) {
-      resolvedPorts = await resolveProxyPorts(config.proxyPort);
+    // 3. Resolve proxy port (cached), ensure Caddy running
+    if (!resolvedHttpsPort) {
+      resolvedHttpsPort = await resolveProxyPort(config.proxyPort);
     }
-    const { httpsPort, httpPort } = resolvedPorts;
-    await ensureCaddy(httpsPort, httpPort);
+    const httpsPort = resolvedHttpsPort;
+    await ensureCaddy(httpsPort);
 
     // 4. Ensure DNS, ensure cert trusted
     await ensureDns(requestSudo);

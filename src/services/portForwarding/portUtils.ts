@@ -17,37 +17,26 @@ export function isPortAvailable(port: number): Promise<boolean> {
 }
 
 /**
- * Resolve the HTTPS and HTTP ports for the local reverse proxy (Caddy).
+ * Resolve the HTTPS port for the local reverse proxy (Caddy).
  *
- * Preference order for HTTPS:
+ * Preference order:
  *   1. Configured `proxyPort` (if provided)
  *   2. 443
  *   3. 8443
  *   4. 9443
  *   5. Random available port
- *
- * The HTTP port is always HTTPS port + 1000 (or random if unavailable).
  */
-export async function resolveProxyPorts(
-  proxyPort?: number,
-): Promise<{ httpsPort: number; httpPort: number }> {
+export async function resolveProxyPort(proxyPort?: number): Promise<number> {
   const candidates = proxyPort != null ? [proxyPort] : [443, 8443, 9443];
 
   for (const port of candidates) {
     if (await isPortAvailable(port)) {
-      const httpPort = port + 1000;
-      const httpAvailable = await isPortAvailable(httpPort);
-      return {
-        httpsPort: port,
-        httpPort: httpAvailable ? httpPort : await findRandomPort(),
-      };
+      return port;
     }
   }
 
   // All candidates taken — use a random port
-  const httpsPort = await findRandomPort();
-  const httpPort = await findRandomPort();
-  return { httpsPort, httpPort };
+  return findRandomPort();
 }
 
 /** Bind to port 0 and return the OS-assigned port. */

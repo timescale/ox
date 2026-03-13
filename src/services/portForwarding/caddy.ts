@@ -28,8 +28,8 @@ const CADDY_CONFIG_PATH = join(tmpdir(), 'ox-caddy-config.json');
 // State
 // ---------------------------------------------------------------------------
 
-/** Cached ports so addRoutes/removeRoutes don't need them re-passed */
-let currentPorts: { httpsPort: number; httpPort: number } | null = null;
+/** Cached HTTPS port so addRoutes/removeRoutes don't need it re-passed */
+let currentHttpsPort: number | null = null;
 
 // ---------------------------------------------------------------------------
 // Config generation
@@ -49,10 +49,7 @@ interface CaddyConfig {
  *
  * Reads routes from the SQLite database so all ox processes share state.
  */
-export function generateCaddyConfig(
-  httpsPort: number,
-  httpPort: number,
-): CaddyConfig {
+export function generateCaddyConfig(httpsPort: number): CaddyConfig {
   const routes: unknown[] = [];
   const db = openSessionDb();
   const allRoutes = listCaddyRoutes(db);
@@ -105,19 +102,6 @@ export function generateCaddyConfig(
     }
   }
 
-  // Build the HTTPS redirect handler for HTTP server
-  const redirectHandler: Record<string, unknown> = {
-    handler: 'static_response',
-    status_code: '301',
-    headers: {
-      Location: [
-        httpsPort === 443
-          ? 'https://{http.request.host}{http.request.uri}'
-          : `https://{{http.request.hostport.host}}:${httpsPort}{{http.request.uri}}`,
-      ],
-    },
-  };
-
   return {
     apps: {
       tls: {
@@ -136,14 +120,6 @@ export function generateCaddyConfig(
             listen: [`:${httpsPort}`],
             routes,
             tls_connection_policies: [{}],
-          },
-          redirect: {
-            listen: [`:${httpPort}`],
-            routes: [
-              {
-                handle: [redirectHandler],
-              },
-            ],
           },
         },
       },
@@ -169,13 +145,25 @@ export async function isCaddyRunning(): Promise<boolean> {
 }
 
 /**
+ * Get the HTTPS port that the running Caddy container is bound to.
+ * Returns null if Caddy isn't running or the port can't be determined.
+ */
+export async function getCaddyHttpsPort(): Promise<number | null> {
+  try {
+    // docker port returns lines like "8443/tcp -> 127.0.0.1:8443"
+    const result = await $`docker port ${CADDY_CONTAINER}`.quiet();
+    const match = result.stdout.toString().match(/^(\d+)\/tcp/);
+    return match ? Number(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Start the Caddy container if it isn't already running.
  */
-export async function ensureCaddy(
-  httpsPort: number,
-  httpPort: number,
-): Promise<void> {
-  currentPorts = { httpsPort, httpPort };
+export async function ensureCaddy(httpsPort: number): Promise<void> {
+  currentHttpsPort = httpsPort;
 
   if (await isCaddyRunning()) {
     log.debug('Caddy container already running');
@@ -194,7 +182,7 @@ export async function ensureCaddy(
   // Generate initial config and write to host.
   // Use writeFileSync + fsyncSync to guarantee data reaches disk before
   // Docker mounts the file — macOS VirtioFS can see a partial file otherwise.
-  const config = generateCaddyConfig(httpsPort, httpPort);
+  const config = generateCaddyConfig(httpsPort);
   const configJson = JSON.stringify(config, null, 2);
   const fd = openSync(CADDY_CONFIG_PATH, 'w');
   writeSync(fd, configJson);
@@ -202,7 +190,7 @@ export async function ensureCaddy(
   closeSync(fd);
 
   log.info(
-    { httpsPort, httpPort, configPath: CADDY_CONFIG_PATH },
+    { httpsPort, configPath: CADDY_CONFIG_PATH },
     'Starting Caddy container',
   );
 
@@ -210,7 +198,6 @@ export async function ensureCaddy(
     --name ${CADDY_CONTAINER} \
     --network ${OX_NETWORK} \
     -p 127.0.0.1:${httpsPort}:${httpsPort} \
-    -p 127.0.0.1:${httpPort}:${httpPort} \
     -v ${CADDY_CONFIG_PATH}:/etc/caddy/config.json:ro \
     -v ox-caddy-data:/data \
     ${CADDY_IMAGE} \
@@ -239,11 +226,8 @@ export async function ensureCaddy(
 /**
  * Write the current config to disk and reload Caddy.
  */
-async function writeCaddyConfigAndReload(
-  httpsPort: number,
-  httpPort: number,
-): Promise<void> {
-  const config = generateCaddyConfig(httpsPort, httpPort);
+async function writeCaddyConfigAndReload(httpsPort: number): Promise<void> {
+  const config = generateCaddyConfig(httpsPort);
   const configJson = JSON.stringify(config, null, 2);
   const fd = openSync(CADDY_CONFIG_PATH, 'w');
   writeSync(fd, configJson);
@@ -281,14 +265,11 @@ export async function addRoutes(
     externalUrls: options?.externalUrls,
   });
 
-  if (!currentPorts) {
-    throw new Error('Caddy ports not initialized — call ensureCaddy first');
+  if (!currentHttpsPort) {
+    throw new Error('Caddy port not initialized — call ensureCaddy first');
   }
 
-  await writeCaddyConfigAndReload(
-    currentPorts.httpsPort,
-    currentPorts.httpPort,
-  );
+  await writeCaddyConfigAndReload(currentHttpsPort);
   log.info(
     { sessionId, containerName, portCount: ports.length },
     'Added Caddy routes',
@@ -302,11 +283,8 @@ export async function removeRoutes(sessionId: string): Promise<void> {
   const db = openSessionDb();
   deleteCaddyRoute(db, sessionId);
 
-  if (currentPorts && (await isCaddyRunning())) {
-    await writeCaddyConfigAndReload(
-      currentPorts.httpsPort,
-      currentPorts.httpPort,
-    );
+  if (currentHttpsPort && (await isCaddyRunning())) {
+    await writeCaddyConfigAndReload(currentHttpsPort);
   }
 
   log.info({ sessionId }, 'Removed Caddy routes');
@@ -324,7 +302,7 @@ export async function stopCaddy(): Promise<void> {
   await $`docker rm -f ${CADDY_CONTAINER}`.quiet().nothrow();
   const db = openSessionDb();
   deleteAllCaddyRoutes(db);
-  currentPorts = null;
+  currentHttpsPort = null;
 }
 
 /**
