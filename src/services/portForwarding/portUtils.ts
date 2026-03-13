@@ -3,12 +3,17 @@ import { createServer } from 'node:net';
 /**
  * Check whether a TCP port is available on 127.0.0.1.
  * Tries to bind a server; resolves true if successful, false if in use.
+ *
+ * EACCES (permission denied for privileged ports < 1024) is treated as
+ * "available" because Docker can still map the port via its own mechanisms.
  */
 export function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer();
-    server.once('error', () => {
-      resolve(false);
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      // EACCES means the port is free but requires root to bind directly —
+      // Docker handles privileged port mapping itself, so treat as available.
+      resolve(err.code === 'EACCES');
     });
     server.listen(port, '127.0.0.1', () => {
       server.close(() => resolve(true));

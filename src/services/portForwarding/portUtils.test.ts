@@ -13,4 +13,13 @@ describe('isPortAvailable', () => {
     expect(typeof available).toBe('boolean');
     expect(available).toBe(true);
   });
+
+  test('treats privileged port as available (EACCES)', async () => {
+    // Port 443 requires root to bind directly but Docker can still map it.
+    // isPortAvailable should treat EACCES as "available" so we prefer 443
+    // over higher ports when nothing else is listening on it.
+    const available = await isPortAvailable(443);
+    // This will be true unless something is actually listening on 443
+    expect(available).toBe(true);
+  });
 });
