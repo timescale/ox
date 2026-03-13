@@ -21,7 +21,7 @@ import {
 } from './network.ts';
 import { resolveProxyPort } from './portUtils.ts';
 import type { RequestSudoFn } from './sudo.ts';
-import type { PortUrl } from './types.ts';
+import type { PortUrl, ResolvedPortConfig } from './types.ts';
 
 // Re-exports
 export { normalizeAppPorts } from './config.ts';
@@ -106,6 +106,34 @@ export async function getPortUrls(
 }
 
 // ---------------------------------------------------------------------------
+// Shared infrastructure setup
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared setup steps for both Docker and cloud port forwarding:
+ * read config, resolve ports, ensure Caddy/DNS/certs.
+ *
+ * Returns null if no port config is present.
+ */
+async function ensurePortForwardingInfra(
+  requestSudo?: RequestSudoFn,
+): Promise<{ portConfig: ResolvedPortConfig; httpsPort: number } | null> {
+  const config = await readConfig();
+  const portConfig = normalizeAppPorts(config);
+  if (!portConfig) return null;
+
+  await ensureNetwork();
+
+  const httpsPort = await resolveHttpsPort(config.proxyPort);
+  await ensureCaddy(httpsPort);
+
+  await ensureDns(requestSudo);
+  await ensureCertTrusted(requestSudo);
+
+  return { portConfig, httpsPort };
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
@@ -120,29 +148,13 @@ export async function setupPortForwarding(
   requestSudo?: RequestSudoFn,
 ): Promise<PortUrl[] | null> {
   try {
-    // 1. Read config, normalize app ports
-    const config = await readConfig();
-    const portConfig = normalizeAppPorts(config);
-    if (!portConfig) {
-      return null;
-    }
+    const infra = await ensurePortForwardingInfra(requestSudo);
+    if (!infra) return null;
+    const { portConfig, httpsPort } = infra;
 
-    // 2. Ensure network, connect container
-    await ensureNetwork();
     await connectToNetwork(containerName);
-
-    // 3. Resolve proxy port (checks running Caddy first), ensure Caddy running
-    const httpsPort = await resolveHttpsPort(config.proxyPort);
-    await ensureCaddy(httpsPort);
-
-    // 4. Ensure DNS, ensure cert trusted
-    await ensureDns(requestSudo);
-    await ensureCertTrusted(requestSudo);
-
-    // 5. Add routes to Caddy
     await addRoutes(sessionId, containerName, portConfig.ports);
 
-    // 6. Build and return PortUrl array
     return portConfig.ports.map((entry) => ({
       port: entry.port,
       subdomain: entry.subdomain,
@@ -170,25 +182,11 @@ export async function setupCloudPortForwarding(
   requestSudo?: RequestSudoFn,
 ): Promise<PortUrl[] | null> {
   try {
-    // 1. Read config, normalize app ports
-    const config = await readConfig();
-    const portConfig = normalizeAppPorts(config);
-    if (!portConfig) {
-      return null;
-    }
+    const infra = await ensurePortForwardingInfra(requestSudo);
+    if (!infra) return null;
+    const { portConfig, httpsPort } = infra;
 
-    // 2. Ensure network (no container to connect for cloud)
-    await ensureNetwork();
-
-    // 3. Resolve proxy port (checks running Caddy first), ensure Caddy running
-    const httpsPort = await resolveHttpsPort(config.proxyPort);
-    await ensureCaddy(httpsPort);
-
-    // 4. Ensure DNS, ensure cert trusted
-    await ensureDns(requestSudo);
-    await ensureCertTrusted(requestSudo);
-
-    // 5. Add routes to Caddy (with cloud options — only for successfully exposed ports)
+    // Only register routes for successfully exposed ports
     const exposedPorts = portConfig.ports.filter((entry) =>
       externalUrls.has(entry.port),
     );
@@ -203,7 +201,6 @@ export async function setupCloudPortForwarding(
       externalUrls: Object.fromEntries(externalUrls),
     });
 
-    // 6. Build and return PortUrl array (only for exposed ports)
     return exposedPorts.map((entry) => ({
       port: entry.port,
       subdomain: entry.subdomain,

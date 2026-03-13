@@ -144,32 +144,33 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
     initialModel: undefined,
     initialSession: undefined,
     renderer: null,
-    get requestSudo(): RequestSudoFn | undefined {
-      const renderer = get().renderer;
-      if (!renderer) return undefined;
-      return async (reason: string): Promise<boolean> => {
-        try {
-          renderer.suspend();
-          process.stderr.write(`\r\n${reason}\r\n\r\n`);
-          const proc = Bun.spawn(['sudo', '-v'], {
-            stdin: 'inherit',
-            stdout: 'inherit',
-            stderr: 'inherit',
-          });
-          await proc.exited;
-          return proc.exitCode === 0;
-        } catch (err) {
-          log.warn({ err }, 'sudo -v failed');
-          return false;
-        } finally {
-          renderer.resume();
-        }
-      };
-    },
+    requestSudo: undefined,
 
     // ---- Actions ----
 
-    setRenderer: (renderer) => set({ renderer }),
+    setRenderer: (renderer) => {
+      const requestSudo: RequestSudoFn | undefined = renderer
+        ? async (reason: string): Promise<boolean> => {
+            try {
+              renderer.suspend();
+              process.stderr.write(`\r\n${reason}\r\n\r\n`);
+              const proc = Bun.spawn(['sudo', '-v'], {
+                stdin: 'inherit',
+                stdout: 'inherit',
+                stderr: 'inherit',
+              });
+              await proc.exited;
+              return proc.exitCode === 0;
+            } catch (err) {
+              log.warn({ err }, 'sudo -v failed');
+              return false;
+            } finally {
+              renderer.resume();
+            }
+          }
+        : undefined;
+      set({ renderer, requestSudo });
+    },
 
     initialize: (params) => {
       set({

@@ -124,6 +124,24 @@ export function generateCaddyConfig(): CaddyConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Config file I/O
+// ---------------------------------------------------------------------------
+
+/**
+ * Write the generated Caddy JSON config to disk with fsync.
+ * macOS VirtioFS can see a partial file when Docker mounts a bind volume,
+ * so we must guarantee the data reaches disk before Docker reads it.
+ */
+function writeCaddyConfigToDisk(): void {
+  const config = generateCaddyConfig();
+  const configJson = JSON.stringify(config, null, 2);
+  const fd = openSync(CADDY_CONFIG_PATH, 'w');
+  writeSync(fd, configJson);
+  fsyncSync(fd);
+  closeSync(fd);
+}
+
+// ---------------------------------------------------------------------------
 // Container lifecycle
 // ---------------------------------------------------------------------------
 
@@ -176,14 +194,7 @@ export async function ensureCaddy(httpsPort: number): Promise<void> {
   await ensureNetwork();
 
   // Generate initial config and write to host.
-  // Use writeFileSync + fsyncSync to guarantee data reaches disk before
-  // Docker mounts the file — macOS VirtioFS can see a partial file otherwise.
-  const config = generateCaddyConfig();
-  const configJson = JSON.stringify(config, null, 2);
-  const fd = openSync(CADDY_CONFIG_PATH, 'w');
-  writeSync(fd, configJson);
-  fsyncSync(fd);
-  closeSync(fd);
+  writeCaddyConfigToDisk();
 
   log.info(
     { httpsPort, configPath: CADDY_CONFIG_PATH },
@@ -223,13 +234,7 @@ export async function ensureCaddy(httpsPort: number): Promise<void> {
  * Write the current config to disk and reload Caddy.
  */
 async function writeCaddyConfigAndReload(): Promise<void> {
-  const config = generateCaddyConfig();
-  const configJson = JSON.stringify(config, null, 2);
-  const fd = openSync(CADDY_CONFIG_PATH, 'w');
-  writeSync(fd, configJson);
-  fsyncSync(fd);
-  closeSync(fd);
-
+  writeCaddyConfigToDisk();
   log.debug('Reloading Caddy config');
   await $`docker exec ${CADDY_CONTAINER} caddy reload --config /etc/caddy/config.json`.quiet();
 }
