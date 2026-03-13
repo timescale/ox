@@ -12,7 +12,7 @@ import {
   stopCaddyIfUnused,
 } from './caddy.ts';
 import { ensureCertTrusted } from './certs.ts';
-import { normalizeAppPorts } from './config.ts';
+import { normalizeAppPorts, sessionSubdomain } from './config.ts';
 import { ensureDns } from './dns.ts';
 import {
   connectToNetwork,
@@ -42,9 +42,8 @@ function buildUrl(
   subdomain: string | undefined,
   httpsPort: number,
 ): string {
-  const host = subdomain
-    ? `${subdomain}.${containerName}.ox.local`
-    : `${containerName}.ox.local`;
+  const base = sessionSubdomain(containerName);
+  const host = subdomain ? `${subdomain}.${base}.ox.local` : `${base}.ox.local`;
   const portSuffix = httpsPort === 443 ? '' : `:${httpsPort}`;
   return `https://${host}${portSuffix}`;
 }

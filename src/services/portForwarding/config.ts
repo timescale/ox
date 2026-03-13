@@ -1,5 +1,10 @@
 import type { AppPortEntry, ResolvedPortConfig } from './types.ts';
 
+/** Strip the `ox-` prefix from container names for friendlier URLs. */
+export function sessionSubdomain(containerName: string): string {
+  return containerName.replace(/^ox-/, '');
+}
+
 interface PortConfigInput {
   appPort?: number;
   appPorts?: { port: number; subdomain?: string }[];

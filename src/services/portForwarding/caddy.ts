@@ -11,6 +11,7 @@ import {
   openSessionDb,
   upsertCaddyRoute,
 } from '../sandbox/sessionDb.ts';
+import { sessionSubdomain } from './config.ts';
 import { ensureNetwork, OX_NETWORK } from './network.ts';
 import type { AppPortEntry } from './types.ts';
 
@@ -55,10 +56,11 @@ export function generateCaddyConfig(httpsPort: number): CaddyConfig {
   const allRoutes = listCaddyRoutes(db);
 
   for (const route of allRoutes) {
+    const base = sessionSubdomain(route.containerName);
     for (const portEntry of route.ports) {
       const host = portEntry.subdomain
-        ? `${portEntry.subdomain}.${route.containerName}.ox.local`
-        : `${route.containerName}.ox.local`;
+        ? `${portEntry.subdomain}.${base}.ox.local`
+        : `${base}.ox.local`;
 
       if (route.isCloud && route.externalUrls?.[portEntry.port]) {
         const externalUrl = route.externalUrls[portEntry.port] as string;
