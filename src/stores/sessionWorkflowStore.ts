@@ -7,6 +7,7 @@
 // useCallback functions in the SessionsApp component.
 // ============================================================================
 
+import type { CliRenderer } from '@opentui/core';
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import type { ConfigWizardResult } from '../commands/config.tsx';
@@ -62,6 +63,7 @@ export interface SessionWorkflowState {
   initialAgent: AgentType | undefined;
   initialModel: string | undefined;
   initialSession: OxSession | undefined;
+  renderer: CliRenderer | null;
   requestSudo: RequestSudoFn | undefined;
 
   // ---- Actions ----
@@ -114,7 +116,7 @@ export interface SessionWorkflowState {
 
   handleCloudSetupComplete: (result: CloudSetupResult) => void;
 
-  setRequestSudo: (fn: RequestSudoFn | undefined) => void;
+  setRenderer: (renderer: CliRenderer | null) => void;
 
   navigateToTargetView: (
     cfg: OxConfig,
@@ -141,11 +143,33 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
     initialAgent: undefined,
     initialModel: undefined,
     initialSession: undefined,
-    requestSudo: undefined,
+    renderer: null,
+    get requestSudo(): RequestSudoFn | undefined {
+      const renderer = get().renderer;
+      if (!renderer) return undefined;
+      return async (reason: string): Promise<boolean> => {
+        try {
+          renderer.suspend();
+          process.stderr.write(`\r\n${reason}\r\n\r\n`);
+          const proc = Bun.spawn(['sudo', '-v'], {
+            stdin: 'inherit',
+            stdout: 'inherit',
+            stderr: 'inherit',
+          });
+          await proc.exited;
+          return proc.exitCode === 0;
+        } catch (err) {
+          log.warn({ err }, 'sudo -v failed');
+          return false;
+        } finally {
+          renderer.resume();
+        }
+      };
+    },
 
     // ---- Actions ----
 
-    setRequestSudo: (fn) => set({ requestSudo: fn }),
+    setRenderer: (renderer) => set({ renderer }),
 
     initialize: (params) => {
       set({

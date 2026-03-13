@@ -7,43 +7,66 @@ export function sessionSubdomain(containerName: string): string {
 
 interface PortConfigInput {
   appPort?: number;
-  appPorts?: { port: number; subdomain?: string }[];
+  additionalPorts?: { port: number; subdomain: string }[];
 }
 
 /**
  * Normalize and validate port forwarding config from project/user config.
  *
  * - Returns null if no port config is present.
- * - Errors if both `appPort` and `appPorts` are specified.
- * - `appPort` normalizes to a single-entry array.
+ * - `appPort` is always the default route (no subdomain).
+ * - `additionalPorts` entries each require a non-empty subdomain.
+ * - `additionalPorts` without `appPort` is an error.
  * - Ports must be integers in 1–65535.
  * - No duplicate port numbers.
- * - Exactly one entry must lack a `subdomain` (the default port).
  */
 export function normalizeAppPorts(
   config: PortConfigInput,
 ): ResolvedPortConfig | null {
-  const { appPort, appPorts } = config;
+  const { appPort, additionalPorts } = config;
 
-  if (appPort == null && appPorts == null) {
+  if (appPort == null && additionalPorts == null) {
     return null;
   }
 
-  if (appPort != null && appPorts != null) {
+  if (additionalPorts != null && appPort == null) {
     throw new Error(
-      'Cannot specify both appPort and appPorts. Use appPorts for multiple port mappings.',
+      'appPort is required when using additionalPorts. Set appPort for the default route.',
     );
   }
 
-  const entries: AppPortEntry[] =
-    appPort != null ? [{ port: appPort }] : (appPorts as AppPortEntry[]);
+  // Validate appPort
+  if (
+    appPort != null &&
+    (!Number.isInteger(appPort) || appPort < 1 || appPort > 65535)
+  ) {
+    throw new Error(
+      `Invalid port number: ${appPort}. Must be an integer between 1 and 65535.`,
+    );
+  }
 
-  // Validate each port
-  for (const entry of entries) {
-    if (!Number.isInteger(entry.port) || entry.port < 1 || entry.port > 65535) {
-      throw new Error(
-        `Invalid port number: ${entry.port}. Must be an integer between 1 and 65535.`,
-      );
+  const defaultEntry: AppPortEntry = { port: appPort as number };
+  const entries: AppPortEntry[] = [defaultEntry];
+
+  if (additionalPorts != null) {
+    for (const entry of additionalPorts) {
+      // Validate port number
+      if (
+        !Number.isInteger(entry.port) ||
+        entry.port < 1 ||
+        entry.port > 65535
+      ) {
+        throw new Error(
+          `Invalid port number: ${entry.port}. Must be an integer between 1 and 65535.`,
+        );
+      }
+      // Validate subdomain is present and non-empty
+      if (!entry.subdomain || typeof entry.subdomain !== 'string') {
+        throw new Error(
+          `Each additionalPorts entry must have a non-empty subdomain. Port ${entry.port} is missing one.`,
+        );
+      }
+      entries.push({ port: entry.port, subdomain: entry.subdomain });
     }
   }
 
@@ -56,21 +79,8 @@ export function normalizeAppPorts(
     seen.add(entry.port);
   }
 
-  // Exactly one entry must lack a subdomain (the default port)
-  const defaultEntries = entries.filter((e) => e.subdomain == null);
-  if (defaultEntries.length === 0) {
-    throw new Error(
-      'At least one port entry must lack a subdomain (the default port).',
-    );
-  }
-  if (defaultEntries.length > 1) {
-    throw new Error(
-      'Only one port entry may lack a subdomain (the default port).',
-    );
-  }
-
   return {
     ports: entries,
-    defaultPort: defaultEntries[0] as AppPortEntry,
+    defaultPort: defaultEntry,
   };
 }

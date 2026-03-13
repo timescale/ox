@@ -23,6 +23,11 @@ import {
 } from '../docker.ts';
 import { readFileFromContainer, writeFileToContainer } from '../dockerFiles.ts';
 import { log } from '../logger.ts';
+import {
+  getPortUrls,
+  setupPortForwarding,
+  teardownPortForwarding,
+} from '../portForwarding/index.ts';
 import type {
   AttachOptions,
   CreateSandboxOptions,
@@ -181,7 +186,6 @@ export class DockerSandboxProvider implements SandboxProvider {
 
     // Set up port forwarding (best-effort — won't block session creation)
     onProgress?.('Configuring port forwarding');
-    const { setupPortForwarding } = await import('../portForwarding/index.ts');
     const portUrls = await setupPortForwarding(
       containerName,
       containerName,
@@ -231,7 +235,6 @@ export class DockerSandboxProvider implements SandboxProvider {
 
     // Set up port forwarding (best-effort — won't block session creation)
     onProgress?.('Configuring port forwarding');
-    const { setupPortForwarding } = await import('../portForwarding/index.ts');
     const portUrls = await setupPortForwarding(
       containerName,
       containerName,
@@ -250,7 +253,6 @@ export class DockerSandboxProvider implements SandboxProvider {
     const mapped = sessions.map(mapDockerSession);
 
     // Derive port URLs from config for running sessions
-    const { getPortUrls } = await import('../portForwarding/index.ts');
     for (const session of mapped) {
       if (session.status === 'running' && session.containerName) {
         session.portUrls =
@@ -268,7 +270,6 @@ export class DockerSandboxProvider implements SandboxProvider {
 
     // Derive port URLs from config for running sessions
     if (mapped.status === 'running' && mapped.containerName) {
-      const { getPortUrls } = await import('../portForwarding/index.ts');
       mapped.portUrls = (await getPortUrls(mapped.containerName)) ?? undefined;
     }
 
@@ -281,9 +282,6 @@ export class DockerSandboxProvider implements SandboxProvider {
     // (routes are stored by container name, but sessionId is the container ID)
     const session = await dockerGetSession(sessionId);
     const containerName = session?.containerName ?? sessionId;
-    const { teardownPortForwarding } = await import(
-      '../portForwarding/index.ts'
-    );
     await teardownPortForwarding(containerName, containerName);
     await removeContainer(sessionId);
   }
@@ -294,9 +292,6 @@ export class DockerSandboxProvider implements SandboxProvider {
     // (routes are stored by container name, but sessionId is the container ID)
     const session = await dockerGetSession(sessionId);
     const containerName = session?.containerName ?? sessionId;
-    const { teardownPortForwarding } = await import(
-      '../portForwarding/index.ts'
-    );
     await teardownPortForwarding(containerName, containerName);
     await stopContainer(sessionId);
   }

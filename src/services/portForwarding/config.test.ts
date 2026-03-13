@@ -14,9 +14,10 @@ describe('normalizeAppPorts', () => {
     });
   });
 
-  test('passes through valid appPorts array', () => {
+  test('appPort with additionalPorts combines correctly', () => {
     const result = normalizeAppPorts({
-      appPorts: [{ port: 3000 }, { port: 8080, subdomain: 'api' }],
+      appPort: 3000,
+      additionalPorts: [{ port: 8080, subdomain: 'api' }],
     });
     expect(result).toEqual({
       ports: [{ port: 3000 }, { port: 8080, subdomain: 'api' }],
@@ -24,35 +25,28 @@ describe('normalizeAppPorts', () => {
     });
   });
 
-  test('errors if both appPort and appPorts specified', () => {
-    expect(() =>
-      normalizeAppPorts({ appPort: 3000, appPorts: [{ port: 3000 }] }),
-    ).toThrow('Cannot specify both appPort and appPorts');
-  });
-
-  test('errors if zero entries lack subdomain', () => {
+  test('additionalPorts without appPort is an error', () => {
     expect(() =>
       normalizeAppPorts({
-        appPorts: [
-          { port: 3000, subdomain: 'web' },
-          { port: 8080, subdomain: 'api' },
-        ],
+        additionalPorts: [{ port: 8080, subdomain: 'api' }],
       }),
-    ).toThrow('At least one port entry must lack a subdomain');
+    ).toThrow('appPort is required when using additionalPorts');
   });
 
-  test('errors if multiple entries lack subdomain', () => {
+  test('additionalPorts entry missing subdomain is an error', () => {
     expect(() =>
       normalizeAppPorts({
-        appPorts: [{ port: 3000 }, { port: 8080 }],
+        appPort: 3000,
+        additionalPorts: [{ port: 8080, subdomain: '' }],
       }),
-    ).toThrow('Only one port entry may lack a subdomain');
+    ).toThrow('must have a non-empty subdomain');
   });
 
   test('errors on duplicate ports', () => {
     expect(() =>
       normalizeAppPorts({
-        appPorts: [{ port: 3000 }, { port: 3000, subdomain: 'api' }],
+        appPort: 3000,
+        additionalPorts: [{ port: 3000, subdomain: 'api' }],
       }),
     ).toThrow('Duplicate port number: 3000');
   });
@@ -67,5 +61,14 @@ describe('normalizeAppPorts', () => {
     expect(() => normalizeAppPorts({ appPort: 70000 })).toThrow(
       'Invalid port number: 70000',
     );
+  });
+
+  test('errors on invalid additional port number', () => {
+    expect(() =>
+      normalizeAppPorts({
+        appPort: 3000,
+        additionalPorts: [{ port: 0, subdomain: 'api' }],
+      }),
+    ).toThrow('Invalid port number: 0');
   });
 });

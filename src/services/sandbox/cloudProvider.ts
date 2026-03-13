@@ -22,6 +22,12 @@ import { readConfig } from '../config.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
 import { log } from '../logger.ts';
+import {
+  getPortUrls,
+  normalizeAppPorts,
+  setupCloudPortForwarding,
+  teardownPortForwarding,
+} from '../portForwarding/index.ts';
 import { CloudConnectionPool } from './cloudConnectionPool.ts';
 import {
   ensureAgentCloudSnapshot,
@@ -690,10 +696,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const db = openSessionDb();
     upsertSession(db, session);
 
-    // Expose HTTP ports and set up local proxy (if appPorts configured)
-    const { normalizeAppPorts, setupCloudPortForwarding } = await import(
-      '../portForwarding/index.ts'
-    );
+    // Expose HTTP ports and set up local proxy (if port forwarding configured)
     const config = await readConfig();
     const portConfig = normalizeAppPorts(config);
 
@@ -990,7 +993,6 @@ export class CloudSandboxProvider implements SandboxProvider {
     });
 
     // Derive port URLs from config for running sessions
-    const { getPortUrls } = await import('../portForwarding/index.ts');
     for (const session of dbSessions) {
       if (session.status === 'running') {
         session.portUrls = (await getPortUrls(session.name)) ?? undefined;
@@ -1059,7 +1061,6 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // Derive port URLs from config for running sessions
     if (session?.status === 'running') {
-      const { getPortUrls } = await import('../portForwarding/index.ts');
       session.portUrls = (await getPortUrls(session.name)) ?? undefined;
     }
 
@@ -1070,9 +1071,6 @@ export class CloudSandboxProvider implements SandboxProvider {
     await this.connectionPool.release(sessionId);
 
     // Tear down port forwarding (best-effort)
-    const { teardownPortForwarding } = await import(
-      '../portForwarding/index.ts'
-    );
     await teardownPortForwarding(sessionId);
 
     const db = openSessionDb();
@@ -1130,9 +1128,6 @@ export class CloudSandboxProvider implements SandboxProvider {
     const session = dbGetSession(db, sessionId);
 
     // Tear down port forwarding (best-effort)
-    const { teardownPortForwarding } = await import(
-      '../portForwarding/index.ts'
-    );
     await teardownPortForwarding(sessionId, session?.name);
 
     const client = await this.getClient();

@@ -83,11 +83,11 @@ export interface OxConfig {
   /** Default interaction mode: 'interactive', 'plan', or 'async' */
   submitMode?: 'async' | 'interactive' | 'plan';
 
-  /** Single port shorthand for app running in sandbox. Sugar for appPorts: [{ port: value }]. */
+  /** Port for the default app running in sandbox. Mapped to the root ox.local URL (no subdomain). */
   appPort?: number;
 
-  /** Port mappings for apps running in the sandbox. Enables reverse proxy routing via *.ox.local URLs. */
-  appPorts?: { port: number; subdomain?: string }[];
+  /** Additional port mappings beyond appPort. Each entry requires a subdomain for routing via *.ox.local URLs. */
+  additionalPorts?: { port: number; subdomain: string }[];
 
   /** Override the HTTPS port for the local reverse proxy (Caddy). Default: 443 -> 8443 -> 9443 -> random. */
   proxyPort?: number;
@@ -123,7 +123,7 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   agentModels: 'object',
   submitMode: 'string',
   appPort: 'number',
-  appPorts: 'object[]',
+  additionalPorts: 'object[]',
   proxyPort: 'number',
 };
 

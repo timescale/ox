@@ -27,13 +27,6 @@ export const CADDY_IMAGE = 'caddy:2-alpine';
 const CADDY_CONFIG_PATH = join(tmpdir(), 'ox-caddy-config.json');
 
 // ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-/** Cached HTTPS port so addRoutes/removeRoutes don't need it re-passed */
-let currentHttpsPort: number | null = null;
-
-// ---------------------------------------------------------------------------
 // Config generation
 // ---------------------------------------------------------------------------
 
@@ -51,7 +44,7 @@ interface CaddyConfig {
  *
  * Reads routes from the SQLite database so all ox processes share state.
  */
-export function generateCaddyConfig(httpsPort: number): CaddyConfig {
+export function generateCaddyConfig(): CaddyConfig {
   const routes: unknown[] = [];
   const db = openSessionDb();
   const allRoutes = listCaddyRoutes(db);
@@ -120,7 +113,7 @@ export function generateCaddyConfig(httpsPort: number): CaddyConfig {
       http: {
         servers: {
           proxy: {
-            listen: [`:${httpsPort}`],
+            listen: [':443'],
             routes,
             tls_connection_policies: [{}],
           },
@@ -166,8 +159,6 @@ export async function getCaddyHttpsPort(): Promise<number | null> {
  * Start the Caddy container if it isn't already running.
  */
 export async function ensureCaddy(httpsPort: number): Promise<void> {
-  currentHttpsPort = httpsPort;
-
   if (await isCaddyRunning()) {
     log.debug('Caddy container already running');
     return;
@@ -185,7 +176,7 @@ export async function ensureCaddy(httpsPort: number): Promise<void> {
   // Generate initial config and write to host.
   // Use writeFileSync + fsyncSync to guarantee data reaches disk before
   // Docker mounts the file — macOS VirtioFS can see a partial file otherwise.
-  const config = generateCaddyConfig(httpsPort);
+  const config = generateCaddyConfig();
   const configJson = JSON.stringify(config, null, 2);
   const fd = openSync(CADDY_CONFIG_PATH, 'w');
   writeSync(fd, configJson);
@@ -200,7 +191,7 @@ export async function ensureCaddy(httpsPort: number): Promise<void> {
   await $`docker run -d \
     --name ${CADDY_CONTAINER} \
     --network ${OX_NETWORK} \
-    -p 127.0.0.1:${httpsPort}:${httpsPort} \
+    -p 127.0.0.1:${httpsPort}:443 \
     -v ${CADDY_CONFIG_PATH}:/etc/caddy/config.json:ro \
     -v ox-caddy-data:/data \
     ${CADDY_IMAGE} \
@@ -229,8 +220,8 @@ export async function ensureCaddy(httpsPort: number): Promise<void> {
 /**
  * Write the current config to disk and reload Caddy.
  */
-async function writeCaddyConfigAndReload(httpsPort: number): Promise<void> {
-  const config = generateCaddyConfig(httpsPort);
+async function writeCaddyConfigAndReload(): Promise<void> {
+  const config = generateCaddyConfig();
   const configJson = JSON.stringify(config, null, 2);
   const fd = openSync(CADDY_CONFIG_PATH, 'w');
   writeSync(fd, configJson);
@@ -268,11 +259,7 @@ export async function addRoutes(
     externalUrls: options?.externalUrls,
   });
 
-  if (!currentHttpsPort) {
-    throw new Error('Caddy port not initialized — call ensureCaddy first');
-  }
-
-  await writeCaddyConfigAndReload(currentHttpsPort);
+  await writeCaddyConfigAndReload();
   log.info(
     { sessionId, containerName, portCount: ports.length },
     'Added Caddy routes',
@@ -286,8 +273,8 @@ export async function removeRoutes(sessionId: string): Promise<void> {
   const db = openSessionDb();
   deleteCaddyRoute(db, sessionId);
 
-  if (currentHttpsPort && (await isCaddyRunning())) {
-    await writeCaddyConfigAndReload(currentHttpsPort);
+  if (await isCaddyRunning()) {
+    await writeCaddyConfigAndReload();
   }
 
   log.info({ sessionId }, 'Removed Caddy routes');
@@ -305,7 +292,6 @@ export async function stopCaddy(): Promise<void> {
   await $`docker rm -f ${CADDY_CONTAINER}`.quiet().nothrow();
   const db = openSessionDb();
   deleteAllCaddyRoutes(db);
-  currentHttpsPort = null;
 }
 
 /**
@@ -316,7 +302,7 @@ export async function stopCaddy(): Promise<void> {
  * This prevents stale rows (e.g., from a previous bug or crash) from
  * keeping Caddy alive indefinitely.
  */
-export async function pruneStaleRoutes(): Promise<void> {
+export async function pruneStaleRoutes(): Promise<number> {
   const db = openSessionDb();
   const routes = listCaddyRoutes(db);
   for (const route of routes) {
@@ -344,6 +330,8 @@ export async function pruneStaleRoutes(): Promise<void> {
       deleteCaddyRoute(db, route.sessionId);
     }
   }
+
+  return countCaddyRoutes(db);
 }
 
 /**
@@ -352,9 +340,8 @@ export async function pruneStaleRoutes(): Promise<void> {
  * No-ops silently if Caddy isn't running.
  */
 export async function stopCaddyIfUnused(): Promise<void> {
-  await pruneStaleRoutes();
-  const db = openSessionDb();
-  if (countCaddyRoutes(db) === 0 && (await isCaddyRunning())) {
+  const remaining = await pruneStaleRoutes();
+  if (remaining === 0 && (await isCaddyRunning())) {
     await stopCaddy();
   }
 }
