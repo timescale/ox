@@ -989,6 +989,14 @@ export class CloudSandboxProvider implements SandboxProvider {
       log.debug({ err }, 'Failed to sync cloud session status');
     });
 
+    // Derive port URLs from config for running sessions
+    const { getPortUrls } = await import('../portForwarding/index.ts');
+    for (const session of dbSessions) {
+      if (session.status === 'running') {
+        session.portUrls = (await getPortUrls(session.name)) ?? undefined;
+      }
+    }
+
     return dbSessions;
   }
 
@@ -1047,6 +1055,12 @@ export class CloudSandboxProvider implements SandboxProvider {
           'Failed to sync cloud session status in get()',
         );
       }
+    }
+
+    // Derive port URLs from config for running sessions
+    if (session?.status === 'running') {
+      const { getPortUrls } = await import('../portForwarding/index.ts');
+      session.portUrls = (await getPortUrls(session.name)) ?? undefined;
     }
 
     return session;
