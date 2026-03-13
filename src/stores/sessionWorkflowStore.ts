@@ -23,6 +23,7 @@ import { ensureDockerImage } from '../services/docker.ts';
 import { checkGhCredentials } from '../services/gh.ts';
 import { generateBranchName } from '../services/git.ts';
 import { log } from '../services/logger.ts';
+import type { RequestSudoFn } from '../services/portForwarding/sudo.ts';
 import { getSandboxProvider } from '../services/sandbox/index.ts';
 import type {
   OxSession,
@@ -61,6 +62,7 @@ export interface SessionWorkflowState {
   initialAgent: AgentType | undefined;
   initialModel: string | undefined;
   initialSession: OxSession | undefined;
+  requestSudo: RequestSudoFn | undefined;
 
   // ---- Actions ----
   initialize: (params: {
@@ -112,6 +114,8 @@ export interface SessionWorkflowState {
 
   handleCloudSetupComplete: (result: CloudSetupResult) => void;
 
+  setRequestSudo: (fn: RequestSudoFn | undefined) => void;
+
   navigateToTargetView: (
     cfg: OxConfig,
     initialView: 'prompt' | 'list' | 'starting' | 'detail' | 'resources',
@@ -137,8 +141,11 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
     initialAgent: undefined,
     initialModel: undefined,
     initialSession: undefined,
+    requestSudo: undefined,
 
     // ---- Actions ----
+
+    setRequestSudo: (fn) => set({ requestSudo: fn }),
 
     initialize: (params) => {
       set({
@@ -453,6 +460,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           onProgress: (step) => {
             updateView((v) => (v.type === 'starting' ? { ...v, step } : v));
           },
+          requestSudo: get().requestSudo,
         });
 
         if (isInteractive) {
@@ -559,6 +567,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           onProgress: (step) => {
             updateView((v) => (v.type === 'resuming' ? { ...v, step } : v));
           },
+          requestSudo: get().requestSudo,
         });
 
         if (isInteractive) {

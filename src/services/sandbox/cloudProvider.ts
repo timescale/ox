@@ -601,7 +601,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       );
     }
 
-    const { onProgress } = options;
+    const { onProgress, requestSudo } = options;
     const client = await this.getClient();
     const region = await this.resolveRegion();
     const baseSnapshot = await this.ensureImage({ agent: options.agent });
@@ -717,6 +717,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         sessionId,
         session.name,
         externalUrls,
+        requestSudo,
       );
       if (portUrls) {
         session.portUrls = portUrls;

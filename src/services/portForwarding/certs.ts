@@ -4,6 +4,7 @@ import { $ } from 'bun';
 import { userConfigDir } from '../config.ts';
 import { log } from '../logger.ts';
 import { CADDY_CONTAINER } from './caddy.ts';
+import { ensureSudo, type RequestSudoFn } from './sudo.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,7 +34,9 @@ const localCertPath = () => join(userConfigDir(), 'caddy-root-ca.crt');
  * 5. Trust it via platform-specific commands (requires sudo).
  * 6. Write a marker file so we don't repeat on next run.
  */
-export async function ensureCertTrusted(): Promise<void> {
+export async function ensureCertTrusted(
+  requestSudo?: RequestSudoFn,
+): Promise<void> {
   // 1. Check marker
   if (await Bun.file(certMarkerPath()).exists()) {
     log.debug('Caddy root CA already trusted (marker exists)');
@@ -75,23 +78,36 @@ export async function ensureCertTrusted(): Promise<void> {
   await $`docker cp ${CADDY_CONTAINER}:${CONTAINER_CERT_PATH} ${certDest}`.quiet();
   log.info({ path: certDest }, 'Copied Caddy root CA to host');
 
-  // 5. Platform-specific trust
+  // 5. Platform-specific trust (requires sudo)
   const platform = process.platform;
 
-  if (platform === 'darwin') {
-    log.info('Trusting Caddy root CA in macOS System keychain (requires sudo)');
-    await $`sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${certDest}`;
-  } else if (platform === 'linux') {
-    log.info('Trusting Caddy root CA on Linux (requires sudo)');
-    await $`sudo cp ${certDest} /usr/local/share/ca-certificates/ox-caddy-root.crt`;
-    await $`sudo update-ca-certificates`;
-  } else {
+  if (platform !== 'darwin' && platform !== 'linux') {
     log.warn(
       { platform },
       'Automatic certificate trust not supported on this platform. ' +
         `Manually trust: ${certDest}`,
     );
     return;
+  }
+
+  const hasSudo = await ensureSudo(
+    'ox needs administrator access to trust the local HTTPS certificate',
+    requestSudo,
+  );
+  if (!hasSudo) {
+    log.warn(
+      'Skipping cert trust — sudo credentials not available. HTTPS may show warnings.',
+    );
+    return;
+  }
+
+  if (platform === 'darwin') {
+    log.info('Trusting Caddy root CA in macOS System keychain');
+    await $`sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${certDest}`;
+  } else {
+    log.info('Trusting Caddy root CA on Linux');
+    await $`sudo cp ${certDest} /usr/local/share/ca-certificates/ox-caddy-root.crt`;
+    await $`sudo update-ca-certificates`;
   }
 
   // 6. Write marker

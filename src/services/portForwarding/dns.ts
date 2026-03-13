@@ -1,5 +1,6 @@
 import { $ } from 'bun';
 import { log } from '../logger.ts';
+import { ensureSudo, type RequestSudoFn } from './sudo.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -36,7 +37,7 @@ async function commandExists(cmd: string): Promise<boolean> {
 // macOS
 // ---------------------------------------------------------------------------
 
-async function setupMacOS(): Promise<void> {
+async function setupMacOS(requestSudo?: RequestSudoFn): Promise<void> {
   // Install dnsmasq if needed
   if (!(await commandExists('dnsmasq'))) {
     if (!(await commandExists('brew'))) {
@@ -79,6 +80,16 @@ async function setupMacOS(): Promise<void> {
   await Bun.write(oxConf, `${DNSMASQ_CONF_LINE}\n`);
   log.info({ path: oxConf }, 'Wrote dnsmasq ox.local config');
 
+  // Ensure sudo credentials before running privileged commands
+  const hasSudo = await ensureSudo(
+    'ox needs administrator access to configure DNS (dnsmasq + /etc/resolver)',
+    requestSudo,
+  );
+  if (!hasSudo) {
+    log.warn('Skipping DNS setup — sudo credentials not available');
+    return;
+  }
+
   // Set up macOS resolver
   await $`sudo mkdir -p /etc/resolver`.nothrow();
   await $`echo ${RESOLVER_CONTENT} | sudo tee /etc/resolver/${OX_DOMAIN}`.quiet();
@@ -93,13 +104,23 @@ async function setupMacOS(): Promise<void> {
 // Linux
 // ---------------------------------------------------------------------------
 
-async function setupLinux(): Promise<void> {
+async function setupLinux(requestSudo?: RequestSudoFn): Promise<void> {
   if (!(await commandExists('dnsmasq'))) {
     throw new Error(
       'dnsmasq is not installed. Please install it:\n' +
         '  Ubuntu/Debian: sudo apt install dnsmasq\n' +
         '  Fedora/RHEL:   sudo dnf install dnsmasq',
     );
+  }
+
+  // Ensure sudo credentials before running privileged commands
+  const hasSudo = await ensureSudo(
+    'ox needs administrator access to configure DNS (dnsmasq)',
+    requestSudo,
+  );
+  if (!hasSudo) {
+    log.warn('Skipping DNS setup — sudo credentials not available');
+    return;
   }
 
   // Write ox.conf via sudo tee
@@ -121,7 +142,7 @@ async function setupLinux(): Promise<void> {
  * On macOS: auto-installs via Homebrew, configures /etc/resolver.
  * On Linux: expects dnsmasq already installed, writes /etc/dnsmasq.d/ox.conf.
  */
-export async function ensureDns(): Promise<void> {
+export async function ensureDns(requestSudo?: RequestSudoFn): Promise<void> {
   const platform = process.platform;
 
   // Quick check: is it already working?
@@ -136,9 +157,9 @@ export async function ensureDns(): Promise<void> {
 
   // Platform-specific setup
   if (platform === 'darwin') {
-    await setupMacOS();
+    await setupMacOS(requestSudo);
   } else if (platform === 'linux') {
-    await setupLinux();
+    await setupLinux(requestSudo);
   } else {
     log.warn(
       { platform },

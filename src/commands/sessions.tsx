@@ -470,7 +470,28 @@ export async function runSessionsTui({
     // onComplete callback so exit actions can resolve the promise.
     useRouterStore.getState().init((result) => deferredResult.resolve(result));
 
-    const { render, destroy } = await createTui();
+    const { renderer, render, destroy } = await createTui();
+
+    // Provide a requestSudo callback that suspends the TUI, lets sudo
+    // use the real terminal for its password prompt, then resumes.
+    useSessionWorkflowStore.getState().setRequestSudo(async (reason) => {
+      try {
+        renderer.suspend();
+        process.stderr.write(`\r\n${reason}\r\n\r\n`);
+        const proc = Bun.spawn(['sudo', '-v'], {
+          stdin: 'inherit',
+          stdout: 'inherit',
+          stderr: 'inherit',
+        });
+        await proc.exited;
+        return proc.exitCode === 0;
+      } catch (err) {
+        log.warn({ err }, 'sudo -v failed');
+        return false;
+      } finally {
+        renderer.resume();
+      }
+    });
 
     render(
       <CopyOnSelect>
@@ -491,6 +512,7 @@ export async function runSessionsTui({
 
     const result = await deferredResult.promise;
 
+    useSessionWorkflowStore.getState().setRequestSudo(undefined);
     await destroy();
 
     // After handling the action, default to returning to the session list

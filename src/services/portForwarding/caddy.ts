@@ -2,8 +2,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { $ } from 'bun';
 import { log } from '../logger.ts';
+import {
+  countCaddyRoutes,
+  deleteAllCaddyRoutes,
+  deleteCaddyRoute,
+  listCaddyRoutes,
+  openSessionDb,
+  upsertCaddyRoute,
+} from '../sandbox/sessionDb.ts';
 import { ensureNetwork, OX_NETWORK } from './network.ts';
-import type { AppPortEntry, CaddyRoute } from './types.ts';
+import type { AppPortEntry } from './types.ts';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -18,9 +26,6 @@ const CADDY_CONFIG_PATH = join(tmpdir(), 'ox-caddy-config.json');
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
-
-/** In-memory map of registered routes keyed by sessionId */
-const activeRoutes = new Map<string, CaddyRoute>();
 
 /** Cached ports so addRoutes/removeRoutes don't need them re-passed */
 let currentPorts: { httpsPort: number; httpPort: number } | null = null;
@@ -40,14 +45,18 @@ interface CaddyConfig {
 
 /**
  * Generate a Caddy JSON config from the current set of active routes.
+ *
+ * Reads routes from the SQLite database so all ox processes share state.
  */
 export function generateCaddyConfig(
   httpsPort: number,
   httpPort: number,
 ): CaddyConfig {
   const routes: unknown[] = [];
+  const db = openSessionDb();
+  const allRoutes = listCaddyRoutes(db);
 
-  for (const route of activeRoutes.values()) {
+  for (const route of allRoutes) {
     for (const portEntry of route.ports) {
       const host = portEntry.subdomain
         ? `${portEntry.subdomain}.${route.containerName}.ox.local`
@@ -252,7 +261,8 @@ export async function addRoutes(
   ports: AppPortEntry[],
   options?: AddRoutesOptions,
 ): Promise<void> {
-  activeRoutes.set(sessionId, {
+  const db = openSessionDb();
+  upsertCaddyRoute(db, {
     sessionId,
     containerName,
     ports,
@@ -278,11 +288,8 @@ export async function addRoutes(
  * Remove routes for a session and reload Caddy.
  */
 export async function removeRoutes(sessionId: string): Promise<void> {
-  if (!activeRoutes.has(sessionId)) {
-    return;
-  }
-
-  activeRoutes.delete(sessionId);
+  const db = openSessionDb();
+  deleteCaddyRoute(db, sessionId);
 
   if (currentPorts && (await isCaddyRunning())) {
     await writeCaddyConfigAndReload(
@@ -304,7 +311,8 @@ export async function removeRoutes(sessionId: string): Promise<void> {
 export async function stopCaddy(): Promise<void> {
   log.info('Stopping Caddy container');
   await $`docker rm -f ${CADDY_CONTAINER}`.quiet().nothrow();
-  activeRoutes.clear();
+  const db = openSessionDb();
+  deleteAllCaddyRoutes(db);
   currentPorts = null;
 }
 
@@ -312,7 +320,8 @@ export async function stopCaddy(): Promise<void> {
  * Stop Caddy if no active routes remain.
  */
 export async function stopCaddyIfUnused(): Promise<void> {
-  if (activeRoutes.size === 0) {
+  const db = openSessionDb();
+  if (countCaddyRoutes(db) === 0) {
     await stopCaddy();
   }
 }
@@ -321,5 +330,6 @@ export async function stopCaddyIfUnused(): Promise<void> {
  * Return the number of active sessions with registered routes.
  */
 export function getActiveSessionCount(): number {
-  return activeRoutes.size;
+  const db = openSessionDb();
+  return countCaddyRoutes(db);
 }

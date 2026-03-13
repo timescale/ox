@@ -19,6 +19,7 @@ import {
   ensureNetwork,
 } from './network.ts';
 import { resolveProxyPorts } from './portUtils.ts';
+import type { RequestSudoFn } from './sudo.ts';
 import type { PortUrl } from './types.ts';
 
 // Re-exports
@@ -89,6 +90,7 @@ export async function getPortUrls(
 export async function setupPortForwarding(
   sessionId: string,
   containerName: string,
+  requestSudo?: RequestSudoFn,
 ): Promise<PortUrl[] | null> {
   try {
     // 1. Read config, normalize app ports
@@ -110,8 +112,8 @@ export async function setupPortForwarding(
     await ensureCaddy(httpsPort, httpPort);
 
     // 4. Ensure DNS, ensure cert trusted
-    await ensureDns();
-    await ensureCertTrusted();
+    await ensureDns(requestSudo);
+    await ensureCertTrusted(requestSudo);
 
     // 5. Add routes to Caddy
     await addRoutes(sessionId, containerName, portConfig.ports);
@@ -141,6 +143,7 @@ export async function setupCloudPortForwarding(
   sessionId: string,
   containerName: string,
   externalUrls: Map<number, string>,
+  requestSudo?: RequestSudoFn,
 ): Promise<PortUrl[] | null> {
   try {
     // 1. Read config, normalize app ports
@@ -161,8 +164,8 @@ export async function setupCloudPortForwarding(
     await ensureCaddy(httpsPort, httpPort);
 
     // 4. Ensure DNS, ensure cert trusted
-    await ensureDns();
-    await ensureCertTrusted();
+    await ensureDns(requestSudo);
+    await ensureCertTrusted(requestSudo);
 
     // 5. Add routes to Caddy (with cloud options)
     await addRoutes(sessionId, containerName, portConfig.ports, {

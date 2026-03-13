@@ -144,7 +144,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       },
       'Creating Docker sandbox',
     );
-    const { onProgress } = options;
+    const { onProgress, requestSudo } = options;
 
     // Ensure agent-specific overlay image exists
     onProgress?.('Preparing agent image');
@@ -182,7 +182,11 @@ export class DockerSandboxProvider implements SandboxProvider {
     // Set up port forwarding (best-effort — won't block session creation)
     onProgress?.('Configuring port forwarding');
     const { setupPortForwarding } = await import('../portForwarding/index.ts');
-    const portUrls = await setupPortForwarding(containerName, containerName);
+    const portUrls = await setupPortForwarding(
+      containerName,
+      containerName,
+      requestSudo,
+    );
     if (portUrls) {
       mapped.portUrls = portUrls;
     }
@@ -209,7 +213,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     options: ResumeSandboxOptions,
   ): Promise<OxSession> {
     log.debug({ sessionId }, 'Resuming Docker sandbox');
-    const { onProgress } = options;
+    const { onProgress, requestSudo } = options;
     onProgress?.('Resuming container');
     const containerName = await resumeSession(sessionId, options);
 
@@ -228,7 +232,11 @@ export class DockerSandboxProvider implements SandboxProvider {
     // Set up port forwarding (best-effort — won't block session creation)
     onProgress?.('Configuring port forwarding');
     const { setupPortForwarding } = await import('../portForwarding/index.ts');
-    const portUrls = await setupPortForwarding(containerName, containerName);
+    const portUrls = await setupPortForwarding(
+      containerName,
+      containerName,
+      requestSudo,
+    );
     if (portUrls) {
       mapped.portUrls = portUrls;
     }
