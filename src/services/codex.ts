@@ -63,7 +63,7 @@ export const readHostCodexCredentials =
       }
       const creds = (await hostAuth.json()) as CodexAuthJson;
       if (codexCredsValid(creds)) {
-        log.debug('Found valid codex credentials in host config directory');
+        log.trace('Found valid codex credentials in host config directory');
         return creds;
       }
       log.debug(
@@ -83,7 +83,7 @@ export const readOxCodexCredentialCache =
       const raw = await getOxSecret(OX_CODEX_ACCOUNT);
       const creds = JSON.parse(raw || '{}') as CodexAuthJson;
       if (codexCredsValid(creds)) {
-        log.debug('Found valid codex credentials in ox keyring');
+        log.trace('Found valid codex credentials in ox keyring');
         return creds;
       }
       log.debug('Codex credentials present in ox keyring, but invalid.');

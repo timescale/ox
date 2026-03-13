@@ -47,7 +47,7 @@ const readHostOAuthAccount = async (): Promise<ClaudeOAuthAccount | null> => {
     if (!(await hostConfigFile.exists())) return null;
     const config: ClaudeConfigJson = await hostConfigFile.json();
     if (config.oauthAccount) {
-      log.debug('Found oauthAccount in host .claude.json');
+      log.trace('Found oauthAccount in host .claude.json');
       return config.oauthAccount;
     }
   } catch (err) {
@@ -64,7 +64,7 @@ export const readHostClaudeCredentials =
       if (raw) {
         const creds = JSON.parse(raw) as ClaudeCredentialsJson;
         if (claudeCredsValid(creds)) {
-          log.debug('Found valid claude credentials in OS keyring');
+          log.trace('Found valid claude credentials in OS keyring');
           creds.oauthAccount = await readHostOAuthAccount();
           return creds;
         }
@@ -80,7 +80,7 @@ export const readHostClaudeCredentials =
       if (!(await hostCredsFile.exists())) return null;
       const creds = await hostCredsFile.json();
       if (claudeCredsValid(creds)) {
-        log.debug('Found valid claude credentials in home directory');
+        log.trace('Found valid claude credentials in home directory');
         creds.oauthAccount = await readHostOAuthAccount();
         return creds;
       }
@@ -99,7 +99,7 @@ export const readOxClaudeCredentialCache =
       const raw = await getOxSecret(OX_CREDS_ACCOUNT);
       const creds = JSON.parse(raw || '{}') as ClaudeCredentialsJson;
       if (claudeCredsValid(creds)) {
-        log.debug('Found valid claude credentials in ox keyring');
+        log.trace('Found valid claude credentials in ox keyring');
         return creds;
       }
       log.debug('Claude credentials present in ox keyring, but invalid.');

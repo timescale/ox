@@ -39,6 +39,12 @@ export interface RunInDockerOptionsBase {
    * Only effective for non-interactive, non-detached runs.
    */
   signal?: AbortSignal;
+  /**
+   * When true, the initial log.debug for the docker command is downgraded
+   * to log.trace. Useful for background/polling calls that would otherwise
+   * flood the log file.
+   */
+  quiet?: boolean;
 }
 
 interface RunInDockerOptions extends RunInDockerOptionsBase {
@@ -92,6 +98,7 @@ export const runInDocker = async ({
   mountCwd = false,
   labels = {},
   signal,
+  quiet = false,
 }: RunInDockerOptions): Promise<RunInDockerResult> => {
   // Bail early if already aborted.
   if (signal?.aborted) {
@@ -129,13 +136,15 @@ export const runInDocker = async ({
         ]
       : []),
   ];
-  log.debug(
-    {
-      containerName,
-      cmd: `${cmdName} ${printArgs(cmdArgs)}`,
-    },
-    'runInDocker',
-  );
+  if (!quiet) {
+    log.debug(
+      {
+        containerName,
+        cmd: `${cmdName} ${printArgs(cmdArgs)}`,
+      },
+      'runInDocker',
+    );
+  }
   log.trace(
     {
       containerName,

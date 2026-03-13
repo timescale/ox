@@ -34,7 +34,7 @@ export function useContainerStats(
       return;
     }
 
-    log.debug({ containerIds }, 'Starting container stats polling');
+    log.trace({ containerIds }, 'Starting container stats polling');
     const controller = new AbortController();
 
     const fetchStats = async () => {
@@ -54,7 +54,7 @@ export function useContainerStats(
     const interval = setInterval(fetchStats, STATS_POLL_INTERVAL);
 
     return () => {
-      log.debug('Stopping container stats polling');
+      log.trace('Stopping container stats polling');
       clearInterval(interval);
       controller.abort();
     };

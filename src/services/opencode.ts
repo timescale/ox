@@ -72,7 +72,7 @@ export const readHostOpencodeCredentials =
       }
       const creds = (await hostAuth.json()) as OpencodeAuthJson;
       if (opencodeCredsValid(creds)) {
-        log.debug('Found valid opencode credentials in host config directory');
+        log.trace('Found valid opencode credentials in host config directory');
         return creds;
       }
       log.debug(
@@ -92,7 +92,7 @@ export const readOxOpencodeCredentialCache =
       const raw = await getOxSecret(OX_OPENCODE_ACCOUNT);
       const creds = JSON.parse(raw || '{}') as OpencodeAuthJson;
       if (opencodeCredsValid(creds)) {
-        log.debug('Found valid opencode credentials in ox keyring');
+        log.trace('Found valid opencode credentials in ox keyring');
         return creds;
       }
       log.debug('Opencode credentials present in ox keyring, but invalid.');

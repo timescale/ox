@@ -249,7 +249,7 @@ export class DockerSandboxProvider implements SandboxProvider {
 
   async list(): Promise<OxSession[]> {
     const sessions = await listOxSessions();
-    log.debug({ count: sessions.length }, 'Listed Docker sessions');
+    log.trace({ count: sessions.length }, 'Listed Docker sessions');
     const mapped = sessions.map(mapDockerSession);
 
     // Derive port URLs from config for running sessions

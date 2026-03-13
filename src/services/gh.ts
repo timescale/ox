@@ -33,16 +33,37 @@ const ghCredsValid = (creds?: GhHostsYml | null): boolean => {
   return hosts.some((host) => !!creds[host]?.oauth_token);
 };
 
+/** In-memory cache for readHostCredentials — avoids redundant gh CLI subprocess
+ *  calls during polling. The gh CLI is invoked to get the token and username,
+ *  which is expensive relative to just reading a file. */
+const GH_HOST_CREDS_CACHE_TTL_MS = 3_600_000; // 1 hour
+let ghHostCredsCache: { creds: GhHostsYml | null; ts: number } | null = null;
+
+/** Invalidate the in-memory gh host credentials cache.
+ *  Call after interactive auth flows (e.g. `ox gh auth login`). */
+export function invalidateGhHostCredsCache(): void {
+  ghHostCredsCache = null;
+}
+
 /**
  * Read gh credentials from the host system's gh CLI.
  * Uses `gh auth token` and `gh api user` to get the token and username.
  */
 const readHostCredentials = async (): Promise<GhHostsYml | null> => {
+  if (
+    ghHostCredsCache &&
+    Date.now() - ghHostCredsCache.ts < GH_HOST_CREDS_CACHE_TTL_MS
+  ) {
+    log.trace('readHostCredentials (cached)');
+    return ghHostCredsCache.creds;
+  }
+
   try {
     const tokenResult = await Bun.$`gh auth token -h github.com`.quiet();
     const token = tokenResult.stdout.toString().trim() || null;
     if (!token) {
       log.debug('No gh auth token found on host');
+      ghHostCredsCache = { creds: null, ts: Date.now() };
       return null;
     }
     const userResult =
@@ -50,18 +71,22 @@ const readHostCredentials = async (): Promise<GhHostsYml | null> => {
     const user = userResult.stdout.toString().trim() || null;
     if (!user) {
       log.debug('gh auth token found but could not determine user');
+      ghHostCredsCache = { creds: null, ts: Date.now() };
       return null;
     }
-    log.debug('Found valid gh credentials on host');
-    return {
+    log.trace('Found valid gh credentials on host');
+    const creds: GhHostsYml = {
       'github.com': {
         oauth_token: token,
         user,
         git_protocol: 'https',
       },
     };
+    ghHostCredsCache = { creds, ts: Date.now() };
+    return creds;
   } catch {
     log.debug('No host gh credentials found');
+    ghHostCredsCache = { creds: null, ts: Date.now() };
     return null;
   }
 };
@@ -140,6 +165,7 @@ const resolveCredentials = async (): Promise<GhHostsYml> => {
  * Use this only from explicit interactive flows where credentials may have changed.
  */
 const resolveAndCacheCredentials = async (): Promise<GhHostsYml> => {
+  invalidateGhHostCredsCache();
   const hostCreds = await readHostCredentials();
   if (hostCreds && ghCredsValid(hostCreds)) {
     // Cache host creds in keyring for when host gh isn't available
@@ -198,6 +224,7 @@ export const runGhInDocker = async ({
   mountCwd,
   saveCredentials = false,
   signal,
+  quiet,
 }: RunGhInDockerOptions): Promise<
   RunInDockerResult & { credsCaptured: Promise<boolean> }
 > => {
@@ -213,6 +240,7 @@ export const runGhInDocker = async ({
     files: [...configFiles, ...files],
     mountCwd,
     signal,
+    quiet,
   });
 
   const deferredCredsCaptured = new Deferred<boolean>();
@@ -257,6 +285,7 @@ export const checkGhCredentials = async (): Promise<boolean> => {
   const proc = await runGhInDocker({
     cmdArgs: ['auth', 'status'],
     shouldThrow: false,
+    quiet: true,
   });
   const exitCode = await proc.exited;
   const output = proc.text().trim();
@@ -284,6 +313,7 @@ export const checkGhCredentialsLocal = async (
  * Returns true if valid credentials were found and cached.
  */
 export async function applyHostGhCreds(): Promise<boolean> {
+  invalidateGhHostCredsCache();
   const hostCreds = await readHostCredentials();
   if (!hostCreds || !ghCredsValid(hostCreds)) {
     log.debug('No valid host credentials found for gh');

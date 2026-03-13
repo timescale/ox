@@ -65,6 +65,7 @@ export async function getPrForBranch(
       ],
       shouldThrow: false,
       signal,
+      quiet: true,
     });
 
     const exitCode = await result.exited;
