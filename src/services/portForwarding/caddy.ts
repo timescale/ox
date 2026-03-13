@@ -5,6 +5,7 @@ import { $ } from 'bun';
 import { log } from '../logger.ts';
 import {
   countCaddyRoutes,
+  getSession as dbGetSession,
   deleteAllCaddyRoutes,
   deleteCaddyRoute,
   listCaddyRoutes,
@@ -308,9 +309,49 @@ export async function stopCaddy(): Promise<void> {
 }
 
 /**
+ * Remove caddy_routes entries whose sessions no longer exist.
+ *
+ * Docker routes are validated by checking if the container is running.
+ * Cloud routes are validated by checking the sessions DB.
+ * This prevents stale rows (e.g., from a previous bug or crash) from
+ * keeping Caddy alive indefinitely.
+ */
+export async function pruneStaleRoutes(): Promise<void> {
+  const db = openSessionDb();
+  const routes = listCaddyRoutes(db);
+  for (const route of routes) {
+    let exists = false;
+    if (route.isCloud) {
+      // Cloud session — check the sessions DB
+      const session = dbGetSession(db, route.sessionId);
+      exists = session != null && session.status === 'running';
+    } else {
+      // Docker session — check if the container is running
+      try {
+        const result =
+          await $`docker inspect -f {{.State.Running}} ${route.containerName}`.quiet();
+        exists = result.stdout.toString().trim() === 'true';
+      } catch {
+        exists = false;
+      }
+    }
+
+    if (!exists) {
+      log.debug(
+        { sessionId: route.sessionId, containerName: route.containerName },
+        'Pruning stale Caddy route',
+      );
+      deleteCaddyRoute(db, route.sessionId);
+    }
+  }
+}
+
+/**
  * Stop Caddy if no active routes remain.
+ * Prunes stale routes first to avoid keeping Caddy alive for orphaned entries.
  */
 export async function stopCaddyIfUnused(): Promise<void> {
+  await pruneStaleRoutes();
   const db = openSessionDb();
   if (countCaddyRoutes(db) === 0) {
     await stopCaddy();
