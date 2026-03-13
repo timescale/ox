@@ -5,6 +5,7 @@
 export { CloudSandboxProvider } from './cloudProvider.ts';
 export { DockerSandboxProvider } from './dockerProvider.ts';
 export type {
+  AgentMode,
   CreateSandboxOptions,
   CreateShellSandboxOptions,
   ExecType,
@@ -16,7 +17,6 @@ export type {
   SandboxProviderType,
   SandboxStats,
   ShellSession,
-  SubmitMode,
 } from './types.ts';
 
 import { track } from '../analytics.ts';

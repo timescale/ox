@@ -81,7 +81,7 @@ export interface OxConfig {
   agentModels?: Partial<Record<AgentType, string>>;
 
   /** Default interaction mode: 'interactive', 'plan', or 'async' */
-  submitMode?: 'async' | 'interactive' | 'plan';
+  agentMode?: 'async' | 'interactive' | 'plan';
 
   /** Port for the default app running in sandbox. Mapped to the root ox.local URL (no subdomain). */
   appPort?: number;
@@ -121,7 +121,7 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   cloudRegion: 'string',
   analytics: 'boolean',
   agentModels: 'object',
-  submitMode: 'string',
+  agentMode: 'string',
   appPort: 'number',
   additionalPorts: 'object[]',
   proxyPort: 'number',

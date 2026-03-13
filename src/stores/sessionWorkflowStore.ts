@@ -27,10 +27,10 @@ import { log } from '../services/logger.ts';
 import type { RequestSudoFn } from '../services/portForwarding/sudo.ts';
 import { getSandboxProvider } from '../services/sandbox/index.ts';
 import type {
+  AgentMode,
   OxSession,
   SandboxProvider,
   SandboxProviderType,
-  SubmitMode,
 } from '../services/sandbox/types.ts';
 import { ensureGitignore } from '../utils/shell.ts';
 import { usePromptSettingsStore } from './promptSettingsStore.ts';
@@ -86,7 +86,7 @@ export interface SessionWorkflowState {
     prompt: string,
     agent: AgentType,
     model: string,
-    mode?: SubmitMode,
+    mode?: AgentMode,
     passedMountDir?: string,
     selectedProvider?: SandboxProviderType,
   ) => Promise<void>;
@@ -95,7 +95,7 @@ export interface SessionWorkflowState {
     session: OxSession,
     prompt: string,
     model: string,
-    mode?: SubmitMode,
+    mode?: AgentMode,
     mountDir?: string,
     selectedProvider?: SandboxProviderType,
   ) => Promise<void>;
@@ -481,7 +481,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           mountDir,
           isGitRepo: inGitRepo,
           agentArgs,
-          submitMode: mode,
+          agentMode: mode,
           onProgress: (step) => {
             updateView((v) => (v.type === 'starting' ? { ...v, step } : v));
           },
@@ -588,7 +588,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           model,
           mountDir,
           agentArgs,
-          submitMode: mode,
+          agentMode: mode,
           onProgress: (step) => {
             updateView((v) => (v.type === 'resuming' ? { ...v, step } : v));
           },
@@ -688,7 +688,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           session,
           '', // no prompt for interactive continue
           session.model ?? '',
-          session.submitMode ?? 'interactive',
+          session.agentMode ?? 'interactive',
           session.mountDir,
           session.provider,
         );

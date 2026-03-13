@@ -9,7 +9,7 @@ import { userConfigDir } from '../config.ts';
 import { log } from '../logger.ts';
 import type { AppPortEntry, CaddyRoute } from '../portForwarding/types.ts';
 import { initPromptHistorySchema } from '../promptHistoryDb.ts';
-import type { OxSession, SandboxProviderType, SubmitMode } from './types.ts';
+import type { AgentMode, OxSession, SandboxProviderType } from './types.ts';
 
 // ============================================================================
 // Schema
@@ -69,6 +69,22 @@ export function initSessionSchema(db: Database): void {
     // Column already exists — expected on subsequent runs
   }
 
+  // Migration: add agent_mode column (renamed from submit_mode)
+  try {
+    db.run('ALTER TABLE sessions ADD COLUMN agent_mode TEXT');
+  } catch {
+    // Column already exists — expected on subsequent runs
+  }
+
+  // Migration: copy data from old submit_mode column to agent_mode (if submit_mode exists)
+  try {
+    db.run(
+      'UPDATE sessions SET agent_mode = submit_mode WHERE agent_mode IS NULL AND submit_mode IS NOT NULL',
+    );
+  } catch {
+    // submit_mode column doesn't exist (fresh DB) — expected
+  }
+
   // Migration: caddy_routes table for cross-process port forwarding state
   db.run(`
     CREATE TABLE IF NOT EXISTS caddy_routes (
@@ -126,6 +142,7 @@ interface SessionRow {
   finished_at: string | null;
   deleted_at: string | null;
   submit_mode: string | null;
+  agent_mode: string | null;
   extra: string | null;
 }
 
@@ -158,7 +175,7 @@ function rowToSession(row: SessionRow): OxSession {
     snapshotSlug: row.snapshot_slug ?? undefined,
     startedAt: row.started_at ?? undefined,
     finishedAt: row.finished_at ?? undefined,
-    submitMode: (row.submit_mode as SubmitMode) ?? undefined,
+    agentMode: (row.agent_mode as AgentMode) ?? undefined,
   };
 }
 
@@ -174,12 +191,12 @@ export function upsertSession(db: Database, session: OxSession): void {
       id, provider, name, branch, agent, model, prompt, repo,
       created, status, exit_code, interactive, exec_type, resumed_from,
       region, mount_dir, container_name, volume_slug, snapshot_slug,
-      started_at, finished_at, submit_mode, extra
+      started_at, finished_at, agent_mode, extra
     ) VALUES (
       $id, $provider, $name, $branch, $agent, $model, $prompt, $repo,
       $created, $status, $exit_code, $interactive, $exec_type, $resumed_from,
       $region, $mount_dir, $container_name, $volume_slug, $snapshot_slug,
-      $started_at, $finished_at, $submit_mode, $extra
+      $started_at, $finished_at, $agent_mode, $extra
     )
     ON CONFLICT(id) DO UPDATE SET
       provider = excluded.provider,
@@ -202,7 +219,7 @@ export function upsertSession(db: Database, session: OxSession): void {
       snapshot_slug = excluded.snapshot_slug,
       started_at = excluded.started_at,
       finished_at = excluded.finished_at,
-      submit_mode = excluded.submit_mode,
+      agent_mode = excluded.agent_mode,
       extra = excluded.extra
   `);
 
@@ -228,7 +245,7 @@ export function upsertSession(db: Database, session: OxSession): void {
     $snapshot_slug: session.snapshotSlug ?? null,
     $started_at: session.startedAt ?? null,
     $finished_at: session.finishedAt ?? null,
-    $submit_mode: session.submitMode ?? null,
+    $agent_mode: session.agentMode ?? null,
     $extra: null,
   });
 }

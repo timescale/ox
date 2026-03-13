@@ -2,10 +2,10 @@ import { create } from 'zustand';
 import type { AgentType } from '../services/config';
 import type { PullLayer } from '../services/docker';
 import type {
+  AgentMode,
   OxSession,
   SandboxProviderType,
   ShellSession,
-  SubmitMode,
 } from '../services/sandbox';
 
 // ============================================================================
@@ -23,14 +23,14 @@ export type SessionsView =
         prompt: string;
         agent: AgentType;
         model: string;
-        mode: SubmitMode;
+        mode: AgentMode;
         mountDir?: string;
       };
       pendingResume?: {
         session: OxSession;
         prompt: string;
         model: string;
-        mode: SubmitMode;
+        mode: AgentMode;
         mountDir?: string;
       };
     }
@@ -41,7 +41,7 @@ export type SessionsView =
       agent: AgentType;
       model: string;
       step: string;
-      mode: SubmitMode;
+      mode: AgentMode;
       layers?: PullLayer[];
     }
   | {
@@ -49,7 +49,7 @@ export type SessionsView =
       session: OxSession;
       model: string;
       step: string;
-      mode: SubmitMode;
+      mode: AgentMode;
     }
   | { type: 'starting-shell'; step: string }
   | { type: 'detail'; session: OxSession }
@@ -133,14 +133,14 @@ interface RouterState {
       prompt: string;
       agent: AgentType;
       model: string;
-      mode: SubmitMode;
+      mode: AgentMode;
       mountDir?: string;
     };
     pendingResume?: {
       session: OxSession;
       prompt: string;
       model: string;
-      mode: SubmitMode;
+      mode: AgentMode;
       mountDir?: string;
     };
   }) => void;
@@ -149,14 +149,14 @@ interface RouterState {
     agent: AgentType;
     model: string;
     step: string;
-    mode: SubmitMode;
+    mode: AgentMode;
     layers?: PullLayer[];
   }) => void;
   goToResuming: (params: {
     session: OxSession;
     model: string;
     step: string;
-    mode: SubmitMode;
+    mode: AgentMode;
   }) => void;
   goToStartingShell: (step: string) => void;
   goToDocker: () => void;

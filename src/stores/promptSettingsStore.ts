@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import type { AgentType, OxConfig } from '../services/config.ts';
 import { userConfig } from '../services/config.ts';
 import { log } from '../services/logger.ts';
-import type { SandboxProviderType, SubmitMode } from '../services/sandbox';
+import type { AgentMode, SandboxProviderType } from '../services/sandbox';
 
 // ============================================================================
 // Serialized persistence — coalesces writes to avoid R-M-W races
@@ -97,7 +97,7 @@ export interface PromptSettingsState {
   sandboxProvider: SandboxProviderType;
 
   /** Interaction mode */
-  submitMode: SubmitMode;
+  agentMode: AgentMode;
 
   /** Per-agent last-used model map */
   agentModels: Partial<Record<AgentType, string>>;
@@ -118,7 +118,7 @@ export interface PromptSettingsState {
       agent?: AgentType;
       model?: string | null;
       sandboxProvider?: SandboxProviderType;
-      submitMode?: SubmitMode;
+      agentMode?: AgentMode;
     },
   ) => Promise<void>;
 
@@ -132,7 +132,7 @@ export interface PromptSettingsState {
   setSandboxProvider: (provider: SandboxProviderType) => void;
 
   /** Update the interaction mode. */
-  setSubmitMode: (mode: SubmitMode) => void;
+  setAgentMode: (mode: AgentMode) => void;
 
   /**
    * Get the persisted model for a given agent, if any.
@@ -151,7 +151,7 @@ export const usePromptSettingsStore = create<PromptSettingsState>()(
     agent: 'opencode',
     modelId: null,
     sandboxProvider: 'docker',
-    submitMode: 'interactive',
+    agentMode: 'interactive',
     agentModels: {},
     initialized: false,
 
@@ -182,11 +182,11 @@ export const usePromptSettingsStore = create<PromptSettingsState>()(
         config.sandboxProvider ??
         get().sandboxProvider ??
         'docker';
-      const submitMode =
-        overrides?.submitMode ??
-        userCfg?.submitMode ??
-        config.submitMode ??
-        get().submitMode ??
+      const agentMode =
+        overrides?.agentMode ??
+        userCfg?.agentMode ??
+        config.agentMode ??
+        get().agentMode ??
         'interactive';
 
       // For the model: override > agentModels[agent] > config.model > null
@@ -197,7 +197,7 @@ export const usePromptSettingsStore = create<PromptSettingsState>()(
         agent,
         modelId,
         sandboxProvider,
-        submitMode,
+        agentMode,
         agentModels,
         initialized: true,
       });
@@ -246,9 +246,9 @@ export const usePromptSettingsStore = create<PromptSettingsState>()(
       queueWrite({ sandboxProvider: provider });
     },
 
-    setSubmitMode: (mode) => {
-      set({ submitMode: mode });
-      queueWrite({ submitMode: mode });
+    setAgentMode: (mode) => {
+      set({ agentMode: mode });
+      queueWrite({ agentMode: mode });
     },
 
     getAgentModel: (agent) => {

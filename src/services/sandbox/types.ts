@@ -13,8 +13,8 @@ export type SandboxProviderType = 'docker' | 'cloud';
 // Docker-specific exec type (keep for backward compat)
 export type ExecType = 'agent' | 'shell';
 
-// How the user submitted the session (affects interactivity + agent flags)
-export type SubmitMode = 'async' | 'interactive' | 'plan';
+// How the agent runs in the sandbox (affects interactivity + agent flags)
+export type AgentMode = 'async' | 'interactive' | 'plan';
 
 /** Options for attaching to a running sandbox session. */
 export interface AttachOptions {
@@ -45,7 +45,7 @@ export interface OxSession {
   snapshotSlug?: string; // cloud only (for resume)
   startedAt?: string;
   finishedAt?: string;
-  submitMode?: SubmitMode;
+  agentMode?: AgentMode;
   /** Port forwarding URLs for this session (when appPort configured) */
   portUrls?: PortUrl[];
 }
@@ -64,7 +64,7 @@ export interface CreateSandboxOptions {
   mountDir?: string; // Docker-only: local dir mount
   isGitRepo?: boolean;
   agentArgs?: string[];
-  submitMode?: SubmitMode;
+  agentMode?: AgentMode;
   initScript?: string;
   overlayMounts?: string[];
   onProgress?: (step: string) => void;
@@ -97,7 +97,7 @@ export interface ResumeSandboxOptions {
   model?: string;
   mountDir?: string;
   agentArgs?: string[];
-  submitMode?: SubmitMode;
+  agentMode?: AgentMode;
   onProgress?: (step: string) => void;
   requestSudo?: RequestSudoFn;
 }
