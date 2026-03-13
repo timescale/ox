@@ -349,11 +349,12 @@ export async function pruneStaleRoutes(): Promise<void> {
 /**
  * Stop Caddy if no active routes remain.
  * Prunes stale routes first to avoid keeping Caddy alive for orphaned entries.
+ * No-ops silently if Caddy isn't running.
  */
 export async function stopCaddyIfUnused(): Promise<void> {
   await pruneStaleRoutes();
   const db = openSessionDb();
-  if (countCaddyRoutes(db) === 0) {
+  if (countCaddyRoutes(db) === 0 && (await isCaddyRunning())) {
     await stopCaddy();
   }
 }

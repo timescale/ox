@@ -218,6 +218,12 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
         }
       }
 
+      // ---- Background: prune stale Caddy routes / stop Caddy if unused ----
+      // Fire-and-forget — never blocks startup or readiness checks.
+      import('../services/portForwarding/caddy.ts')
+        .then(({ stopCaddyIfUnused }) => stopCaddyIfUnused())
+        .catch((err) => log.debug({ err }, 'Caddy cleanup on startup failed'));
+
       // ---- Tier 3: Sandbox image? ----
       set({ sandboxBaseImage: 'checking' });
 
