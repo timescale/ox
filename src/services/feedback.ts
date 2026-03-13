@@ -11,7 +11,8 @@ import { log } from './logger';
 // ============================================================================
 
 // Build-time constant injected via `bun build --define`.
-// Falls back to empty string when building from source without the secret.
+// The value is base64-encoded at build time to avoid the plain-text URL
+// appearing in the compiled binary.  Decoded at runtime by getFeedbackWebhookUrl().
 declare const __OX_FEEDBACK_WEBHOOK_URL__: string;
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -33,15 +34,15 @@ export function getFeedbackWebhookUrl(): string | undefined {
   const envUrl = process.env.OX_FEEDBACK_WEBHOOK_URL;
   if (envUrl) return envUrl;
 
-  // Build-time define: the bundler replaces the identifier with a string literal.
-  // When building from source the declare above gives us `undefined` at runtime,
-  // so we guard with typeof + truthiness.
+  // Build-time define: the bundler replaces the identifier with a base64-encoded
+  // string literal.  We decode it here so the plain-text URL never appears in
+  // the compiled binary.
   try {
     if (
       typeof __OX_FEEDBACK_WEBHOOK_URL__ === 'string' &&
       __OX_FEEDBACK_WEBHOOK_URL__
     ) {
-      return __OX_FEEDBACK_WEBHOOK_URL__;
+      return Buffer.from(__OX_FEEDBACK_WEBHOOK_URL__, 'base64').toString();
     }
   } catch {
     // ReferenceError when running from source without --define

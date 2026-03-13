@@ -25,6 +25,10 @@ const { values } = parseArgs({
 });
 
 const webhookUrl = process.env.OX_FEEDBACK_WEBHOOK_URL ?? '';
+// Obfuscate the URL so it isn't visible as plain text in the compiled binary.
+const webhookUrlB64 = webhookUrl
+  ? Buffer.from(webhookUrl).toString('base64')
+  : '';
 
 const args = [
   'build',
@@ -32,7 +36,7 @@ const args = [
   '--compile',
   `--outfile=${values.outfile}`,
   '--define',
-  `__OX_FEEDBACK_WEBHOOK_URL__='${webhookUrl}'`,
+  `__OX_FEEDBACK_WEBHOOK_URL__='${webhookUrlB64}'`,
 ];
 
 if (values.minify) args.push('--minify');
