@@ -277,19 +277,27 @@ export class DockerSandboxProvider implements SandboxProvider {
 
   async remove(sessionId: string): Promise<void> {
     log.debug({ sessionId }, 'Removing Docker sandbox');
+    // Look up the container name so we can match the caddy_routes key
+    // (routes are stored by container name, but sessionId is the container ID)
+    const session = await dockerGetSession(sessionId);
+    const containerName = session?.containerName ?? sessionId;
     const { teardownPortForwarding } = await import(
       '../portForwarding/index.ts'
     );
-    await teardownPortForwarding(sessionId, sessionId);
+    await teardownPortForwarding(containerName, containerName);
     await removeContainer(sessionId);
   }
 
   async stop(sessionId: string): Promise<void> {
     log.debug({ sessionId }, 'Stopping Docker sandbox');
+    // Look up the container name so we can match the caddy_routes key
+    // (routes are stored by container name, but sessionId is the container ID)
+    const session = await dockerGetSession(sessionId);
+    const containerName = session?.containerName ?? sessionId;
     const { teardownPortForwarding } = await import(
       '../portForwarding/index.ts'
     );
-    await teardownPortForwarding(sessionId, sessionId);
+    await teardownPortForwarding(containerName, containerName);
     await stopContainer(sessionId);
   }
 
