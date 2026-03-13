@@ -7,6 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { userConfigDir } from '../config.ts';
 import { log } from '../logger.ts';
+import type { AppPortEntry, CaddyRoute } from '../portForwarding/types.ts';
 import { initPromptHistorySchema } from '../promptHistoryDb.ts';
 import type { OxSession, SandboxProviderType, SubmitMode } from './types.ts';
 
@@ -67,6 +68,18 @@ export function initSessionSchema(db: Database): void {
   } catch {
     // Column already exists — expected on subsequent runs
   }
+
+  // Migration: caddy_routes table for cross-process port forwarding state
+  db.run(`
+    CREATE TABLE IF NOT EXISTS caddy_routes (
+      session_id TEXT PRIMARY KEY,
+      container_name TEXT NOT NULL,
+      ports TEXT NOT NULL,
+      is_cloud INTEGER DEFAULT 0,
+      external_urls TEXT,
+      created_at TEXT NOT NULL
+    )
+  `);
 }
 
 let _db: Database | null = null;
@@ -307,4 +320,80 @@ export function updateSessionSnapshot(
     $id: id,
     $snapshot_slug: snapshotSlug,
   });
+}
+
+// ============================================================================
+// Caddy Routes — cross-process route persistence
+// ============================================================================
+
+interface CaddyRouteRow {
+  session_id: string;
+  container_name: string;
+  ports: string;
+  is_cloud: number;
+  external_urls: string | null;
+  created_at: string;
+}
+
+function rowToCaddyRoute(row: CaddyRouteRow): CaddyRoute {
+  return {
+    sessionId: row.session_id,
+    containerName: row.container_name,
+    ports: JSON.parse(row.ports) as AppPortEntry[],
+    isCloud: row.is_cloud === 1,
+    externalUrls: row.external_urls
+      ? (JSON.parse(row.external_urls) as Record<number, string>)
+      : undefined,
+  };
+}
+
+/** Insert or replace a Caddy route for a session */
+export function upsertCaddyRoute(db: Database, route: CaddyRoute): void {
+  const stmt = db.prepare(`
+    INSERT INTO caddy_routes (session_id, container_name, ports, is_cloud, external_urls, created_at)
+    VALUES ($session_id, $container_name, $ports, $is_cloud, $external_urls, $created_at)
+    ON CONFLICT(session_id) DO UPDATE SET
+      container_name = excluded.container_name,
+      ports = excluded.ports,
+      is_cloud = excluded.is_cloud,
+      external_urls = excluded.external_urls
+  `);
+  stmt.run({
+    $session_id: route.sessionId,
+    $container_name: route.containerName,
+    $ports: JSON.stringify(route.ports),
+    $is_cloud: route.isCloud ? 1 : 0,
+    $external_urls: route.externalUrls
+      ? JSON.stringify(route.externalUrls)
+      : null,
+    $created_at: new Date().toISOString(),
+  });
+}
+
+/** Remove a Caddy route by session ID */
+export function deleteCaddyRoute(db: Database, sessionId: string): void {
+  db.prepare('DELETE FROM caddy_routes WHERE session_id = $session_id').run({
+    $session_id: sessionId,
+  });
+}
+
+/** Get all active Caddy routes */
+export function listCaddyRoutes(db: Database): CaddyRoute[] {
+  const rows = db
+    .prepare('SELECT * FROM caddy_routes')
+    .all() as CaddyRouteRow[];
+  return rows.map(rowToCaddyRoute);
+}
+
+/** Get the count of active Caddy routes */
+export function countCaddyRoutes(db: Database): number {
+  const row = db
+    .prepare('SELECT COUNT(*) as count FROM caddy_routes')
+    .get() as { count: number };
+  return row.count;
+}
+
+/** Delete all Caddy routes (used when force-stopping Caddy) */
+export function deleteAllCaddyRoutes(db: Database): void {
+  db.prepare('DELETE FROM caddy_routes').run();
 }

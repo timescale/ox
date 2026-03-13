@@ -160,6 +160,34 @@ export function SessionDetail() {
         onSelect: handlePrOpen,
       },
       {
+        id: 'session.openApp',
+        title: 'Open app',
+        description: 'Open the default app URL in your browser',
+        category: 'Session',
+        keybind: { key: 'b', ctrl: true },
+        enabled: isRunning && !!liveSession?.portUrls?.length,
+        onSelect: () => {
+          const s = sessionRef.current;
+          const defaultUrl = s?.portUrls?.find((pu) => !pu.subdomain)?.url;
+          if (defaultUrl) {
+            open(defaultUrl)
+              .then(() => {
+                useToastStore
+                  .getState()
+                  .show('Opening app in browser...', 'info', 1000);
+              })
+              .catch((err) => {
+                log.error({ err }, 'Failed to open app URL in browser');
+                useToastStore
+                  .getState()
+                  .show('Failed to open app in browser', 'error');
+              });
+          } else {
+            useToastStore.getState().show('No app URL available', 'warning');
+          }
+        },
+      },
+      {
         id: 'session.gitSwitch',
         title: 'Git switch',
         description: "Switch local git branch to this session's branch",
@@ -168,7 +196,14 @@ export function SessionDetail() {
         onSelect: handleGitSwitch,
       },
     ],
-    [isRunning, isStopped, handleResume, handlePrOpen, handleGitSwitch],
+    [
+      isRunning,
+      isStopped,
+      handleResume,
+      handlePrOpen,
+      handleGitSwitch,
+      liveSession?.portUrls,
+    ],
   );
 
   // Read palette open state so escape doesn't go back when closing the palette

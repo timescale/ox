@@ -7,6 +7,7 @@
 // useCallback functions in the SessionsApp component.
 // ============================================================================
 
+import type { CliRenderer } from '@opentui/core';
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import type { ConfigWizardResult } from '../commands/config.tsx';
@@ -23,6 +24,7 @@ import { ensureDockerImage } from '../services/docker.ts';
 import { checkGhCredentials } from '../services/gh.ts';
 import { generateBranchName } from '../services/git.ts';
 import { log } from '../services/logger.ts';
+import type { RequestSudoFn } from '../services/portForwarding/sudo.ts';
 import { getSandboxProvider } from '../services/sandbox/index.ts';
 import type {
   OxSession,
@@ -61,6 +63,8 @@ export interface SessionWorkflowState {
   initialAgent: AgentType | undefined;
   initialModel: string | undefined;
   initialSession: OxSession | undefined;
+  renderer: CliRenderer | null;
+  requestSudo: RequestSudoFn | undefined;
 
   // ---- Actions ----
   initialize: (params: {
@@ -112,6 +116,8 @@ export interface SessionWorkflowState {
 
   handleCloudSetupComplete: (result: CloudSetupResult) => void;
 
+  setRenderer: (renderer: CliRenderer | null) => void;
+
   navigateToTargetView: (
     cfg: OxConfig,
     initialView: 'prompt' | 'list' | 'starting' | 'detail' | 'resources',
@@ -137,8 +143,34 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
     initialAgent: undefined,
     initialModel: undefined,
     initialSession: undefined,
+    renderer: null,
+    requestSudo: undefined,
 
     // ---- Actions ----
+
+    setRenderer: (renderer) => {
+      const requestSudo: RequestSudoFn | undefined = renderer
+        ? async (reason: string): Promise<boolean> => {
+            try {
+              renderer.suspend();
+              process.stderr.write(`\r\n${reason}\r\n\r\n`);
+              const proc = Bun.spawn(['sudo', '-v'], {
+                stdin: 'inherit',
+                stdout: 'inherit',
+                stderr: 'inherit',
+              });
+              await proc.exited;
+              return proc.exitCode === 0;
+            } catch (err) {
+              log.warn({ err }, 'sudo -v failed');
+              return false;
+            } finally {
+              renderer.resume();
+            }
+          }
+        : undefined;
+      set({ renderer, requestSudo });
+    },
 
     initialize: (params) => {
       set({
@@ -453,6 +485,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           onProgress: (step) => {
             updateView((v) => (v.type === 'starting' ? { ...v, step } : v));
           },
+          requestSudo: get().requestSudo,
         });
 
         if (isInteractive) {
@@ -559,6 +592,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           onProgress: (step) => {
             updateView((v) => (v.type === 'resuming' ? { ...v, step } : v));
           },
+          requestSudo: get().requestSudo,
         });
 
         if (isInteractive) {

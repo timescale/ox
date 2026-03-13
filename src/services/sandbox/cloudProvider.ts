@@ -22,6 +22,12 @@ import { readConfig } from '../config.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
 import { log } from '../logger.ts';
+import {
+  getPortUrls,
+  normalizeAppPorts,
+  setupCloudPortForwarding,
+  teardownPortForwarding,
+} from '../portForwarding/index.ts';
 import { CloudConnectionPool } from './cloudConnectionPool.ts';
 import {
   ensureAgentCloudSnapshot,
@@ -601,7 +607,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       );
     }
 
-    const { onProgress } = options;
+    const { onProgress, requestSudo } = options;
     const client = await this.getClient();
     const region = await this.resolveRegion();
     const baseSnapshot = await this.ensureImage({ agent: options.agent });
@@ -689,6 +695,38 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     const db = openSessionDb();
     upsertSession(db, session);
+
+    // Expose HTTP ports and set up local proxy (if port forwarding configured)
+    const config = await readConfig();
+    const portConfig = normalizeAppPorts(config);
+
+    if (portConfig) {
+      onProgress?.('Exposing ports');
+      const externalUrls = new Map<number, string>();
+      for (const entry of portConfig.ports) {
+        try {
+          const url = await sandbox.exposeHttp({ port: entry.port });
+          externalUrls.set(entry.port, url);
+        } catch (err) {
+          log.warn(
+            { err, port: entry.port },
+            'Failed to expose HTTP port (non-fatal)',
+          );
+        }
+      }
+
+      onProgress?.('Configuring port forwarding');
+      const portUrls = await setupCloudPortForwarding(
+        sessionId,
+        session.name,
+        externalUrls,
+        requestSudo,
+      );
+      if (portUrls) {
+        session.portUrls = portUrls;
+        upsertSession(db, session);
+      }
+    }
 
     // 4-7. Provision sandbox (credentials, repo clone, init script, agent)
     if (options.interactive) {
@@ -954,6 +992,13 @@ export class CloudSandboxProvider implements SandboxProvider {
       log.debug({ err }, 'Failed to sync cloud session status');
     });
 
+    // Derive port URLs from config for running sessions
+    for (const session of dbSessions) {
+      if (session.status === 'running') {
+        session.portUrls = (await getPortUrls(session.name)) ?? undefined;
+      }
+    }
+
     return dbSessions;
   }
 
@@ -1014,11 +1059,20 @@ export class CloudSandboxProvider implements SandboxProvider {
       }
     }
 
+    // Derive port URLs from config for running sessions
+    if (session?.status === 'running') {
+      session.portUrls = (await getPortUrls(session.name)) ?? undefined;
+    }
+
     return session;
   }
 
   async remove(sessionId: string): Promise<void> {
     await this.connectionPool.release(sessionId);
+
+    // Tear down port forwarding (best-effort)
+    await teardownPortForwarding(sessionId);
+
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
 
@@ -1072,6 +1126,10 @@ export class CloudSandboxProvider implements SandboxProvider {
     await this.connectionPool.release(sessionId);
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
+
+    // Tear down port forwarding (best-effort)
+    await teardownPortForwarding(sessionId, session?.name);
+
     const client = await this.getClient();
 
     // 1. Kill sandbox first (detaches the volume so it can be snapshotted)

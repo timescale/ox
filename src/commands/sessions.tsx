@@ -470,7 +470,11 @@ export async function runSessionsTui({
     // onComplete callback so exit actions can resolve the promise.
     useRouterStore.getState().init((result) => deferredResult.resolve(result));
 
-    const { render, destroy } = await createTui();
+    const { renderer, render, destroy } = await createTui();
+
+    // Provide the renderer to the workflow store so it can handle sudo
+    // prompts by suspending/resuming the TUI.
+    useSessionWorkflowStore.getState().setRenderer(renderer);
 
     render(
       <CopyOnSelect>
@@ -491,6 +495,7 @@ export async function runSessionsTui({
 
     const result = await deferredResult.promise;
 
+    useSessionWorkflowStore.getState().setRenderer(null);
     await destroy();
 
     // After handling the action, default to returning to the session list

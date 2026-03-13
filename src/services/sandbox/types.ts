@@ -5,6 +5,8 @@
 import type { AgentType } from '../config.ts';
 import type { PullLayer } from '../docker.ts';
 import type { RepoInfo } from '../git.ts';
+import type { RequestSudoFn } from '../portForwarding/sudo.ts';
+import type { PortUrl } from '../portForwarding/types.ts';
 
 export type SandboxProviderType = 'docker' | 'cloud';
 
@@ -44,6 +46,8 @@ export interface OxSession {
   startedAt?: string;
   finishedAt?: string;
   submitMode?: SubmitMode;
+  /** Port forwarding URLs for this session (when appPort configured) */
+  portUrls?: PortUrl[];
 }
 
 // Options for creating a new sandbox
@@ -64,6 +68,7 @@ export interface CreateSandboxOptions {
   initScript?: string;
   overlayMounts?: string[];
   onProgress?: (step: string) => void;
+  requestSudo?: RequestSudoFn;
 }
 
 // Options for creating a shell sandbox
@@ -94,6 +99,7 @@ export interface ResumeSandboxOptions {
   agentArgs?: string[];
   submitMode?: SubmitMode;
   onProgress?: (step: string) => void;
+  requestSudo?: RequestSudoFn;
 }
 
 // Container resource stats

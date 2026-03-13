@@ -23,6 +23,11 @@ import {
 } from '../docker.ts';
 import { readFileFromContainer, writeFileToContainer } from '../dockerFiles.ts';
 import { log } from '../logger.ts';
+import {
+  getPortUrls,
+  setupPortForwarding,
+  teardownPortForwarding,
+} from '../portForwarding/index.ts';
 import type {
   AttachOptions,
   CreateSandboxOptions,
@@ -144,7 +149,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       },
       'Creating Docker sandbox',
     );
-    const { onProgress } = options;
+    const { onProgress, requestSudo } = options;
 
     // Ensure agent-specific overlay image exists
     onProgress?.('Preparing agent image');
@@ -177,7 +182,20 @@ export class DockerSandboxProvider implements SandboxProvider {
       { sessionId: session.containerId, name: session.name },
       'Docker sandbox created',
     );
-    return mapDockerSession(session);
+    const mapped = mapDockerSession(session);
+
+    // Set up port forwarding (best-effort — won't block session creation)
+    onProgress?.('Configuring port forwarding');
+    const portUrls = await setupPortForwarding(
+      containerName,
+      containerName,
+      requestSudo,
+    );
+    if (portUrls) {
+      mapped.portUrls = portUrls;
+    }
+
+    return mapped;
   }
 
   async createShell(options: CreateShellSandboxOptions): Promise<ShellSession> {
@@ -199,7 +217,7 @@ export class DockerSandboxProvider implements SandboxProvider {
     options: ResumeSandboxOptions,
   ): Promise<OxSession> {
     log.debug({ sessionId }, 'Resuming Docker sandbox');
-    const { onProgress } = options;
+    const { onProgress, requestSudo } = options;
     onProgress?.('Resuming container');
     const containerName = await resumeSession(sessionId, options);
 
@@ -213,27 +231,68 @@ export class DockerSandboxProvider implements SandboxProvider {
       { sessionId: session.containerId, name: session.name },
       'Docker sandbox resumed',
     );
-    return mapDockerSession(session);
+    const mapped = mapDockerSession(session);
+
+    // Set up port forwarding (best-effort — won't block session creation)
+    onProgress?.('Configuring port forwarding');
+    const portUrls = await setupPortForwarding(
+      containerName,
+      containerName,
+      requestSudo,
+    );
+    if (portUrls) {
+      mapped.portUrls = portUrls;
+    }
+
+    return mapped;
   }
 
   async list(): Promise<OxSession[]> {
     const sessions = await listOxSessions();
     log.debug({ count: sessions.length }, 'Listed Docker sessions');
-    return sessions.map(mapDockerSession);
+    const mapped = sessions.map(mapDockerSession);
+
+    // Derive port URLs from config for running sessions
+    for (const session of mapped) {
+      if (session.status === 'running' && session.containerName) {
+        session.portUrls =
+          (await getPortUrls(session.containerName)) ?? undefined;
+      }
+    }
+
+    return mapped;
   }
 
   async get(sessionId: string): Promise<OxSession | null> {
     const session = await dockerGetSession(sessionId);
-    return session ? mapDockerSession(session) : null;
+    if (!session) return null;
+    const mapped = mapDockerSession(session);
+
+    // Derive port URLs from config for running sessions
+    if (mapped.status === 'running' && mapped.containerName) {
+      mapped.portUrls = (await getPortUrls(mapped.containerName)) ?? undefined;
+    }
+
+    return mapped;
   }
 
   async remove(sessionId: string): Promise<void> {
     log.debug({ sessionId }, 'Removing Docker sandbox');
+    // Look up the container name so we can match the caddy_routes key
+    // (routes are stored by container name, but sessionId is the container ID)
+    const session = await dockerGetSession(sessionId);
+    const containerName = session?.containerName ?? sessionId;
+    await teardownPortForwarding(containerName, containerName);
     await removeContainer(sessionId);
   }
 
   async stop(sessionId: string): Promise<void> {
     log.debug({ sessionId }, 'Stopping Docker sandbox');
+    // Look up the container name so we can match the caddy_routes key
+    // (routes are stored by container name, but sessionId is the container ID)
+    const session = await dockerGetSession(sessionId);
+    const containerName = session?.containerName ?? sessionId;
+    await teardownPortForwarding(containerName, containerName);
     await stopContainer(sessionId);
   }
 

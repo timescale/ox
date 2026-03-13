@@ -117,6 +117,8 @@ export function SessionDetailPanel({
 
   // Hover state for PR indicator
   const [prHovered, setPrHovered] = useState(false);
+  // Hover state for port URL links
+  const [hoveredPort, setHoveredPort] = useState<number | null>(null);
 
   // AbortController ref for cancelling in-flight PR fetches on unmount.
   // This prevents `gh pr list` docker containers from keeping the process alive
@@ -465,6 +467,60 @@ export function SessionDetailPanel({
                 <text>{session.snapshotSlug}</text>
               </box>
             )}
+          </box>
+        )}
+        {session.portUrls && session.portUrls.length > 0 && (
+          <box
+            flexDirection="row"
+            columnGap={isWide ? 3 : 2}
+            overflow="hidden"
+            flexWrap="wrap"
+          >
+            {session.portUrls.map((pu) => (
+              <box key={`port-${pu.port}`} flexDirection="row" gap={1}>
+                <text fg={theme.textMuted}>{pu.subdomain ?? 'app'}</text>
+                <box
+                  backgroundColor={
+                    hoveredPort === pu.port
+                      ? theme.backgroundElement
+                      : undefined
+                  }
+                  onMouseDown={() => {
+                    open(pu.url).catch((err: unknown) => {
+                      log.error({ err }, 'Failed to open app URL in browser');
+                      useToastStore
+                        .getState()
+                        .show('Failed to open URL in browser', 'error');
+                    });
+                  }}
+                  onMouseOver={() => setHoveredPort(pu.port)}
+                  onMouseOut={() => setHoveredPort(null)}
+                >
+                  <text fg={theme.accent} wrapMode="none">
+                    {pu.url}
+                  </text>
+                </box>
+              </box>
+            ))}
+          </box>
+        )}
+        {session.portUrls?.some((pu) => pu.externalUrl) && (
+          <box
+            flexDirection="row"
+            columnGap={isWide ? 3 : 2}
+            overflow="hidden"
+            flexWrap="wrap"
+          >
+            {session.portUrls
+              ?.filter((pu) => pu.externalUrl)
+              .map((pu) => (
+                <box key={`ext-port-${pu.port}`} flexDirection="row" gap={1}>
+                  <text fg={theme.textMuted}>
+                    {pu.subdomain ?? 'app'} (ext)
+                  </text>
+                  <text fg={theme.textMuted}>{pu.externalUrl}</text>
+                </box>
+              ))}
           </box>
         )}
 
