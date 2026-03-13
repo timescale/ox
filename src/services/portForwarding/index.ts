@@ -37,6 +37,32 @@ let resolvedHttpsPort: number | null = null;
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Determine the host-side HTTPS port for Caddy.
+ *
+ * Priority:
+ *   1. In-process cache (set during this process's setupPortForwarding)
+ *   2. Already-running Caddy container (discovered via `docker port`)
+ *   3. Resolve a new candidate port via `resolveProxyPort()`
+ *
+ * Caches the result in `resolvedHttpsPort` for subsequent calls.
+ */
+async function resolveHttpsPort(proxyPort?: number): Promise<number> {
+  if (resolvedHttpsPort) return resolvedHttpsPort;
+
+  // Check if Caddy is already running (e.g., started by another ox process)
+  const existingPort = await getCaddyHttpsPort();
+  if (existingPort) {
+    resolvedHttpsPort = existingPort;
+    return existingPort;
+  }
+
+  // No running Caddy — resolve a fresh port
+  const port = await resolveProxyPort(proxyPort);
+  resolvedHttpsPort = port;
+  return port;
+}
+
 function buildUrl(
   containerName: string,
   subdomain: string | undefined,
@@ -105,11 +131,8 @@ export async function setupPortForwarding(
     await ensureNetwork();
     await connectToNetwork(containerName);
 
-    // 3. Resolve proxy port (cached), ensure Caddy running
-    if (!resolvedHttpsPort) {
-      resolvedHttpsPort = await resolveProxyPort(config.proxyPort);
-    }
-    const httpsPort = resolvedHttpsPort;
+    // 3. Resolve proxy port (checks running Caddy first), ensure Caddy running
+    const httpsPort = await resolveHttpsPort(config.proxyPort);
     await ensureCaddy(httpsPort);
 
     // 4. Ensure DNS, ensure cert trusted
@@ -157,25 +180,31 @@ export async function setupCloudPortForwarding(
     // 2. Ensure network (no container to connect for cloud)
     await ensureNetwork();
 
-    // 3. Resolve proxy port (cached), ensure Caddy running
-    if (!resolvedHttpsPort) {
-      resolvedHttpsPort = await resolveProxyPort(config.proxyPort);
-    }
-    const httpsPort = resolvedHttpsPort;
+    // 3. Resolve proxy port (checks running Caddy first), ensure Caddy running
+    const httpsPort = await resolveHttpsPort(config.proxyPort);
     await ensureCaddy(httpsPort);
 
     // 4. Ensure DNS, ensure cert trusted
     await ensureDns(requestSudo);
     await ensureCertTrusted(requestSudo);
 
-    // 5. Add routes to Caddy (with cloud options)
-    await addRoutes(sessionId, containerName, portConfig.ports, {
+    // 5. Add routes to Caddy (with cloud options — only for successfully exposed ports)
+    const exposedPorts = portConfig.ports.filter((entry) =>
+      externalUrls.has(entry.port),
+    );
+    if (exposedPorts.length === 0) {
+      log.warn(
+        'No ports were successfully exposed — skipping cloud port forwarding',
+      );
+      return null;
+    }
+    await addRoutes(sessionId, containerName, exposedPorts, {
       isCloud: true,
       externalUrls: Object.fromEntries(externalUrls),
     });
 
-    // 6. Build and return PortUrl array (including external URLs)
-    return portConfig.ports.map((entry) => ({
+    // 6. Build and return PortUrl array (only for exposed ports)
+    return exposedPorts.map((entry) => ({
       port: entry.port,
       subdomain: entry.subdomain,
       url: buildUrl(containerName, entry.subdomain, httpsPort),

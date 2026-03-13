@@ -141,14 +141,16 @@ export async function isCaddyRunning(): Promise<boolean> {
 }
 
 /**
- * Get the HTTPS port that the running Caddy container is bound to.
+ * Get the host-side HTTPS port that the running Caddy container is bound to.
  * Returns null if Caddy isn't running or the port can't be determined.
+ *
+ * `docker port` output format: "443/tcp -> 127.0.0.1:8443"
+ * We need the host port (8443), not the container port (443).
  */
 export async function getCaddyHttpsPort(): Promise<number | null> {
   try {
-    // docker port returns lines like "8443/tcp -> 127.0.0.1:8443"
     const result = await $`docker port ${CADDY_CONTAINER}`.quiet();
-    const match = result.stdout.toString().match(/^(\d+)\/tcp/);
+    const match = result.stdout.toString().match(/->\s*[\d.]+:(\d+)/);
     return match ? Number(match[1]) : null;
   } catch {
     return null;

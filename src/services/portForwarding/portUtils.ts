@@ -1,19 +1,47 @@
 import { createServer } from 'node:net';
+import { $ } from 'bun';
 
 /**
  * Check whether a TCP port is available on 127.0.0.1.
- * Tries to bind a server; resolves true if successful, false if in use.
  *
- * EACCES (permission denied for privileged ports < 1024) is treated as
- * "available" because Docker can still map the port via its own mechanisms.
+ * For privileged ports (< 1024), a userspace bind always fails with EACCES
+ * regardless of whether the port is free, so we use `lsof` to check.
+ * For unprivileged ports, we try to bind a server directly.
  */
-export function isPortAvailable(port: number): Promise<boolean> {
+export async function isPortAvailable(port: number): Promise<boolean> {
+  if (port < 1024) {
+    return isPrivilegedPortAvailable(port);
+  }
+  return isUnprivilegedPortAvailable(port);
+}
+
+/**
+ * Check a privileged port via lsof (bind would always fail with EACCES).
+ * Returns true if nothing is listening on the port.
+ */
+async function isPrivilegedPortAvailable(port: number): Promise<boolean> {
+  try {
+    // lsof exits 0 if it finds matches, 1 if none
+    const result = await $`lsof -iTCP:${port} -sTCP:LISTEN -P -n`
+      .quiet()
+      .nothrow();
+    // If lsof found listeners, the port is taken
+    return result.exitCode !== 0;
+  } catch {
+    // lsof not available — assume port is available and let Docker fail
+    // gracefully if it's actually taken
+    return true;
+  }
+}
+
+/**
+ * Check an unprivileged port by attempting to bind.
+ */
+function isUnprivilegedPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer();
-    server.once('error', (err: NodeJS.ErrnoException) => {
-      // EACCES means the port is free but requires root to bind directly —
-      // Docker handles privileged port mapping itself, so treat as available.
-      resolve(err.code === 'EACCES');
+    server.once('error', () => {
+      resolve(false);
     });
     server.listen(port, '127.0.0.1', () => {
       server.close(() => resolve(true));
