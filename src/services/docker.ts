@@ -973,7 +973,6 @@ export interface StartContainerOptions {
   repoInfo: RepoInfo | null;
   agent: AgentType;
   model?: string;
-  detach: boolean;
   interactive: boolean;
   envVars?: Record<string, string>;
   /** If set, mount this local directory into the container instead of git clone */
@@ -1724,7 +1723,6 @@ export async function startContainer(
     repoInfo,
     agent,
     model,
-    detach,
     interactive,
     envVars,
     mountDir,
@@ -1830,9 +1828,9 @@ export async function startContainer(
     agentArgs,
   });
 
-  // Only add PR instructions in async mode (detached) with a git repo
+  // Only add PR instructions in async agent mode with a git repo
   const fullPrompt =
-    detach && isGitRepo
+    agentMode === 'async' && isGitRepo
       ? `${prompt}
 
 ---

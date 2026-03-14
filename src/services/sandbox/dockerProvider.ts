@@ -162,7 +162,6 @@ export class DockerSandboxProvider implements SandboxProvider {
       repoInfo: options.repoInfo,
       agent: options.agent,
       model: options.model,
-      detach: options.detach,
       interactive: options.interactive,
       envVars: options.envVars,
       mountDir: options.mountDir,
