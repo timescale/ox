@@ -774,9 +774,9 @@ export async function runSessionsTui({
 // CLI Output Functions
 // ============================================================================
 
-type OutputFormat = 'tui' | 'table' | 'json' | 'yaml';
+export type OutputFormat = 'tui' | 'table' | 'json' | 'yaml';
 
-interface SessionsOptions {
+export interface SessionsOptions {
   output: OutputFormat;
   all: boolean;
 }
@@ -807,7 +807,7 @@ export function truncate(str: string, maxLen: number): string {
   return `${str.slice(0, maxLen - 3)}...`;
 }
 
-function printTable(sessions: OxSession[]): void {
+export function printTable(sessions: OxSession[]): void {
   const headers = ['NAME', 'STATUS', 'AGENT', 'REPO', 'CREATED', 'PROMPT'];
   const rows = sessions.map((s) => [
     s.name,
@@ -858,7 +858,7 @@ function printTable(sessions: OxSession[]): void {
 // Command Action
 // ============================================================================
 
-async function sessionsAction(options: SessionsOptions): Promise<void> {
+export async function sessionsAction(options: SessionsOptions): Promise<void> {
   // TUI mode is default
   if (options.output === 'tui') {
     await runSessionsTui({ initialView: 'list' });
@@ -918,7 +918,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
 // ============================================================================
 
 export const sessionsCommand = new Command('sessions')
-  .aliases(['list', 'session', 'status', 's'])
+  .aliases(['list', 'status', 's'])
   .description('Show all ox sessions and their status')
   .option(
     '-o, --output <format>',
@@ -932,59 +932,64 @@ export const sessionsCommand = new Command('sessions')
   .action(sessionsAction);
 
 // Subcommand to remove/clean up sessions
+export async function cleanAction(options: {
+  all: boolean;
+  force: boolean;
+}): Promise<void> {
+  const sessions = await listAllSessions();
+
+  const toRemove = options.all
+    ? sessions
+    : sessions.filter((s) => s.status !== 'running');
+
+  if (toRemove.length === 0) {
+    console.log('No containers to remove.');
+    return;
+  }
+
+  const displayName = (s: OxSession) => s.containerName ?? s.id;
+
+  console.log(`Found ${toRemove.length} container(s) to remove:`);
+  for (const session of toRemove) {
+    console.log(`  - ${displayName(session)} (${session.status})`);
+  }
+
+  if (!options.force) {
+    const readline = await import('node:readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const answer = await new Promise<string>((resolve) => {
+      rl.question('\nProceed? [y/N] ', resolve);
+    });
+    rl.close();
+
+    if (answer.toLowerCase() !== 'y') {
+      console.log('Cancelled.');
+      return;
+    }
+  }
+
+  console.log('');
+  for (const session of toRemove) {
+    const name = displayName(session);
+    try {
+      const actionProvider = getProviderForSession(session);
+      await actionProvider.remove(session.id);
+      console.log(`Removed ${name}`);
+    } catch (err) {
+      log.error({ err }, `Failed to remove ${name}`);
+      console.error(`Failed to remove ${name}: ${err}`);
+    }
+  }
+}
+
 const cleanCommand = new Command('clean')
   .description('Remove stopped ox containers')
   .option('-a, --all', 'Remove all containers (including running)')
   .option('-f, --force', 'Skip confirmation')
-  .action(async (options: { all: boolean; force: boolean }) => {
-    const sessions = await listAllSessions();
-
-    const toRemove = options.all
-      ? sessions
-      : sessions.filter((s) => s.status !== 'running');
-
-    if (toRemove.length === 0) {
-      console.log('No containers to remove.');
-      return;
-    }
-
-    const displayName = (s: OxSession) => s.containerName ?? s.id;
-
-    console.log(`Found ${toRemove.length} container(s) to remove:`);
-    for (const session of toRemove) {
-      console.log(`  - ${displayName(session)} (${session.status})`);
-    }
-
-    if (!options.force) {
-      const readline = await import('node:readline');
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-
-      const answer = await new Promise<string>((resolve) => {
-        rl.question('\nProceed? [y/N] ', resolve);
-      });
-      rl.close();
-
-      if (answer.toLowerCase() !== 'y') {
-        console.log('Cancelled.');
-        return;
-      }
-    }
-
-    console.log('');
-    for (const session of toRemove) {
-      const name = displayName(session);
-      try {
-        const actionProvider = getProviderForSession(session);
-        await actionProvider.remove(session.id);
-        console.log(`Removed ${name}`);
-      } catch (err) {
-        log.error({ err }, `Failed to remove ${name}`);
-        console.error(`Failed to remove ${name}: ${err}`);
-      }
-    }
-  });
+  .action(cleanAction);
 
 sessionsCommand.addCommand(cleanCommand);

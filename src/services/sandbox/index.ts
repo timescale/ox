@@ -218,3 +218,39 @@ export async function listAllSessions(): Promise<OxSession[]> {
 
   return sessions;
 }
+
+/**
+ * Resolve a session by name, container name, or ID.
+ * Returns the session and its provider, or null if not found.
+ */
+export async function resolveSession(
+  idOrName: string,
+): Promise<{ session: OxSession; provider: SandboxProvider } | null> {
+  const sessions = await listAllSessions();
+
+  // 1. Try matching by name
+  let session = sessions.find((s) => s.name === idOrName);
+
+  // 2. Fallback: match by containerName or ID
+  if (!session) {
+    session = sessions.find(
+      (s) => s.containerName === idOrName || s.id === idOrName,
+    );
+  }
+
+  // 3. Fallback: query each provider directly
+  if (!session) {
+    for (const providerType of ['docker', 'cloud'] as const) {
+      const p = getSandboxProvider(providerType);
+      const found = await p.get(idOrName);
+      if (found) {
+        session = found;
+        break;
+      }
+    }
+  }
+
+  if (!session) return null;
+
+  return { session, provider: getProviderForSession(session) };
+}
