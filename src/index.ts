@@ -8,6 +8,7 @@ import { authCommand } from './commands/auth';
 import {
   branchAction,
   branchCommand,
+  validateBranchOptions,
   withBranchOptions,
 } from './commands/branch';
 import { claudeCommand } from './commands/claude';
@@ -63,6 +64,9 @@ withBranchOptions(program)
       { options, prompt: resolved.prompt, promptSource: resolved.source },
       'Root ox command invoked',
     );
+
+    // Validate mutually exclusive flags before any routing
+    validateBranchOptions(options);
 
     if (resolved.prompt) {
       // Guard against accidentally running with an invalid command as prompt

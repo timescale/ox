@@ -31,18 +31,17 @@ interface BranchOptions {
   provider?: SandboxProviderType;
 }
 
-export async function branchAction(
-  prompt: string,
-  options: BranchOptions,
-): Promise<void> {
-  // Validate mutually exclusive options
+/**
+ * Validate mutually exclusive CLI options. Call this early — before any
+ * routing logic — so that invalid flag combinations are always caught.
+ */
+export function validateBranchOptions(options: BranchOptions): void {
   if (options.follow && options.interactive) {
     log.error('--follow and --interactive are mutually exclusive');
     console.error('Error: --follow and --interactive are mutually exclusive');
     process.exit(1);
   }
 
-  // --follow only works with async agent mode
   const effectiveAgentMode = options.agentMode ?? 'async';
   if (options.follow && effectiveAgentMode !== 'async') {
     log.error('--follow requires --agent-mode=async');
@@ -51,6 +50,16 @@ export async function branchAction(
     );
     process.exit(1);
   }
+}
+
+export async function branchAction(
+  prompt: string,
+  options: BranchOptions,
+): Promise<void> {
+  // Safety net — callers should validate early, but ensure it here too
+  validateBranchOptions(options);
+
+  const effectiveAgentMode = options.agentMode ?? 'async';
 
   const provider = options.provider
     ? getSandboxProvider(options.provider)
@@ -279,6 +288,9 @@ export const branchCommand = withBranchOptions(
     )
     .argument('[prompt]', 'Natural language description of the task'),
 ).action(async (prompt: string | undefined, options: BranchOptions) => {
+  // Validate mutually exclusive flags before any routing
+  validateBranchOptions(options);
+
   let resolved: Awaited<ReturnType<typeof resolvePromptInput>>;
   try {
     resolved = await resolvePromptInput(prompt);
