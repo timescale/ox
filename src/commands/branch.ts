@@ -46,7 +46,7 @@ export function validateBranchOptions(options: BranchOptions): void {
   if (options.follow && effectiveAgentMode !== 'async') {
     log.error('--follow requires --agent-mode=async');
     console.error(
-      'Error: --follow requires --agent-mode=async (interactive and plan agents need a terminal)',
+      'Error: --follow requires --agent-mode=async (interactive and plan agents need a full tui)',
     );
     process.exit(1);
   }
