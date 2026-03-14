@@ -223,10 +223,11 @@ export async function branchAction(
     const exitCode = session?.exitCode ?? 0;
     process.exit(exitCode);
   } else {
-    // Detached mode: print session ID to stdout only
+    // Detached mode: print session ID to stdout and exit immediately
     if (session?.id) {
       console.log(session.id);
     }
+    process.exit(0);
   }
 }
 
