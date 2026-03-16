@@ -5,8 +5,10 @@ import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
 import {
   buildOxLabels,
   computeDockerfileHash,
+  computeProjectSetupHash,
   formatCpuPercent,
   formatMemUsage,
+  getProjectSetupTag,
   resolveSandboxImage,
   toVolumeArgs,
 } from './docker';
@@ -155,6 +157,32 @@ describe('buildOxLabels', () => {
     });
     expect(labels['ox.resumed-from']).toBe('ox-old-session');
     expect(labels['ox.resume-image']).toBe('ox-resume:abc123');
+  });
+});
+
+describe('computeProjectSetupHash', () => {
+  test('produces 12-char hex string', () => {
+    const hash = computeProjectSetupHash('basehash1234', 'apt install python3');
+    expect(hash).toMatch(/^[a-f0-9]{12}$/);
+  });
+
+  test('changes when script changes', () => {
+    const h1 = computeProjectSetupHash('base123', 'script-a');
+    const h2 = computeProjectSetupHash('base123', 'script-b');
+    expect(h1).not.toBe(h2);
+  });
+
+  test('changes when base hash changes', () => {
+    const h1 = computeProjectSetupHash('base-a', 'same-script');
+    const h2 = computeProjectSetupHash('base-b', 'same-script');
+    expect(h1).not.toBe(h2);
+  });
+});
+
+describe('getProjectSetupTag', () => {
+  test('returns tag with -l- infix', () => {
+    const tag = getProjectSetupTag('ox-sandbox:md5-abc123def456', 'my-script');
+    expect(tag).toMatch(/^ox-sandbox:md5-abc123def456-l-[a-f0-9]{12}$/);
   });
 });
 

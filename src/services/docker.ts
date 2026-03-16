@@ -256,6 +256,32 @@ export function computeDockerfileHash(content: string): string {
   return hasher.digest('hex').slice(0, 12);
 }
 
+/**
+ * Compute a content hash for the project setup layer.
+ * Combines the base image hash and the setup script content so the
+ * layer rebuilds when either the base or the script changes.
+ */
+export function computeProjectSetupHash(
+  baseHash: string,
+  script: string,
+): string {
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(baseHash);
+  hasher.update(script);
+  return hasher.digest('hex').slice(0, 12);
+}
+
+/**
+ * Compute the project setup layer image tag.
+ * Format: <baseImage>-l-<setupHash>
+ */
+export function getProjectSetupTag(baseImage: string, script: string): string {
+  // Extract the base hash from the image tag (e.g. 'ox-sandbox:md5-abc123def456' -> 'abc123def456')
+  const baseHash = baseImage.split(':')[1]?.replace('md5-', '') ?? baseImage;
+  const setupHash = computeProjectSetupHash(baseHash, script);
+  return `${baseImage}-l-${setupHash}`;
+}
+
 // ============================================================================
 // Agent Install Scripts & Overlay Images
 // ============================================================================
