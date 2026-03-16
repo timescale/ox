@@ -418,21 +418,30 @@ export async function ensureAgentOverlay(
     return overlayTag;
   }
 
-  // Try to pull pre-built agent image from GHCR
+  // Try to pull pre-built agent image from GHCR.
+  // Only attempt this when the base image is the standard base (not a project
+  // setup layer), since GHCR won't have project-specific images.
   const ghcrAgentTag = getGhcrAgentTag(agent);
-  log.debug({ ghcrAgentTag, agent }, 'Trying to pull agent image from GHCR');
-  options?.onProgress?.({
-    type: 'pulling',
-    message: `Pulling ${agent} agent image`,
-  });
-  if (await tryPullImage(ghcrAgentTag)) {
-    // Tag the GHCR image with the local overlay tag for consistency
-    if (ghcrAgentTag !== overlayTag) {
-      await $`docker tag ${ghcrAgentTag} ${overlayTag}`.quiet().nothrow();
-      invalidateImageExistsCache(overlayTag);
+  if (overlayTag === ghcrAgentTag || baseImage === getGhcrBaseTag()) {
+    log.debug({ ghcrAgentTag, agent }, 'Trying to pull agent image from GHCR');
+    options?.onProgress?.({
+      type: 'pulling',
+      message: `Pulling ${agent} agent image`,
+    });
+    if (await tryPullImage(ghcrAgentTag)) {
+      // Tag the GHCR image with the local overlay tag for consistency
+      if (ghcrAgentTag !== overlayTag) {
+        await $`docker tag ${ghcrAgentTag} ${overlayTag}`.quiet().nothrow();
+        invalidateImageExistsCache(overlayTag);
+      }
+      log.info({ overlayTag, agent }, 'Agent overlay image pulled from GHCR');
+      return overlayTag;
     }
-    log.info({ overlayTag, agent }, 'Agent overlay image pulled from GHCR');
-    return overlayTag;
+  } else {
+    log.debug(
+      { overlayTag, ghcrAgentTag, agent },
+      'Skipping GHCR pull — base image includes project setup layer',
+    );
   }
 
   // Fall back to building locally
