@@ -8,6 +8,7 @@ import { log } from '../services/logger.ts';
 import type { OxSession } from '../services/sandbox';
 import { resolveSession } from '../services/sandbox';
 import { formatRelativeTime } from '../services/sessionDisplay.ts';
+import { printErr } from '../utils/shell.ts';
 import { cleanAction, getStatusDisplay, sessionsAction } from './sessions.tsx';
 
 // ============================================================================
@@ -71,7 +72,7 @@ const rmCommand = new Command('rm')
     const { session, provider } = resolved;
     try {
       await provider.remove(session.id);
-      console.error(`Removed session: ${session.name}`);
+      printErr(`Removed session: ${session.name}`);
       process.exit(0);
     } catch (err) {
       log.error({ err }, `Failed to remove session: ${session.name}`);
@@ -93,12 +94,12 @@ const stopCommand = new Command('stop')
     }
     const { session, provider } = resolved;
     if (session.status !== 'running') {
-      console.error(`Session ${session.name} is already ${session.status}.`);
+      printErr(`Session ${session.name} is already ${session.status}.`);
       process.exit(0);
     }
     try {
       await provider.stop(session.id);
-      console.error(`Stopped session: ${session.name}`);
+      printErr(`Stopped session: ${session.name}`);
       process.exit(0);
     } catch (err) {
       log.error({ err }, `Failed to stop session: ${session.name}`);

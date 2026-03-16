@@ -14,7 +14,7 @@ import { ensureOpencodeAuth } from '../services/opencode';
 import type { SandboxProviderType } from '../services/sandbox';
 import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
 import { resolvePromptInput } from '../services/stdinPrompt.ts';
-import { ensureGitignore } from '../utils/shell.ts';
+import { ensureGitignore, printErr } from '../utils/shell.ts';
 import { configAction } from './config';
 
 interface BranchOptions {
@@ -76,7 +76,7 @@ export async function branchAction(
     log.info(
       'Not in a git repository. Using mount mode with current directory.',
     );
-    console.error(
+    printErr(
       'Not in a git repository. Using mount mode with current directory.',
     );
     options.mount = true;
@@ -95,7 +95,7 @@ export async function branchAction(
   // Step 3: Read merged config for defaults, run config wizard if no project config exists
   if (!(await projectConfig.exists())) {
     log.info('No project config found. Running config wizard...');
-    console.error('No project config found. Running config wizard...\n');
+    printErr('No project config found. Running config wizard...\n');
     await configAction();
     // Verify project config was created
     if (!(await projectConfig.exists())) {
@@ -103,7 +103,7 @@ export async function branchAction(
       console.error('Config was cancelled or failed. Cannot continue.');
       process.exit(1);
     }
-    console.error(''); // blank line after config
+    printErr(''); // blank line after config
   }
 
   // Read merged config for effective values
@@ -115,48 +115,48 @@ export async function branchAction(
   const effectiveModel: string | undefined = options.model ?? config.model;
 
   // Step 4b: Ensure sandbox image (including agent overlay) is ready
-  console.error('Ensuring sandbox image...');
+  printErr('Ensuring sandbox image...');
   await provider.ensureImage({ agent: effectiveAgent });
 
   // Step 5: Get repo info (if in a git repo)
   if (isGitRepo) {
     log.debug({ repo: repoInfo.fullName }, 'Repository info resolved');
-    console.error('Getting repository info...');
-    console.error(`  Repository: ${repoInfo.fullName}`);
+    printErr('Getting repository info...');
+    printErr(`  Repository: ${repoInfo.fullName}`);
   }
 
   // Step 6: Generate branch name using configured agent and model
   log.debug('Generating branch name');
-  console.error('Generating branch name...');
+  printErr('Generating branch name...');
   const branchName = await generateBranchName({
     prompt,
     agent: effectiveAgent,
     model: effectiveModel,
-    onProgress: console.error,
+    onProgress: printErr,
   });
   log.debug({ branchName }, 'Branch name generated');
-  console.error(`  Branch name: ${branchName}`);
+  printErr(`  Branch name: ${branchName}`);
 
   // Step 7: Fork database (only if explicitly configured with a service ID)
   let forkResult: ForkResult | null = null;
   if (!options.dbFork) {
     log.debug('Skipping database fork (--no-db-fork)');
-    console.error('Skipping database fork (--no-db-fork)');
+    printErr('Skipping database fork (--no-db-fork)');
   } else if (!effectiveServiceId) {
     // Default is to skip fork unless a service ID is explicitly configured
     log.debug('Skipping database fork (no service ID configured)');
-    console.error('Skipping database fork (no service ID configured)');
+    printErr('Skipping database fork (no service ID configured)');
   } else {
     log.info('Forking database (this may take a few minutes)...');
-    console.error('Forking database (this may take a few minutes)...');
+    printErr('Forking database (this may take a few minutes)...');
     forkResult = await forkDatabase(branchName, effectiveServiceId);
     log.info({ name: forkResult.name }, 'Database fork created');
-    console.error(`  Database fork created: ${forkResult.name}`);
+    printErr(`  Database fork created: ${forkResult.name}`);
   }
 
   // Step 8: Ensure agent credentials are valid
   log.debug({ agent: effectiveAgent }, 'Checking agent credentials');
-  console.error(`Checking ${effectiveAgent} credentials...`);
+  printErr(`Checking ${effectiveAgent} credentials...`);
   let authValid: boolean;
   switch (effectiveAgent) {
     case 'claude':
@@ -194,7 +194,7 @@ export async function branchAction(
     { agent: effectiveAgent, model: effectiveModel, mountDir },
     'Starting agent container',
   );
-  console.error(
+  printErr(
     `Starting agent container (using ${effectiveAgent}${effectiveModel ? ` with ${effectiveModel}` : ''})${mountDir ? ' [mount mode]' : ''}...`,
   );
   const isInteractiveAgent =
@@ -238,7 +238,7 @@ export async function branchAction(
     const finalSession = await provider.get(session.id);
     const exitCode = finalSession?.exitCode ?? 0;
     log.info({ agent: effectiveAgent, exitCode }, 'Agent session ended');
-    console.error(`\n${effectiveAgent} session ended.`);
+    printErr(`\n${effectiveAgent} session ended.`);
     process.exit(exitCode);
   } else {
     // Detached mode: print session ID to stdout and exit immediately
