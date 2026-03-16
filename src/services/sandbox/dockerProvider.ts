@@ -2,7 +2,7 @@
 // Docker Sandbox Provider - Adapts existing Docker functions to SandboxProvider
 // ============================================================================
 
-import type { AgentType } from '../config.ts';
+import { type AgentType, readConfig } from '../config.ts';
 import {
   attachToContainer,
   type OxSession as DockerSession,
@@ -10,6 +10,7 @@ import {
   ensureDockerImage,
   ensureDockerImageForAgent,
   ensureDockerSandbox,
+  ensureProjectSetupLayer,
   getContainerLogs,
   getContainerStats,
   listOxSessions,
@@ -139,10 +140,21 @@ export class DockerSandboxProvider implements SandboxProvider {
         force: options?.force,
       });
     }
-    return ensureDockerImage({
+    const baseImage = await ensureDockerImage({
       onProgress: options?.onProgress,
       force: options?.force,
     });
+
+    // Chain through project setup layer if configured
+    const config = await readConfig();
+    if (config.projectSetupLayer) {
+      return ensureProjectSetupLayer(baseImage, config.projectSetupLayer, {
+        onProgress: options?.onProgress,
+        force: options?.force,
+      });
+    }
+
+    return baseImage;
   }
 
   async create(options: CreateSandboxOptions): Promise<OxSession> {

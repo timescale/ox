@@ -20,6 +20,7 @@ import {
   getProjectSetupTag,
   listOxSessions as listDockerContainers,
   listOxImages,
+  resolveSandboxImage,
 } from '../docker.ts';
 import { log } from '../logger.ts';
 import {
@@ -94,6 +95,8 @@ interface VolumeClassificationContext {
 
 interface ImageClassificationContext {
   currentDockerfileHash: string;
+  /** The tag of the current resolved base image (e.g. 'md5-{hash}' or a custom tag) */
+  currentBaseTag: string;
   currentGhcrTags: Set<string>;
   /** Full local overlay tags that are current (e.g. 'md5-{hash}-claude-2.1.71') */
   currentLocalOverlayTags: Set<string>;
@@ -359,7 +362,9 @@ export function classifyDockerImage(
     // Base images have tags like 'md5-{hash}' — current if hash matches.
     // Agent overlays have tags like 'md5-{hash}-{agent}-{version}' — current
     // only if both the base hash AND agent version match.
-    const isCurrentBase = image.tag === `md5-${ctx.currentDockerfileHash}`;
+    const isCurrentBase =
+      image.tag === ctx.currentBaseTag ||
+      image.tag === `md5-${ctx.currentDockerfileHash}`;
     const isCurrentOverlay = ctx.currentLocalOverlayTags.has(image.tag);
     const isCurrentSetup = ctx.currentSetupLayerTags.has(image.tag);
     return {
@@ -563,8 +568,13 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
   }
   log.debug({ imageCount: images.length }, 'Docker images fetched');
 
+  const config = await readConfig();
+  const resolved = await resolveSandboxImage(config);
+  const currentBaseImage = resolved.image;
+  // Extract the tag portion for hash matching in classifyDockerImage
+  const currentBaseTag = currentBaseImage.split(':')[1] ?? '';
+  // The dockerfile hash for GHCR tag comparison
   const currentDockerfileHash = computeDockerfileHash(BASE_DOCKERFILE);
-  const localBaseImage = `ox-sandbox:md5-${currentDockerfileHash}`;
 
   // Build the set of current GHCR tags (base + all agent variants)
   const agents = ['claude', 'opencode', 'codex'] as const;
@@ -577,7 +587,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
   // so that overlays with old agent versions are classified as 'old'.
   const currentLocalOverlayTags = new Set(
     agents.map((agent) => {
-      const fullTag = getAgentOverlayTag(localBaseImage, agent);
+      const fullTag = getAgentOverlayTag(currentBaseImage, agent);
       // getAgentOverlayTag returns 'ox-sandbox:md5-{hash}-{agent}-{ver}',
       // but the tag portion (after ':') is what we match against image.tag.
       return fullTag.split(':')[1] ?? fullTag;
@@ -587,11 +597,10 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
   // Build the set of current setup layer tags (if configured).
   // getProjectSetupTag always returns an ox-sandbox:md5-... local tag,
   // so we only need to compute for the local prefix.
-  const config = await readConfig();
   const currentSetupLayerTags = new Set<string>();
   if (config.projectSetupLayer) {
     const setupTag = getProjectSetupTag(
-      localBaseImage,
+      currentBaseImage,
       config.projectSetupLayer,
     );
     const tagPart = setupTag.split(':')[1] ?? setupTag;
@@ -618,6 +627,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     resources.push(
       classifyDockerImage(image, {
         currentDockerfileHash,
+        currentBaseTag,
         currentGhcrTags,
         currentLocalOverlayTags,
         currentSetupLayerTags,

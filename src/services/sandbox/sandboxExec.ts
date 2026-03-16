@@ -63,20 +63,52 @@ export async function sandboxExec(
   });
 
   // When streaming, tee stdout/stderr to the terminal in real-time
+  // and collect output for error reporting. This is a separate path
+  // because proc.output() cannot be called after streams are consumed.
   if (stream && proc.stdout && proc.stderr) {
+    const chunks: { out: Uint8Array[]; err: Uint8Array[] } = {
+      out: [],
+      err: [],
+    };
     const tee = async (
       reader: ReadableStream<Uint8Array>,
       dest: NodeJS.WriteStream,
+      buf: Uint8Array[],
     ) => {
       for await (const chunk of reader) {
         dest.write(chunk);
+        buf.push(chunk);
       }
     };
-    await Promise.all([
-      tee(proc.stdout, process.stderr),
-      tee(proc.stderr, process.stderr),
+    const [, , status] = await Promise.all([
+      tee(proc.stdout, process.stderr, chunks.out),
+      tee(proc.stderr, process.stderr, chunks.err),
       proc.status,
     ]);
+
+    if (!status.success) {
+      const decoder = new TextDecoder();
+      const stderr = decoder.decode(Buffer.concat(chunks.err)).trim();
+      const stdout = decoder.decode(Buffer.concat(chunks.out)).trim();
+      const logFields: Record<string, unknown> = {
+        command: effectiveCommand.slice(0, 200),
+        exitCode: status.code,
+        stderr,
+      };
+      if (label) {
+        logFields.step = label;
+        logFields.stdout = stdout;
+        log.error(logFields, 'Snapshot build step failed');
+        throw new Error(
+          `Sandbox command failed at "${label}" (exit ${status.code}): ${stderr.slice(0, 500)}`,
+        );
+      }
+      log.warn(logFields, 'Sandbox command failed');
+      throw new Error(
+        `Sandbox command failed (exit ${status.code}): ${stderr || effectiveCommand}`,
+      );
+    }
+    return '';
   }
 
   const result = await proc.output();

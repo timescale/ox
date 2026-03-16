@@ -1,15 +1,6 @@
 import { Command, Option } from 'commander';
-// Import the embedded base Dockerfile to compute its hash
-import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
-  type: 'text',
-};
 import type { AgentType } from '../services/config.ts';
-import {
-  computeDockerfileHash,
-  getAgentVersion,
-  getGhcrAgentTag,
-  getGhcrBaseTag,
-} from '../services/docker';
+import { getGhcrAgentTag, getGhcrBaseTag } from '../services/docker';
 import {
   getAgentSnapshotSlug,
   getBaseSnapshotSlug,
@@ -65,23 +56,32 @@ export const sandboxCommand = new Command('sandbox')
           const { readConfig } = await import('../services/config.ts');
           const config = await readConfig();
 
+          // Resolve the actual base image (respects buildSandboxFromDockerfile / sandboxBaseImage)
+          const {
+            resolveSandboxImage,
+            getProjectSetupTag: getSetupTag,
+            getAgentOverlayTag: getOverlayTag,
+          } = await import('../services/docker.ts');
+          const resolved = await resolveSandboxImage(config);
+          const resolvedBase = resolved.image;
+
           // Resolve the project setup hash if configured
-          let dockerSetupHash: string | undefined;
+          let dockerSetupTag: string | undefined;
           let cloudSetupHash: string | undefined;
           if (config.projectSetupLayer) {
-            const { computeProjectSetupHash } = await import(
+            const { computeProjectSetupHash: computeSetupHash } = await import(
               '../services/docker.ts'
             );
+            dockerSetupTag = getSetupTag(
+              resolvedBase,
+              config.projectSetupLayer,
+            );
+
             const { computeCloudBaseHash } = await import(
               '../services/sandbox/cloudBaseSteps.ts'
             );
-            const dockerBaseHash = computeDockerfileHash(BASE_DOCKERFILE);
-            dockerSetupHash = computeProjectSetupHash(
-              dockerBaseHash,
-              config.projectSetupLayer,
-            );
             const cloudBaseHash = computeCloudBaseHash();
-            cloudSetupHash = computeProjectSetupHash(
+            cloudSetupHash = computeSetupHash(
               cloudBaseHash,
               config.projectSetupLayer,
             );
@@ -108,8 +108,8 @@ export const sandboxCommand = new Command('sandbox')
                 ),
               );
             } else {
-              // --image is rejected above, so this is always the raw hash
-              console.log(dockerSetupHash);
+              // --image is rejected above, so this is always the full Docker tag
+              console.log(dockerSetupTag);
             }
             return;
           }
@@ -127,8 +127,6 @@ export const sandboxCommand = new Command('sandbox')
           }
 
           // Docker image tags
-          const hash = computeDockerfileHash(BASE_DOCKERFILE);
-
           if (options.image) {
             if (options.agent) {
               // GHCR tags don't include setup layer (it's project-specific,
@@ -139,15 +137,11 @@ export const sandboxCommand = new Command('sandbox')
             }
           } else {
             if (options.agent) {
-              const version = getAgentVersion(options.agent);
-              // When projectSetupLayer is configured, the agent overlay is
-              // built on top of the setup layer, so include it in the tag
-              const base = dockerSetupHash
-                ? `${hash}-l-${dockerSetupHash}`
-                : hash;
-              console.log(`${base}-${options.agent}-${version}`);
+              const effectiveBase = dockerSetupTag ?? resolvedBase;
+              const tag = getOverlayTag(effectiveBase, options.agent);
+              console.log(tag);
             } else {
-              console.log(hash);
+              console.log(resolvedBase);
             }
           }
         },

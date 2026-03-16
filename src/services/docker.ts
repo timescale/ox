@@ -453,10 +453,11 @@ export async function ensureAgentOverlay(
   }
 
   // Try to pull pre-built agent image from GHCR.
-  // Only attempt this when the base image is the standard base (not a project
-  // setup layer), since GHCR won't have project-specific images.
+  // Skip when the base image is a project setup layer (contains '-l-')
+  // since GHCR won't have project-specific agent overlays.
   const ghcrAgentTag = getGhcrAgentTag(agent);
-  if (overlayTag === ghcrAgentTag || baseImage === getGhcrBaseTag()) {
+  const isProjectSetupBase = baseImage.includes('-l-');
+  if (!isProjectSetupBase) {
     log.debug({ ghcrAgentTag, agent }, 'Trying to pull agent image from GHCR');
     options?.onProgress?.({
       type: 'pulling',
@@ -1086,7 +1087,7 @@ export async function ensureDockerImageForAgent(
   options: EnsureDockerImageOptions = {},
 ): Promise<string> {
   const existing = agentImageInFlight.get(agent);
-  if (!options.force && existing) return existing;
+  if (existing) return existing;
 
   const promise = (async () => {
     const baseImage = await ensureDockerImage(options);

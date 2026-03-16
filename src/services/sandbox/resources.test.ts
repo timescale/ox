@@ -593,6 +593,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
@@ -613,6 +614,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
@@ -631,6 +633,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
       currentSetupLayerTags: new Set(),
@@ -649,6 +652,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
       currentSetupLayerTags: new Set(),
@@ -667,6 +671,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
       currentSetupLayerTags: new Set(),
@@ -685,6 +690,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
@@ -703,6 +709,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set([
         'ghcr.io/timescale/ox/sandbox:abcdef123456',
         'ghcr.io/timescale/ox/sandbox:abcdef123456-claude-2.1.71',
@@ -724,6 +731,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
@@ -742,6 +750,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
@@ -761,6 +770,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
@@ -780,6 +790,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
@@ -800,6 +811,7 @@ describe('classifyDockerImage', () => {
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
@@ -825,6 +837,7 @@ describe('classifyDockerImage', () => {
 
     const ctx = {
       currentDockerfileHash: 'abcdef123456',
+      currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set<string>(),
       currentSetupLayerTags: new Set<string>(),
@@ -1367,6 +1380,7 @@ describe('classifyCloudVolume — project setup build volume', () => {
 describe('classifyDockerImage — project setup layer', () => {
   const baseCtx = {
     currentDockerfileHash: 'abc123def456',
+    currentBaseTag: 'md5-abc123def456',
     currentGhcrTags: new Set<string>(),
     currentLocalOverlayTags: new Set<string>(),
     currentSetupLayerTags: new Set(['md5-abc123def456-l-setup789012']),
