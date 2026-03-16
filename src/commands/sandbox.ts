@@ -27,47 +27,68 @@ export const sandboxCommand = new Command('sandbox')
       )
       .option('-i, --image', 'print the full GHCR image reference')
       .option('-c, --cloud', 'print cloud snapshot slug instead of Docker tag')
-      .option('-s, --setup', 'include project setup layer hash')
+      .option(
+        '-p, --project',
+        'show the project setup layer hash (requires projectSetupLayer config)',
+      )
       .action(
         async (options: {
           agent?: 'claude' | 'opencode' | 'codex';
           image?: boolean;
           cloud?: boolean;
-          setup?: boolean;
+          project?: boolean;
         }) => {
-          // Project setup layer hash
-          if (options.setup) {
-            const { readConfig } = await import('../services/config.ts');
-            const config = await readConfig();
+          const { readConfig } = await import('../services/config.ts');
+          const config = await readConfig();
+
+          // Resolve the project setup hash if configured
+          let dockerSetupHash: string | undefined;
+          let cloudSetupHash: string | undefined;
+          if (config.projectSetupLayer) {
+            const { computeProjectSetupHash } = await import(
+              '../services/docker.ts'
+            );
+            const { computeCloudBaseHash } = await import(
+              '../services/sandbox/cloudBaseSteps.ts'
+            );
+            const dockerBaseHash = computeDockerfileHash(BASE_DOCKERFILE);
+            dockerSetupHash = computeProjectSetupHash(
+              dockerBaseHash,
+              config.projectSetupLayer,
+            );
+            const cloudBaseHash = computeCloudBaseHash();
+            cloudSetupHash = computeProjectSetupHash(
+              cloudBaseHash,
+              config.projectSetupLayer,
+            );
+          }
+
+          // --project: show the project setup layer hash/slug
+          if (options.project) {
             if (!config.projectSetupLayer) {
               console.error('No projectSetupLayer configured');
               process.exit(1);
             }
 
             if (options.cloud) {
-              const { computeCloudBaseHash } = await import(
-                '../services/sandbox/cloudBaseSteps.ts'
-              );
               const { getProjectSetupSnapshotSlug } = await import(
                 '../services/sandbox/cloudSnapshot.ts'
               );
-              const baseHash = computeCloudBaseHash();
+              const { computeCloudBaseHash } = await import(
+                '../services/sandbox/cloudBaseSteps.ts'
+              );
               console.log(
-                getProjectSetupSnapshotSlug(baseHash, config.projectSetupLayer),
+                getProjectSetupSnapshotSlug(
+                  computeCloudBaseHash(),
+                  config.projectSetupLayer,
+                ),
               );
             } else {
               const hash = computeDockerfileHash(BASE_DOCKERFILE);
-              const { computeProjectSetupHash } = await import(
-                '../services/docker.ts'
-              );
-              const setupHash = computeProjectSetupHash(
-                hash,
-                config.projectSetupLayer,
-              );
               if (options.image) {
-                console.log(`ox-sandbox:md5-${hash}-l-${setupHash}`);
+                console.log(`ox-sandbox:md5-${hash}-l-${dockerSetupHash}`);
               } else {
-                console.log(setupHash);
+                console.log(dockerSetupHash);
               }
             }
             return;
@@ -76,18 +97,22 @@ export const sandboxCommand = new Command('sandbox')
           // Cloud snapshot slugs
           if (options.cloud) {
             if (options.agent) {
-              console.log(getAgentSnapshotSlug(options.agent));
+              // When projectSetupLayer is configured, the agent slug
+              // incorporates the setup hash (matching what's actually built)
+              console.log(getAgentSnapshotSlug(options.agent, cloudSetupHash));
             } else {
               console.log(getBaseSnapshotSlug());
             }
             return;
           }
 
-          // Docker image tags (existing behavior)
+          // Docker image tags
           const hash = computeDockerfileHash(BASE_DOCKERFILE);
 
           if (options.image) {
             if (options.agent) {
+              // GHCR tags don't include setup layer (it's project-specific,
+              // not published). Show the GHCR base agent tag.
               console.log(getGhcrAgentTag(options.agent));
             } else {
               console.log(getGhcrBaseTag());
@@ -95,7 +120,12 @@ export const sandboxCommand = new Command('sandbox')
           } else {
             if (options.agent) {
               const version = getAgentVersion(options.agent);
-              console.log(`${hash}-${options.agent}-${version}`);
+              // When projectSetupLayer is configured, the agent overlay is
+              // built on top of the setup layer, so include it in the tag
+              const base = dockerSetupHash
+                ? `${hash}-l-${dockerSetupHash}`
+                : hash;
+              console.log(`${base}-${options.agent}-${version}`);
             } else {
               console.log(hash);
             }
