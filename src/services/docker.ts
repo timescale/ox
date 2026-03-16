@@ -328,6 +328,67 @@ export function getAgentOverlayTag(
 }
 
 /**
+ * Ensure a project-specific setup layer image exists on top of the base image.
+ *
+ * Resolution:
+ * 1. Check if setup layer image exists locally → return if yes
+ * 2. Build locally via docker run + exec + commit
+ *
+ * The setup layer tag encodes the base hash and script content hash
+ * so that any change to either triggers a rebuild.
+ *
+ * @returns The setup layer image tag (to be used as base for agent overlay)
+ */
+export async function ensureProjectSetupLayer(
+  baseImage: string,
+  script: string,
+  options?: { onProgress?: (progress: ImageBuildProgress) => void },
+): Promise<string> {
+  const setupTag = getProjectSetupTag(baseImage, script);
+
+  // Check if setup layer already exists locally
+  if (await imageExists(setupTag)) {
+    log.debug('Project setup layer image already exists');
+    return setupTag;
+  }
+
+  // Build locally
+  log.info({ setupTag, baseImage }, 'Building project setup layer image');
+  options?.onProgress?.({
+    type: 'building',
+    message: 'Running project setup layer',
+  });
+
+  const containerName = `ox-setup-${nanoid(6).toLowerCase()}`;
+
+  try {
+    // 1. Start a temporary container from the base image
+    await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+
+    // 2. Write setup script into the container
+    await writeFileToContainer(containerName, '/tmp/project-setup.sh', script);
+
+    // 3. Execute setup script
+    await $`docker exec ${containerName} bash /tmp/project-setup.sh`.quiet();
+
+    // 4. Clean up temp files and commit
+    await $`docker exec ${containerName} rm -f /tmp/project-setup.sh`.quiet();
+    await $`docker commit ${containerName} ${setupTag}`.quiet();
+    invalidateImageExistsCache(setupTag);
+
+    log.info({ setupTag }, 'Project setup layer image built successfully');
+    return setupTag;
+  } catch (err) {
+    log.error({ err, setupTag }, 'Failed to build project setup layer');
+    throw new Error(
+      `Failed to build project setup layer: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    await $`docker rm -f ${containerName}`.quiet().nothrow();
+  }
+}
+
+/**
  * Ensure an agent-specific overlay image exists on top of the base image.
  *
  * Resolution order:
@@ -978,7 +1039,19 @@ export async function ensureDockerImageForAgent(
 
   const promise = (async () => {
     const baseImage = await ensureDockerImage(options);
-    return ensureAgentOverlay(baseImage, agent, options);
+
+    // If projectSetupLayer is configured, apply it on top of the base
+    const config = await readConfig();
+    let effectiveBase = baseImage;
+    if (config.projectSetupLayer) {
+      effectiveBase = await ensureProjectSetupLayer(
+        baseImage,
+        config.projectSetupLayer,
+        options,
+      );
+    }
+
+    return ensureAgentOverlay(effectiveBase, agent, options);
   })();
 
   agentImageInFlight.set(agent, promise);

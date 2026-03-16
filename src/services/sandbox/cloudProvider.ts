@@ -32,6 +32,7 @@ import { CloudConnectionPool } from './cloudConnectionPool.ts';
 import {
   ensureAgentCloudSnapshot,
   ensureCloudSnapshot,
+  ensureProjectSetupCloudSnapshot,
 } from './cloudSnapshot.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import { sandboxExec } from './sandboxExec.ts';
@@ -542,6 +543,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
 
     const region = await this.resolveRegion();
+    const config = await readConfig();
 
     const mapProgress = (p: {
       type: string;
@@ -581,19 +583,34 @@ export class CloudSandboxProvider implements SandboxProvider {
       onProgress: mapProgress,
     });
 
-    // 2. If agent specified, ensure agent overlay snapshot exists
+    // 2. If projectSetupLayer is configured, ensure setup layer snapshot
+    let effectiveBaseSlug = baseSlug;
+    let setupHash: string | undefined;
+    if (config.projectSetupLayer) {
+      effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
+        token,
+        region,
+        baseSnapshotSlug: baseSlug,
+        script: config.projectSetupLayer,
+        onProgress: mapProgress,
+      });
+      // Extract the setup hash for use in agent slug computation
+      setupHash = effectiveBaseSlug.replace('oxl-', '');
+    }
+
+    // 3. If agent specified, ensure agent overlay snapshot exists
     if (options?.agent) {
       const agentSlug = await ensureAgentCloudSnapshot({
         token,
         region,
         agent: options.agent,
-        baseSnapshotSlug: baseSlug,
+        baseSnapshotSlug: effectiveBaseSlug,
         onProgress: mapProgress,
       });
       return agentSlug;
     }
 
-    return baseSlug;
+    return effectiveBaseSlug;
   }
 
   // --------------------------------------------------------------------------

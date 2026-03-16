@@ -276,6 +276,179 @@ export async function ensureCloudSnapshot(options: {
 }
 
 /**
+ * Ensure a project-specific setup layer cloud snapshot exists.
+ *
+ * Boots a sandbox from the base snapshot, executes the project setup script,
+ * kills the sandbox, and snapshots the resulting volume.
+ *
+ * @returns The project setup snapshot slug (to be used as base for agent overlay)
+ */
+export async function ensureProjectSetupCloudSnapshot(options: {
+  token: string;
+  region: string;
+  baseSnapshotSlug: string;
+  script: string;
+  onProgress?: (progress: SnapshotBuildProgress) => void;
+}): Promise<string> {
+  const { token, region, baseSnapshotSlug, script, onProgress } = options;
+  const client = new DenoApiClient(token);
+
+  // Derive the base hash from the base snapshot slug (ox-base-{hash} -> {hash})
+  const baseHash = baseSnapshotSlug.replace('ox-base-', '');
+  const snapshotSlug = getProjectSetupSnapshotSlug(baseHash, script);
+
+  // 1. Check if setup snapshot already exists AND is bootable
+  onProgress?.({ type: 'checking' });
+  try {
+    const existing = await client.getSnapshot(snapshotSlug);
+    if (existing) {
+      const bootable = await isSnapshotBootable(token, snapshotSlug);
+      if (bootable) {
+        onProgress?.({ type: 'exists', snapshotSlug });
+        return snapshotSlug;
+      }
+      log.warn(
+        { snapshotSlug },
+        'Project setup snapshot exists but is not bootable — deleting and rebuilding',
+      );
+      try {
+        await client.deleteSnapshot(existing.id);
+      } catch (err) {
+        log.debug(
+          { err },
+          'Failed to delete non-bootable project setup snapshot',
+        );
+      }
+    }
+  } catch (err) {
+    log.debug({ err }, 'Failed to check project setup snapshot');
+  }
+
+  // 2. Create a bootable volume from the base snapshot
+  const buildVolumeSlug = denoSlug('oxlb');
+  onProgress?.({
+    type: 'creating-volume',
+    message: 'Creating volume for project setup layer',
+  });
+
+  const volume = await client.createVolume({
+    slug: buildVolumeSlug,
+    region,
+    capacity: '10GiB',
+    from: baseSnapshotSlug,
+  });
+
+  let sandbox: ResolvedSandbox | null = null;
+  let snapshotCreated = false;
+  let buildSandboxId: string | undefined;
+
+  try {
+    // 3. Boot sandbox from the base volume
+    onProgress?.({
+      type: 'booting-sandbox',
+      message: 'Booting sandbox for project setup',
+    });
+
+    sandbox = await client.createSandbox({
+      region: region as 'ord' | 'ams',
+      root: volume.slug,
+      timeout: '30m',
+      memory: '2GiB',
+    });
+    buildSandboxId = sandbox.resolvedId || sandbox.id;
+    log.debug(
+      { sandboxId: buildSandboxId },
+      'Project setup build sandbox created',
+    );
+
+    // 4. Execute the project setup script
+    onProgress?.({
+      type: 'installing',
+      message: 'Running project setup script',
+    });
+    await sandboxExec(
+      sandbox,
+      `cat > /tmp/project-setup.sh << 'SETUP_EOF'\n${script}\nSETUP_EOF\nbash /tmp/project-setup.sh`,
+      { label: 'Project setup' },
+    );
+
+    // Clean up temp files
+    await sandboxExec(sandbox, 'rm -f /tmp/project-setup.sh', {
+      label: 'Clean up project setup script',
+    });
+
+    // 5. Kill sandbox and wait for volume detachment
+    onProgress?.({
+      type: 'snapshotting',
+      message: 'Detaching volume',
+    });
+    log.debug({ sandboxId: buildSandboxId }, 'Stopping project setup sandbox');
+    try {
+      await sandbox.close();
+    } catch {
+      // ignore close errors
+    }
+    if (buildSandboxId) {
+      await client.killAndWaitForDetach(buildSandboxId);
+    }
+    sandbox = null;
+
+    // 6. Snapshot the volume
+    onProgress?.({
+      type: 'snapshotting',
+      message: 'Creating project setup snapshot',
+    });
+    try {
+      await client.snapshotVolumeWithRetry(volume.id, { slug: snapshotSlug });
+    } catch (err) {
+      log.error(
+        { err, volumeId: volume.id, snapshotSlug },
+        'Failed to snapshot project setup volume',
+      );
+      throw err;
+    }
+    snapshotCreated = true;
+
+    onProgress?.({ type: 'done', snapshotSlug });
+    return snapshotSlug;
+  } finally {
+    const needsCleanup = !snapshotCreated || sandbox !== null;
+    if (needsCleanup) {
+      onProgress?.({
+        type: 'cleaning-up',
+        message: 'Cleaning up project setup build resources',
+      });
+    }
+    if (sandbox) {
+      try {
+        await sandbox.close();
+      } catch {
+        // ignore close errors
+      }
+      if (buildSandboxId) {
+        try {
+          await client.killSandbox(buildSandboxId);
+        } catch (err) {
+          log.debug({ err }, 'Failed to kill project setup sandbox in cleanup');
+        }
+      }
+    }
+    if (!snapshotCreated) {
+      try {
+        await client.deleteVolume(volume.id);
+      } catch (err) {
+        log.debug({ err }, 'Failed to delete project setup build volume');
+      }
+    } else {
+      log.debug(
+        { volumeId: volume.id, slug: volume.slug },
+        'Leaving project setup build volume intact to avoid disrupting snapshot finalization',
+      );
+    }
+  }
+}
+
+/**
  * Ensure an agent-specific overlay cloud snapshot exists.
  *
  * Boots a sandbox from the base snapshot, installs the agent + tiger CLI,
