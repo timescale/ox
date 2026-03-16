@@ -2,12 +2,121 @@
 // Completion Command - Generate shell completions using @bomb.sh/tab
 // ============================================================================
 
-import t from '@bomb.sh/tab';
+import t, { type Complete } from '@bomb.sh/tab';
 import createTabFromCommander from '@bomb.sh/tab/commander';
 import { Command, type Command as CommandType } from 'commander';
+import type { OxSession } from '../services/sandbox/types.ts';
 
 type Shell = 'zsh' | 'bash' | 'fish' | 'powershell';
 const SHELLS: Shell[] = ['zsh', 'bash', 'fish', 'powershell'];
+
+// ============================================================================
+// Session name completion
+// ============================================================================
+
+/**
+ * Get session names synchronously for tab completion.
+ * Combines Docker containers (via docker ps) and cloud sessions (via SQLite).
+ * Must be synchronous — @bomb.sh/tab handlers don't support async.
+ */
+function getSessionCompletions(): { name: string; description: string }[] {
+  const sessions: { name: string; description: string }[] = [];
+
+  // Docker sessions: synchronous subprocess
+  try {
+    const result = Bun.spawnSync(
+      [
+        'docker',
+        'ps',
+        '-a',
+        '--filter',
+        'label=ox.managed=true',
+        '--format',
+        '{{.Label "ox.name"}}\t{{.Status}}\t{{.ID}}',
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    if (result.exitCode === 0) {
+      const lines = result.stdout.toString().trim().split('\n');
+      for (const line of lines) {
+        if (!line) continue;
+        const [name, status, id] = line.split('\t');
+        if (name) {
+          sessions.push({
+            name,
+            description: `${status ?? ''} (${id ?? ''})`.trim(),
+          });
+        }
+      }
+    }
+  } catch {
+    // Docker not available — skip
+  }
+
+  // Cloud sessions: synchronous SQLite read
+  try {
+    const { openSessionDb, listSessions } =
+      require('../services/sandbox/sessionDb.ts') as {
+        openSessionDb: () => import('bun:sqlite').Database;
+        listSessions: (
+          db: import('bun:sqlite').Database,
+          filter?: { provider?: string },
+        ) => OxSession[];
+      };
+    const db = openSessionDb();
+    const cloudSessions = listSessions(db, { provider: 'cloud' });
+    for (const s of cloudSessions) {
+      // Avoid duplicates if name already added from Docker
+      if (!sessions.some((existing) => existing.name === s.name)) {
+        sessions.push({ name: s.name, description: `${s.status} (cloud)` });
+      }
+    }
+  } catch {
+    // Session DB not available — skip
+  }
+
+  return sessions;
+}
+
+/**
+ * Argument handler that provides session name completions.
+ */
+function completeSessionId(complete: Complete): void {
+  for (const s of getSessionCompletions()) {
+    complete(s.name, s.description);
+  }
+}
+
+/**
+ * Register argument completions for commands that take a session ID.
+ */
+function registerSessionCompletions(): void {
+  // Commands under "session" that take a session <id> argument
+  const sessionSubcommands = [
+    'session rm',
+    'session stop',
+    'session attach',
+    'session logs',
+    'session info',
+  ];
+
+  for (const path of sessionSubcommands) {
+    const cmd = t.commands.get(path);
+    if (cmd) {
+      cmd.argument('id', completeSessionId);
+    }
+  }
+
+  // Also handle the standalone "resume" command
+  const resumeCmd = t.commands.get('resume');
+  if (resumeCmd) {
+    resumeCmd.argument('session', completeSessionId);
+  }
+}
+
+// ============================================================================
+// Completion handler
+// ============================================================================
 
 /**
  * Handle completion requests before commander parses args.
@@ -23,6 +132,9 @@ export function handleCompletionRequest(program: CommandType): boolean {
 
   // Initialize tab with commander program structure
   createTabFromCommander(program);
+
+  // Register dynamic argument completions
+  registerSessionCompletions();
 
   const shell = process.argv[3];
   if (shell === '--') {
