@@ -38,6 +38,15 @@ export const sandboxCommand = new Command('sandbox')
           cloud?: boolean;
           project?: boolean;
         }) => {
+          // Validate flag combinations
+          if (options.project && options.agent) {
+            console.error(
+              'Error: --project and --agent cannot be used together.\n' +
+                'Use --project to show the project setup layer hash, or --agent to show the agent overlay tag.',
+            );
+            process.exit(1);
+          }
+
           const { readConfig } = await import('../services/config.ts');
           const config = await readConfig();
 
