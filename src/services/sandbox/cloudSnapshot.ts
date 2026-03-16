@@ -3,7 +3,11 @@
 // ============================================================================
 
 import type { AgentType } from '../config.ts';
-import { getAgentInstallScript, getAgentVersion } from '../docker.ts';
+import {
+  computeProjectSetupHash,
+  getAgentInstallScript,
+  getAgentVersion,
+} from '../docker.ts';
 import { log } from '../logger.ts';
 import { CLOUD_BASE_STEPS, computeCloudBaseHash } from './cloudBaseSteps.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
@@ -28,12 +32,33 @@ export function getBaseSnapshotSlug(): string {
 }
 
 /**
- * Get the deterministic snapshot slug for an agent overlay.
- * Encodes the base version, agent name, and agent version.
+ * Get the deterministic snapshot slug for a project setup layer.
+ * Encodes the base hash and setup script content.
  * Constrained to 32 characters (Deno slug limit).
  */
-export function getAgentSnapshotSlug(agent: AgentType): string {
-  const hash = computeCloudBaseHash().slice(0, 6);
+export function getProjectSetupSnapshotSlug(
+  baseHash: string,
+  script: string,
+): string {
+  const setupHash = computeProjectSetupHash(baseHash, script);
+  return `oxl-${setupHash}`.slice(0, 32).replace(/-+$/, '');
+}
+
+/**
+ * Get the deterministic snapshot slug for an agent overlay.
+ * Encodes the effective base version (setup layer or base), agent name, and agent version.
+ * Constrained to 32 characters (Deno slug limit).
+ *
+ * @param agent - The agent type
+ * @param setupHash - If a project setup layer is active, the setup hash to use
+ *   instead of the base hash. This ensures the agent overlay rebuilds when
+ *   the setup layer changes.
+ */
+export function getAgentSnapshotSlug(
+  agent: AgentType,
+  setupHash?: string,
+): string {
+  const hash = (setupHash ?? computeCloudBaseHash()).slice(0, 6);
   const agentVer = getAgentVersion(agent)
     .replace(/[^a-z0-9-]/g, '-')
     .slice(0, 6);

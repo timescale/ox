@@ -4,7 +4,11 @@
 
 import { describe, expect, test } from 'bun:test';
 import { CLOUD_BASE_STEPS, computeCloudBaseHash } from './cloudBaseSteps.ts';
-import { getAgentSnapshotSlug, getBaseSnapshotSlug } from './cloudSnapshot.ts';
+import {
+  getAgentSnapshotSlug,
+  getBaseSnapshotSlug,
+  getProjectSetupSnapshotSlug,
+} from './cloudSnapshot.ts';
 
 // ============================================================================
 // computeCloudBaseHash
@@ -90,6 +94,36 @@ describe('getBaseSnapshotSlug', () => {
 });
 
 // ============================================================================
+// getProjectSetupSnapshotSlug
+// ============================================================================
+
+describe('getProjectSetupSnapshotSlug', () => {
+  test('starts with oxl- prefix', () => {
+    const slug = getProjectSetupSnapshotSlug('basehash1234', 'my script');
+    expect(slug.startsWith('oxl-')).toBe(true);
+  });
+
+  test('is at most 32 chars', () => {
+    const slug = getProjectSetupSnapshotSlug(
+      'basehash1234',
+      'a very long script content',
+    );
+    expect(slug.length).toBeLessThanOrEqual(32);
+  });
+
+  test('changes when script changes', () => {
+    const s1 = getProjectSetupSnapshotSlug('base123', 'script-a');
+    const s2 = getProjectSetupSnapshotSlug('base123', 'script-b');
+    expect(s1).not.toBe(s2);
+  });
+
+  test('does not end with hyphen', () => {
+    const slug = getProjectSetupSnapshotSlug('base123', 'test');
+    expect(slug.endsWith('-')).toBe(false);
+  });
+});
+
+// ============================================================================
 // getAgentSnapshotSlug
 // ============================================================================
 
@@ -130,5 +164,19 @@ describe('getAgentSnapshotSlug', () => {
     const slugs = agents.map((a) => getAgentSnapshotSlug(a));
     const unique = new Set(slugs);
     expect(unique.size).toBe(agents.length);
+  });
+
+  test('uses setupHash when provided', () => {
+    const slug1 = getAgentSnapshotSlug('claude');
+    const slug2 = getAgentSnapshotSlug('claude', 'custom-setup-hash');
+    expect(slug1).not.toBe(slug2);
+  });
+
+  test('is at most 32 chars with setupHash', () => {
+    const slug = getAgentSnapshotSlug(
+      'claude',
+      'a-very-long-setup-hash-string',
+    );
+    expect(slug.length).toBeLessThanOrEqual(32);
   });
 });

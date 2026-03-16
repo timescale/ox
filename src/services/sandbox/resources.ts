@@ -435,7 +435,7 @@ async function discoverCloudResources(
   const client = new DenoApiClient(token);
   const currentBaseSlug = getBaseSnapshotSlug();
   const AGENTS: AgentType[] = ['claude', 'opencode', 'codex'];
-  const currentAgentSlugs = new Set(AGENTS.map(getAgentSnapshotSlug));
+  const currentAgentSlugs = new Set(AGENTS.map((a) => getAgentSnapshotSlug(a)));
 
   const [volumes, snapshots] = await Promise.all([
     client.listVolumes(),
