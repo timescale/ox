@@ -209,6 +209,32 @@ const infoCommand = new Command('info')
     process.exit(0);
   });
 
+const urlsCommand = new Command('urls')
+  .alias('url')
+  .description('Print proxied URLs for a session')
+  .argument('<id>', 'Session name or ID')
+  .action(async (id: string) => {
+    const resolved = await resolveSession(id);
+    if (!resolved) {
+      console.error(`Error: session not found: ${id}`);
+      process.exit(1);
+    }
+    const { session } = resolved;
+
+    if (!session.portUrls || session.portUrls.length === 0) {
+      printErr('No port URLs configured for this session.');
+      process.exit(0);
+    }
+
+    for (const pu of session.portUrls) {
+      console.log(pu.url);
+      if (pu.externalUrl) {
+        console.log(pu.externalUrl);
+      }
+    }
+    process.exit(0);
+  });
+
 const sessionCleanCommand = new Command('clean')
   .description('Remove stopped ox containers')
   .option('-a, --all', 'Remove all containers (including running)')
@@ -228,4 +254,5 @@ export const sessionCommand = new Command('session')
   .addCommand(psCommand)
   .addCommand(logsCommand)
   .addCommand(infoCommand)
+  .addCommand(urlsCommand)
   .addCommand(sessionCleanCommand);

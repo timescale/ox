@@ -98,6 +98,7 @@ function registerSessionCompletions(): void {
     'session attach',
     'session logs',
     'session info',
+    'session urls',
   ];
 
   for (const path of sessionSubcommands) {
