@@ -115,6 +115,94 @@ function registerSessionCompletions(): void {
 }
 
 // ============================================================================
+// Alias registration
+// ============================================================================
+
+/**
+ * Copy a tab command's options and arguments to a new alias command.
+ */
+function mirrorTabCommand(
+  sourcePath: string,
+  aliasPath: string,
+  description: string,
+): void {
+  if (t.commands.get(aliasPath)) return; // Already registered
+  const source = t.commands.get(sourcePath);
+  if (!source) return;
+
+  const alias = t.command(aliasPath, description);
+  for (const [, opt] of source.options) {
+    alias.option(opt.value, opt.description, opt.alias);
+  }
+  for (const [argName, arg] of source.arguments) {
+    alias.argument(argName, arg.handler, arg.variadic);
+  }
+}
+
+/**
+ * Walk the commander tree and register aliases with the tab library.
+ * The @bomb.sh/tab commander adapter only registers primary command names,
+ * so aliases like "container" for "session" are missing. This function
+ * registers each alias as a mirror of its primary command, and recursively
+ * handles subcommands so that e.g. "container rm" mirrors "session rm".
+ */
+function registerCommandAliases(
+  cmd: CommandType,
+  primaryPrefix: string,
+  aliasPrefix: string,
+): void {
+  for (const sub of cmd.commands) {
+    const name = sub.name();
+    const primaryPath = primaryPrefix ? `${primaryPrefix} ${name}` : name;
+    const aliasPath = aliasPrefix ? `${aliasPrefix} ${name}` : name;
+
+    // Mirror this subcommand under the alias prefix
+    if (aliasPath !== primaryPath) {
+      mirrorTabCommand(primaryPath, aliasPath, sub.description() || '');
+    }
+
+    // Also mirror any aliases of this subcommand under the alias prefix
+    for (const subAlias of sub.aliases()) {
+      const subAliasPath = aliasPrefix
+        ? `${aliasPrefix} ${subAlias}`
+        : subAlias;
+      mirrorTabCommand(primaryPath, subAliasPath, sub.description() || '');
+    }
+
+    // Also mirror subcommand aliases under the primary prefix
+    for (const subAlias of sub.aliases()) {
+      const subAliasPath = primaryPrefix
+        ? `${primaryPrefix} ${subAlias}`
+        : subAlias;
+      mirrorTabCommand(primaryPath, subAliasPath, sub.description() || '');
+    }
+
+    // Recurse: register aliases of deeper subcommands under this alias prefix
+    registerCommandAliases(sub, primaryPath, aliasPath);
+  }
+}
+
+/**
+ * Register all command aliases from the commander program tree.
+ */
+function registerAllAliases(program: CommandType): void {
+  for (const cmd of program.commands) {
+    const name = cmd.name();
+    const aliases = cmd.aliases();
+
+    // Register each top-level alias
+    for (const alias of aliases) {
+      mirrorTabCommand(name, alias, cmd.description() || '');
+      // Recurse: register subcommands under the alias
+      registerCommandAliases(cmd, name, alias);
+    }
+
+    // Also register subcommand aliases under the primary name
+    registerCommandAliases(cmd, name, name);
+  }
+}
+
+// ============================================================================
 // Completion handler
 // ============================================================================
 
@@ -133,8 +221,11 @@ export function handleCompletionRequest(program: CommandType): boolean {
   // Initialize tab with commander program structure
   createTabFromCommander(program);
 
-  // Register dynamic argument completions
+  // Register dynamic argument completions (before aliases, so aliases copy them)
   registerSessionCompletions();
+
+  // Register command aliases (must be after argument handlers are set up)
+  registerAllAliases(program);
 
   const shell = process.argv[3];
   if (shell === '--') {

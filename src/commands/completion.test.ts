@@ -181,12 +181,14 @@ describe('completion resolution', () => {
     expect(completions).not.toContain('shell');
   });
 
-  test('unique prefix completes to single subcommand', async () => {
+  test('unique prefix completes to matching commands and aliases', async () => {
     const { stdout, exitCode } = await runOx('complete', '--', 'up');
     expect(exitCode).toBe(0);
 
     const { completions } = parseCompletionOutput(stdout);
-    expect(completions).toEqual(['upgrade']);
+    expect(completions).toContain('upgrade');
+    expect(completions).toContain('update');
+    expect(completions).not.toContain('auth');
   });
 
   test('root flags complete when -- prefix is used', async () => {
