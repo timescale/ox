@@ -875,7 +875,7 @@ export async function sessionsAction(options: SessionsOptions): Promise<void> {
 
   if (options.output === 'json') {
     console.log(JSON.stringify(filteredSessions, null, 2));
-    return;
+    process.exit(0);
   }
 
   if (options.output === 'yaml') {
@@ -884,7 +884,7 @@ export async function sessionsAction(options: SessionsOptions): Promise<void> {
     } else {
       console.log(YAML.stringify(filteredSessions, null, 2));
     }
-    return;
+    process.exit(0);
   }
 
   // Table output
@@ -894,7 +894,7 @@ export async function sessionsAction(options: SessionsOptions): Promise<void> {
     } else {
       console.log('No running ox sessions. Use --all to see all sessions.');
     }
-    return;
+    process.exit(0);
   }
 
   console.log('');
@@ -911,6 +911,7 @@ export async function sessionsAction(options: SessionsOptions): Promise<void> {
       console.log('');
     }
   }
+  process.exit(0);
 }
 
 // ============================================================================
@@ -944,7 +945,7 @@ export async function cleanAction(options: {
 
   if (toRemove.length === 0) {
     console.log('No containers to remove.');
-    return;
+    process.exit(0);
   }
 
   const displayName = (s: OxSession) => s.containerName ?? s.id;
@@ -968,7 +969,7 @@ export async function cleanAction(options: {
 
     if (answer.toLowerCase() !== 'y') {
       console.log('Cancelled.');
-      return;
+      process.exit(0);
     }
   }
 
@@ -984,6 +985,7 @@ export async function cleanAction(options: {
       console.error(`Failed to remove ${name}: ${err}`);
     }
   }
+  process.exit(0);
 }
 
 const cleanCommand = new Command('clean')

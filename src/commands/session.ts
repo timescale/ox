@@ -72,6 +72,7 @@ const rmCommand = new Command('rm')
     try {
       await provider.remove(session.id);
       console.error(`Removed session: ${session.name}`);
+      process.exit(0);
     } catch (err) {
       log.error({ err }, `Failed to remove session: ${session.name}`);
       console.error(
@@ -93,11 +94,12 @@ const stopCommand = new Command('stop')
     const { session, provider } = resolved;
     if (session.status !== 'running') {
       console.error(`Session ${session.name} is already ${session.status}.`);
-      return;
+      process.exit(0);
     }
     try {
       await provider.stop(session.id);
       console.error(`Stopped session: ${session.name}`);
+      process.exit(0);
     } catch (err) {
       log.error({ err }, `Failed to stop session: ${session.name}`);
       console.error(
@@ -165,12 +167,14 @@ const logsCommand = new Command('logs')
       for await (const line of stream.lines) {
         console.log(line);
       }
+      process.exit(0);
     } else {
       const tail = options.tail ? Number.parseInt(options.tail, 10) : undefined;
       const logs = await provider.getLogs(session.id, tail);
       if (logs) {
         process.stdout.write(logs);
       }
+      process.exit(0);
     }
   });
 
@@ -201,6 +205,7 @@ const infoCommand = new Command('info')
         printSessionInfo(session);
         break;
     }
+    process.exit(0);
   });
 
 const sessionCleanCommand = new Command('clean')
