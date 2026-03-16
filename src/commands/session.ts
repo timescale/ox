@@ -5,7 +5,7 @@
 import { YAML } from 'bun';
 import { Command, Option } from 'commander';
 import { log } from '../services/logger.ts';
-import type { OxSession } from '../services/sandbox';
+import type { OxSession, SandboxProvider } from '../services/sandbox';
 import { resolveSession } from '../services/sandbox';
 import { formatRelativeTime } from '../services/sessionDisplay.ts';
 import { printErr } from '../utils/shell.ts';
@@ -14,6 +14,27 @@ import { cleanAction, getStatusDisplay, sessionsAction } from './sessions.tsx';
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Resolve a session by ID/name with CLI-friendly error handling.
+ * Handles both not-found (null) and ambiguous name collisions (thrown error).
+ */
+async function requireSession(
+  id: string,
+): Promise<{ session: OxSession; provider: SandboxProvider }> {
+  let resolved: { session: OxSession; provider: SandboxProvider } | null;
+  try {
+    resolved = await resolveSession(id);
+  } catch (err) {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+  if (!resolved) {
+    console.error(`Error: session not found: ${id}`);
+    process.exit(1);
+  }
+  return resolved;
+}
 
 function printSessionInfo(session: OxSession): void {
   const fields: [string, string | undefined][] = [
@@ -64,12 +85,7 @@ const rmCommand = new Command('rm')
   .description('Remove a session')
   .argument('<id>', 'Session name or ID')
   .action(async (id: string) => {
-    const resolved = await resolveSession(id);
-    if (!resolved) {
-      console.error(`Error: session not found: ${id}`);
-      process.exit(1);
-    }
-    const { session, provider } = resolved;
+    const { session, provider } = await requireSession(id);
     try {
       await provider.remove(session.id);
       printErr(`Removed session: ${session.name}`);
@@ -87,12 +103,7 @@ const stopCommand = new Command('stop')
   .description('Stop a running session')
   .argument('<id>', 'Session name or ID')
   .action(async (id: string) => {
-    const resolved = await resolveSession(id);
-    if (!resolved) {
-      console.error(`Error: session not found: ${id}`);
-      process.exit(1);
-    }
-    const { session, provider } = resolved;
+    const { session, provider } = await requireSession(id);
     if (session.status !== 'running') {
       printErr(`Session ${session.name} is already ${session.status}.`);
       process.exit(0);
@@ -114,12 +125,7 @@ const attachCommand = new Command('attach')
   .description('Attach to a running session')
   .argument('<id>', 'Session name or ID')
   .action(async (id: string) => {
-    const resolved = await resolveSession(id);
-    if (!resolved) {
-      console.error(`Error: session not found: ${id}`);
-      process.exit(1);
-    }
-    const { session, provider } = resolved;
+    const { session, provider } = await requireSession(id);
     if (session.status !== 'running') {
       console.error(
         `Error: cannot attach to session ${session.name} (status: ${session.status})`,
@@ -149,12 +155,7 @@ const logsCommand = new Command('logs')
   .option('-f, --follow', 'Follow log output until session exits')
   .option('--tail <n>', 'Number of lines to show from the end')
   .action(async (id: string, options: { follow?: boolean; tail?: string }) => {
-    const resolved = await resolveSession(id);
-    if (!resolved) {
-      console.error(`Error: session not found: ${id}`);
-      process.exit(1);
-    }
-    const { session, provider } = resolved;
+    const { session, provider } = await requireSession(id);
 
     if (options.follow) {
       const stream = provider.streamLogs(session.id);
@@ -197,12 +198,7 @@ const infoCommand = new Command('info')
       .default('table'),
   )
   .action(async (id: string, options: { output: string }) => {
-    const resolved = await resolveSession(id);
-    if (!resolved) {
-      console.error(`Error: session not found: ${id}`);
-      process.exit(1);
-    }
-    const { session } = resolved;
+    const { session } = await requireSession(id);
 
     switch (options.output) {
       case 'json':
@@ -223,12 +219,7 @@ const urlsCommand = new Command('urls')
   .description('Print proxied URLs for a session')
   .argument('<id>', 'Session name or ID')
   .action(async (id: string) => {
-    const resolved = await resolveSession(id);
-    if (!resolved) {
-      console.error(`Error: session not found: ${id}`);
-      process.exit(1);
-    }
-    const { session } = resolved;
+    const { session } = await requireSession(id);
 
     if (!session.portUrls || session.portUrls.length === 0) {
       printErr('No port URLs configured for this session.');

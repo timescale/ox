@@ -131,7 +131,10 @@ withBranchOptions(program)
     const taskOnlyFlags: [string, unknown][] = [
       ['--follow', options.follow],
       ['--agent-mode', options.agentMode],
-      ['--output', options.output !== 'id' && options.output],
+      [
+        '--output',
+        program.getOptionValueSource('output') !== 'default' && options.output,
+      ],
       ['--mount', options.mount],
     ];
     const setFlags = taskOnlyFlags.filter(([, v]) => v).map(([name]) => name);
