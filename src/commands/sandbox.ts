@@ -46,6 +46,20 @@ export const sandboxCommand = new Command('sandbox')
             );
             process.exit(1);
           }
+          if (options.project && options.image) {
+            console.error(
+              'Error: --project and --image cannot be used together.\n' +
+                'Project setup layers are built locally and not published to GHCR.',
+            );
+            process.exit(1);
+          }
+          if (options.image && options.cloud) {
+            console.error(
+              'Error: --image and --cloud cannot be used together.\n' +
+                'Use --image for GHCR Docker image references, or --cloud for Deno Cloud snapshot slugs.',
+            );
+            process.exit(1);
+          }
 
           const { readConfig } = await import('../services/config.ts');
           const config = await readConfig();
@@ -93,12 +107,8 @@ export const sandboxCommand = new Command('sandbox')
                 ),
               );
             } else {
-              const hash = computeDockerfileHash(BASE_DOCKERFILE);
-              if (options.image) {
-                console.log(`ox-sandbox:md5-${hash}-l-${dockerSetupHash}`);
-              } else {
-                console.log(dockerSetupHash);
-              }
+              // --image is rejected above, so this is always the raw hash
+              console.log(dockerSetupHash);
             }
             return;
           }
