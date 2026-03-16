@@ -461,11 +461,14 @@ export async function ensureAgentCloudSnapshot(options: {
   region: string;
   agent: AgentType;
   baseSnapshotSlug: string;
+  /** If a project setup layer is active, its hash. Ensures the agent overlay
+   *  slug changes when the setup layer changes, triggering a rebuild. */
+  setupHash?: string;
   onProgress?: (progress: SnapshotBuildProgress) => void;
 }): Promise<string> {
   const { token, region, agent, baseSnapshotSlug, onProgress } = options;
   const client = new DenoApiClient(token);
-  const snapshotSlug = getAgentSnapshotSlug(agent);
+  const snapshotSlug = getAgentSnapshotSlug(agent, options.setupHash);
 
   // 1. Check if agent overlay snapshot already exists AND is bootable
   onProgress?.({ type: 'checking' });
