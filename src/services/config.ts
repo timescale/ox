@@ -63,6 +63,15 @@ export interface OxConfig {
    */
   initScript?: string;
 
+  /**
+   * Bash script to run on top of the base sandbox image, then snapshot.
+   * Runs WITHOUT the project repo — use for system-level dependencies
+   * (apt packages, language runtimes, etc).
+   * The script content + base image hash are combined for cache keys;
+   * the image rebuilds automatically when either changes.
+   */
+  projectSetupLayer?: string;
+
   /** Sandbox provider: 'docker' (default) or 'cloud' (Deno Cloud) */
   sandboxProvider?: 'docker' | 'cloud';
 
@@ -117,6 +126,7 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   buildSandboxFromDockerfile: 'boolean|string',
   overlayMounts: 'string[]',
   initScript: 'string',
+  projectSetupLayer: 'string',
   sandboxProvider: 'string',
   cloudRegion: 'string',
   analytics: 'boolean',
