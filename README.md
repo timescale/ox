@@ -331,6 +331,13 @@ ox session logs -f <session>
 ox session logs --tail 50 <session>
 ```
 
+### Session URLs
+
+```bash
+# Print proxied URLs for a session (if appPort configured)
+ox session urls <session>
+```
+
 ### Stopping and Removing Sessions
 
 ```bash
@@ -395,6 +402,7 @@ ox resources clean
 | `ox session stop <id>` | Stop a running session |
 | `ox session rm <id>` | Remove a session (aliases: `remove`, `delete`) |
 | `ox session attach <id>` | Attach to a running session |
+| `ox session urls <id>` | Print proxied URLs for a session |
 | `ox session clean` | Remove stopped containers (`-a` for all) |
 | `ox sessions` | Alias for `ox session ps` |
 | `ox resume <session>` | Resume a stopped session |
@@ -411,7 +419,9 @@ ox resources clean
 | `ox logs` | View ox logs |
 | `ox upgrade` | Check for and install updates |
 | `ox completions [shell]` | Set up shell tab completions |
+| `ox feedback <message>` | Send product feedback to the ox team |
 | `ox claude [args...]` | Run Claude Code inside a sandbox |
+| `ox codex [args...]` | Run Codex inside a sandbox |
 | `ox opencode [args...]` | Run OpenCode inside a sandbox |
 | `ox gh [args...]` | Run the GitHub CLI inside a sandbox |
 | `ox colors` | Display theme color swatches |
