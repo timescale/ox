@@ -378,8 +378,9 @@ export async function ensureProjectSetupLayer(
     await writeFileToContainer(containerName, '/tmp/project-setup.sh', script);
 
     // 3. Execute setup script as root (so it can apt-get install, etc.)
-    if (options?.stream) {
-      // Stream stdout/stderr to the terminal so the user sees progress
+    //    Pipe stdout/stderr so we can surface output lines via onProgress
+    //    and optionally stream to the terminal.
+    {
       const proc = Bun.spawn(
         [
           'docker',
@@ -390,8 +391,54 @@ export async function ensureProjectSetupLayer(
           'bash',
           '/tmp/project-setup.sh',
         ],
-        { stdout: 'inherit', stderr: 'inherit' },
+        { stdout: 'pipe', stderr: 'pipe' },
       );
+
+      const processStream = async (
+        readable: ReadableStream<Uint8Array> | null,
+      ) => {
+        if (!readable) return;
+        const shouldStream = options?.stream;
+        const shouldReport = !shouldStream && options?.onProgress;
+        let partial = '';
+        for await (const chunk of readable) {
+          if (shouldStream) {
+            process.stderr.write(chunk);
+          }
+          if (shouldReport) {
+            partial += new TextDecoder().decode(chunk);
+            const lines = partial.split('\n');
+            partial = lines.pop() ?? '';
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed) {
+                options?.onProgress?.({
+                  type: 'building',
+                  message: 'Running project setup layer',
+                  detail: trimmed,
+                });
+              }
+            }
+          }
+        }
+        if (shouldReport) {
+          const trimmed = partial.trim();
+          if (trimmed) {
+            options?.onProgress?.({
+              type: 'building',
+              message: 'Running project setup layer',
+              detail: trimmed,
+            });
+          }
+        }
+      };
+
+      await Promise.all([
+        processStream(proc.stdout),
+        processStream(proc.stderr),
+        proc.exited,
+      ]);
+
       const exitCode = await proc.exited;
       if (exitCode !== 0) {
         throw Object.assign(new Error(`Failed with exit code ${exitCode}`), {
@@ -400,8 +447,6 @@ export async function ensureProjectSetupLayer(
           stdout: '',
         });
       }
-    } else {
-      await $`docker exec --user root ${containerName} bash /tmp/project-setup.sh`.quiet();
     }
 
     // 4. Clean up temp files and commit
@@ -938,7 +983,7 @@ export type ImageBuildProgress =
   | { type: 'exists' }
   | { type: 'pulling'; message: string; layers?: PullLayer[] }
   | { type: 'pulling-cache'; message: string; layers?: PullLayer[] }
-  | { type: 'building'; message: string }
+  | { type: 'building'; message: string; detail?: string }
   | { type: 'done' };
 
 export interface EnsureDockerImageOptions {

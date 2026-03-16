@@ -549,6 +549,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const mapProgress = (p: {
       type: string;
       message?: string;
+      detail?: string;
       snapshotSlug?: string;
     }) => {
       switch (p.type) {
@@ -566,6 +567,7 @@ export class CloudSandboxProvider implements SandboxProvider {
           options?.onProgress?.({
             type: 'building',
             message: p.message ?? '',
+            detail: p.detail,
           });
           break;
         case 'done':

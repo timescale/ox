@@ -121,7 +121,7 @@ export type SandboxBuildProgress =
   | { type: 'exists' }
   | { type: 'pulling'; message: string; layers?: PullLayer[] }
   | { type: 'pulling-cache'; message: string; layers?: PullLayer[] }
-  | { type: 'building'; message: string }
+  | { type: 'building'; message: string; detail?: string }
   | { type: 'done' };
 
 // The main provider interface

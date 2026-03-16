@@ -35,6 +35,8 @@ export interface ReadinessState {
   agentBuildLayers: PullLayer[];
   /** Current build step message (e.g. 'Running project setup layer') */
   agentBuildMessage: string | null;
+  /** Latest output line from the build (e.g. apt-get progress) */
+  agentBuildDetail: string | null;
 
   // Tier 3: Models
   models: CheckStatus;
@@ -93,6 +95,7 @@ const initialState: Omit<
   agentImageProvider: null,
   agentBuildLayers: [],
   agentBuildMessage: null,
+  agentBuildDetail: null,
   models: 'unknown',
   claudeAuth: 'unknown',
   opencodeAuth: 'unknown',
@@ -377,6 +380,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
       agentImageProvider: providerType,
       agentBuildLayers: [],
       agentBuildMessage: null,
+      agentBuildDetail: null,
     });
 
     // Fire-and-forget async build
@@ -387,7 +391,11 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
         );
         const provider = getSandboxProvider(providerType);
 
-        set({ sandboxAgentImage: 'building', agentBuildMessage: null });
+        set({
+          sandboxAgentImage: 'building',
+          agentBuildMessage: null,
+          agentBuildDetail: null,
+        });
 
         await provider.ensureImage({
           agent,
@@ -408,7 +416,12 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
               set({ agentBuildLayers: progress.layers ?? [] });
             }
             if (progress.type === 'building') {
-              set({ agentBuildMessage: progress.message });
+              set({
+                agentBuildMessage: progress.message,
+                ...(progress.detail != null
+                  ? { agentBuildDetail: progress.detail }
+                  : {}),
+              });
             }
           },
         });
@@ -423,6 +436,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
             sandboxAgentImage: 'ready',
             agentBuildLayers: [],
             agentBuildMessage: null,
+            agentBuildDetail: null,
           });
         }
       } catch (err) {
@@ -440,6 +454,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
             sandboxAgentImage: 'error',
             agentBuildLayers: [],
             agentBuildMessage: null,
+            agentBuildDetail: null,
             error: err instanceof Error ? err.message : String(err),
           });
         }

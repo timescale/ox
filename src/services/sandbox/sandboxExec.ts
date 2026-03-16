@@ -12,6 +12,8 @@ export interface SandboxExecOptions {
   capture?: boolean;
   /** Stream stdout/stderr to the terminal in real-time */
   stream?: boolean;
+  /** Called for each non-empty line of stdout/stderr output */
+  onLine?: (line: string) => void;
   label?: string;
   cwd?: string;
 }
@@ -37,7 +39,7 @@ export async function sandboxExec(
   command: string,
   options?: SandboxExecOptions,
 ): Promise<string> {
-  const { sudo, capture, stream, label, cwd } = options ?? {};
+  const { sudo, capture, stream, onLine, label, cwd } = options ?? {};
 
   // Optionally prefix with cd
   let effectiveCommand = cwd ? `cd ${shellEscape(cwd)} && ${command}` : command;
@@ -62,27 +64,47 @@ export async function sandboxExec(
     env: { BASH_ENV: '$HOME/.bashrc' },
   });
 
-  // When streaming, tee stdout/stderr to the terminal in real-time
-  // and collect output for error reporting. This is a separate path
-  // because proc.output() cannot be called after streams are consumed.
-  if (stream && proc.stdout && proc.stderr) {
+  // When streaming or onLine is set, consume streams manually.
+  // This is a separate path because proc.output() cannot be called
+  // after streams are consumed.
+  if ((stream || onLine) && proc.stdout && proc.stderr) {
     const chunks: { out: Uint8Array[]; err: Uint8Array[] } = {
       out: [],
       err: [],
     };
-    const tee = async (
+    const processStream = async (
       reader: ReadableStream<Uint8Array>,
-      dest: NodeJS.WriteStream,
       buf: Uint8Array[],
     ) => {
+      let partial = '';
       for await (const chunk of reader) {
-        dest.write(chunk);
+        if (stream) {
+          process.stderr.write(chunk);
+        }
         buf.push(chunk);
+        if (onLine) {
+          partial += new TextDecoder().decode(chunk);
+          const lines = partial.split('\n');
+          partial = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) {
+              onLine(trimmed);
+            }
+          }
+        }
+      }
+      // Flush any remaining partial line
+      if (onLine) {
+        const trimmed = partial.trim();
+        if (trimmed) {
+          onLine(trimmed);
+        }
       }
     };
     const [, , status] = await Promise.all([
-      tee(proc.stdout, process.stderr, chunks.out),
-      tee(proc.stderr, process.stderr, chunks.err),
+      processStream(proc.stdout, chunks.out),
+      processStream(proc.stderr, chunks.err),
       proc.status,
     ]);
 

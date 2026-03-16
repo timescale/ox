@@ -388,11 +388,12 @@ function SessionsApp({
           ? 'Hint: press ctrl+\\ to detach an interactive session'
           : undefined;
       const layers = view.type === 'starting' ? view.layers : undefined;
+      const detail = view.type === 'starting' ? view.detail : undefined;
       content =
         layers && layers.length > 0 ? (
           <PullProgress message={view.step} layers={layers} />
         ) : (
-          <StartingScreen step={view.step} hint={hint} />
+          <StartingScreen step={view.step} subDetail={detail} hint={hint} />
         );
       break;
     }

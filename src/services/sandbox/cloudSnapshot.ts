@@ -403,7 +403,22 @@ export async function ensureProjectSetupCloudSnapshot(options: {
     await sandboxExec(
       sandbox,
       `cat > /tmp/project-setup.sh << 'SETUP_EOF'\n${script}\nSETUP_EOF\nbash /tmp/project-setup.sh`,
-      { label: 'Project setup', sudo: true, stream: options.stream },
+      {
+        label: 'Project setup',
+        sudo: true,
+        stream: options.stream,
+        // Only send line-by-line progress when not streaming to terminal
+        // (streaming already shows raw output)
+        onLine: options.stream
+          ? undefined
+          : (line) => {
+              onProgress?.({
+                type: 'installing',
+                message: 'Running project setup script',
+                detail: line,
+              });
+            },
+      },
     );
 
     // Clean up temp files

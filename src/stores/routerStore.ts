@@ -41,6 +41,8 @@ export type SessionsView =
       agent: AgentType;
       model: string;
       step: string;
+      /** Latest output line from the current build step */
+      detail?: string;
       mode: AgentMode;
       layers?: PullLayer[];
     }

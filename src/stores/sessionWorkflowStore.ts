@@ -276,7 +276,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             } else if (progress.type === 'building') {
               updateView((v) =>
                 v.type === 'starting'
-                  ? { ...v, step: progress.message, layers: undefined }
+                  ? {
+                      ...v,
+                      step: progress.message,
+                      detail: progress.detail,
+                      layers: undefined,
+                    }
                   : v,
               );
             }
