@@ -864,7 +864,8 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         goToDetail(state.initialSession);
       } else if (initialView === 'starting' && initialPrompt != null) {
         const agent = state.initialAgent ?? cfg.agent ?? 'opencode';
-        const model = state.initialModel ?? cfg.model ?? '';
+        const model =
+          state.initialModel ?? cfg.agentModels?.[agent] ?? cfg.model ?? '';
 
         // Non-interactive path: wait for readiness before starting session
         goToStarting({

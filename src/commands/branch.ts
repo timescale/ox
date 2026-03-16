@@ -124,7 +124,8 @@ export async function branchAction(
   // Step 4: Determine effective values from options or config
   const effectiveServiceId = options.serviceId ?? config.tigerServiceId;
   const effectiveAgent: AgentType = options.agent ?? config.agent ?? 'opencode';
-  const effectiveModel: string | undefined = options.model ?? config.model;
+  const effectiveModel: string | undefined =
+    options.model ?? config.agentModels?.[effectiveAgent] ?? config.model;
 
   // Step 4b: Ensure sandbox image (including agent overlay) is ready
   printErr('Ensuring sandbox image...');
