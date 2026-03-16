@@ -33,6 +33,8 @@ export interface ReadinessState {
   agentImageAgent: AgentType | null;
   agentImageProvider: SandboxProviderType | null;
   agentBuildLayers: PullLayer[];
+  /** Current build step message (e.g. 'Running project setup layer') */
+  agentBuildMessage: string | null;
 
   // Tier 3: Models
   models: CheckStatus;
@@ -90,6 +92,7 @@ const initialState: Omit<
   agentImageAgent: null,
   agentImageProvider: null,
   agentBuildLayers: [],
+  agentBuildMessage: null,
   models: 'unknown',
   claudeAuth: 'unknown',
   opencodeAuth: 'unknown',
@@ -373,6 +376,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
       agentImageAgent: agent,
       agentImageProvider: providerType,
       agentBuildLayers: [],
+      agentBuildMessage: null,
     });
 
     // Fire-and-forget async build
@@ -383,7 +387,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
         );
         const provider = getSandboxProvider(providerType);
 
-        set({ sandboxAgentImage: 'building' });
+        set({ sandboxAgentImage: 'building', agentBuildMessage: null });
 
         await provider.ensureImage({
           agent,
@@ -403,6 +407,9 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
             ) {
               set({ agentBuildLayers: progress.layers ?? [] });
             }
+            if (progress.type === 'building') {
+              set({ agentBuildMessage: progress.message });
+            }
           },
         });
 
@@ -412,7 +419,11 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
           current.agentImageAgent === agent &&
           current.agentImageProvider === providerType
         ) {
-          set({ sandboxAgentImage: 'ready', agentBuildLayers: [] });
+          set({
+            sandboxAgentImage: 'ready',
+            agentBuildLayers: [],
+            agentBuildMessage: null,
+          });
         }
       } catch (err) {
         // Only set error if this is still the active build
@@ -428,6 +439,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
           set({
             sandboxAgentImage: 'error',
             agentBuildLayers: [],
+            agentBuildMessage: null,
             error: err instanceof Error ? err.message : String(err),
           });
         }

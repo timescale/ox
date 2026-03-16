@@ -20,6 +20,7 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
   const basePullLayers = useReadinessStore((s) => s.basePullLayers);
   const sandboxAgentImage = useReadinessStore((s) => s.sandboxAgentImage);
   const agentImageAgent = useReadinessStore((s) => s.agentImageAgent);
+  const agentBuildMessage = useReadinessStore((s) => s.agentBuildMessage);
   const claudeAuth = useReadinessStore((s) => s.claudeAuth);
   const opencodeAuth = useReadinessStore((s) => s.opencodeAuth);
   const codexAuth = useReadinessStore((s) => s.codexAuth);
@@ -78,9 +79,10 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
   // Agent image building
   if (sandboxAgentImage === 'building') {
     const agentName = agentImageAgent ?? 'agent';
+    const message = agentBuildMessage ?? `Building ${agentName} agent image`;
     return (
       <text fg={theme.warning}>
-        {'\u27F3 '} Building {agentName} agent image
+        {'\u27F3 '} {message}
         <Dots />
       </text>
     );
