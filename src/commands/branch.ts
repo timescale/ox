@@ -2,6 +2,7 @@
 // Branch Command - Creates feature branch with isolated DB fork and agent
 // ============================================================================
 
+import { YAML } from 'bun';
 import { Command, Option } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { ensureClaudeAuth } from '../services/claude';
@@ -25,6 +26,7 @@ interface BranchOptions {
   follow: boolean;
   interactive: boolean;
   agentMode?: 'async' | 'interactive' | 'plan';
+  output: 'id' | 'json' | 'yaml';
   /** Mount local directory instead of git clone. True = cwd, string = specific path */
   mount?: string | true;
   /** Sandbox provider override (docker or cloud) */
@@ -49,6 +51,17 @@ export function validateBranchOptions(options: BranchOptions): void {
       'Error: --follow requires --agent-mode=async (interactive and plan agents need a full tui)',
     );
     process.exit(1);
+  }
+
+  if (options.output && options.output !== 'id') {
+    if (options.follow) {
+      console.error('Error: --output and --follow are mutually exclusive');
+      process.exit(1);
+    }
+    if (options.interactive) {
+      console.error('Error: --output and --interactive are mutually exclusive');
+      process.exit(1);
+    }
   }
 }
 
@@ -241,9 +254,19 @@ export async function branchAction(
     printErr(`\n${effectiveAgent} session ended.`);
     process.exit(exitCode);
   } else {
-    // Detached mode: print session ID to stdout and exit immediately
-    if (session?.id) {
-      console.log(session.id);
+    // Detached mode: print session info to stdout and exit immediately
+    switch (options.output) {
+      case 'json':
+        console.log(JSON.stringify(session, null, 2));
+        break;
+      case 'yaml':
+        console.log(YAML.stringify(session, null, 2));
+        break;
+      default:
+        if (session?.id) {
+          console.log(session.id);
+        }
+        break;
     }
     process.exit(0);
   }
@@ -277,6 +300,14 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
         '-M, --agent-mode <mode>',
         'Agent mode: async (default), interactive, or plan',
       ).choices(['async', 'interactive', 'plan']),
+    )
+    .addOption(
+      new Option(
+        '-o, --output <format>',
+        'Output format for session info: id (default), json, yaml',
+      )
+        .choices(['id', 'json', 'yaml'])
+        .default('id'),
     )
     .option(
       '--mount [dir]',
