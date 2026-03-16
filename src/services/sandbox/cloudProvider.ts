@@ -585,7 +585,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // 2. If projectSetupLayer is configured, ensure setup layer snapshot
     let effectiveBaseSlug = baseSlug;
-    let setupHash: string | undefined;
+    let _setupHash: string | undefined;
     if (config.projectSetupLayer) {
       effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
         token,
@@ -595,7 +595,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         onProgress: mapProgress,
       });
       // Extract the setup hash for use in agent slug computation
-      setupHash = effectiveBaseSlug.replace('oxl-', '');
+      _setupHash = effectiveBaseSlug.replace('oxl-', '');
     }
 
     // 3. If agent specified, ensure agent overlay snapshot exists
