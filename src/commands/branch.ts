@@ -199,9 +199,6 @@ export async function branchAction(
   );
   const isInteractiveAgent =
     effectiveAgentMode === 'interactive' || effectiveAgentMode === 'plan';
-  // Follow mode: don't detach (we stream output)
-  // Default (detached): detach the container
-  const detach = !options.follow;
 
   const session = await provider.create({
     branchName,
@@ -210,7 +207,7 @@ export async function branchAction(
     repoInfo,
     agent: effectiveAgent,
     model: effectiveModel,
-    detach,
+    detach: true,
     interactive: isInteractiveAgent,
     envVars: forkResult?.envVars,
     mountDir,
@@ -225,11 +222,23 @@ export async function branchAction(
   });
 
   if (options.follow) {
-    // Follow mode: output was already streamed by provider.create() (detach=false)
-    log.info({ agent: effectiveAgent }, 'Agent session ended');
+    // Follow mode: stream container logs until the session exits
+    const stream = provider.streamLogs(session.id);
+
+    process.on('SIGINT', () => {
+      stream.stop();
+      process.exit(0);
+    });
+
+    for await (const line of stream.lines) {
+      console.log(line);
+    }
+
+    // Re-fetch session to get exit code after stream ends
+    const finalSession = await provider.get(session.id);
+    const exitCode = finalSession?.exitCode ?? 0;
+    log.info({ agent: effectiveAgent, exitCode }, 'Agent session ended');
     console.error(`\n${effectiveAgent} session ended.`);
-    // Exit with agent's exit code
-    const exitCode = session?.exitCode ?? 0;
     process.exit(exitCode);
   } else {
     // Detached mode: print session ID to stdout and exit immediately
