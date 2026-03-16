@@ -9,7 +9,7 @@
 import BASE_DOCKERFILE from '../../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
-import type { AgentType } from '../config.ts';
+import { type AgentType, readConfig } from '../config.ts';
 import { getDenoToken } from '../deno.ts';
 import {
   computeDockerfileHash,
@@ -17,11 +17,16 @@ import {
   getAgentOverlayTag,
   getGhcrAgentTag,
   getGhcrBaseTag,
+  getProjectSetupTag,
   listOxSessions as listDockerContainers,
   listOxImages,
 } from '../docker.ts';
 import { log } from '../logger.ts';
-import { getAgentSnapshotSlug, getBaseSnapshotSlug } from './cloudSnapshot.ts';
+import {
+  getAgentSnapshotSlug,
+  getBaseSnapshotSlug,
+  getProjectSetupSnapshotSlug,
+} from './cloudSnapshot.ts';
 import {
   DenoApiClient,
   type DenoSnapshot,
@@ -69,6 +74,8 @@ export interface SandboxResource {
 interface SnapshotClassificationContext {
   currentBaseSlug: string;
   currentAgentSlugs: Set<string>;
+  /** Slug of the current project setup snapshot, if configured */
+  currentSetupSlug: string | null;
   sessionsBySnapshotSlug: Map<string, OxSession>;
   deletedSessionsBySnapshotSlug: Map<string, OxSession>;
 }
@@ -90,6 +97,8 @@ interface ImageClassificationContext {
   currentGhcrTags: Set<string>;
   /** Full local overlay tags that are current (e.g. 'md5-{hash}-claude-2.1.71') */
   currentLocalOverlayTags: Set<string>;
+  /** Full local setup layer tags that are current (e.g. 'md5-{hash}-l-{setupHash}') */
+  currentSetupLayerTags: Set<string>;
   /** Container ID prefixes (12-char) for active containers */
   activeContainerIdPrefixes: Set<string>;
 }
@@ -99,10 +108,10 @@ interface ImageClassificationContext {
 // ============================================================================
 
 /** Known Ox snapshot slug prefixes. */
-const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'ox-', 'oxn-'];
+const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'oxl-', 'ox-', 'oxn-'];
 
 /** Known Ox volume slug prefixes. */
-const OX_VOLUME_PREFIXES = ['oxb-', 'oxa-', 'oxe-', 'oxs-', 'oxr-'];
+const OX_VOLUME_PREFIXES = ['oxb-', 'oxlb-', 'oxa-', 'oxe-', 'oxs-', 'oxr-'];
 
 /**
  * Classify a cloud snapshot as current/active/old/orphaned.
@@ -141,6 +150,15 @@ export function classifyCloudSnapshot(
       ...base,
       category: 'Base Snapshot',
       status: snapshot.slug === ctx.currentBaseSlug ? 'current' : 'old',
+    };
+  }
+
+  // Project setup layer snapshots (oxl-*)
+  if (snapshot.slug.startsWith('oxl-')) {
+    return {
+      ...base,
+      category: 'Project Setup Snapshot',
+      status: snapshot.slug === ctx.currentSetupSlug ? 'current' : 'old',
     };
   }
 
@@ -266,6 +284,15 @@ export function classifyCloudVolume(
     };
   }
 
+  // Project setup build volumes — status derived from child snapshots.
+  if (volume.slug.startsWith('oxlb-')) {
+    return {
+      ...base,
+      category: 'Project Setup Build Volume',
+      status: volumeStatusFromChildSnapshots(childSnapshots),
+    };
+  }
+
   // Shell volumes — always orphaned
   if (volume.slug.startsWith('oxe-')) {
     return {
@@ -334,10 +361,12 @@ export function classifyDockerImage(
     // only if both the base hash AND agent version match.
     const isCurrentBase = image.tag === `md5-${ctx.currentDockerfileHash}`;
     const isCurrentOverlay = ctx.currentLocalOverlayTags.has(image.tag);
+    const isCurrentSetup = ctx.currentSetupLayerTags.has(image.tag);
     return {
       ...base,
       category: 'Local Build',
-      status: isCurrentBase || isCurrentOverlay ? 'current' : 'old',
+      status:
+        isCurrentBase || isCurrentOverlay || isCurrentSetup ? 'current' : 'old',
     };
   }
 
@@ -437,6 +466,23 @@ async function discoverCloudResources(
   const AGENTS: AgentType[] = ['claude', 'opencode', 'codex'];
   const currentAgentSlugs = new Set(AGENTS.map((a) => getAgentSnapshotSlug(a)));
 
+  // Compute current setup slug (if projectSetupLayer is configured)
+  const config = await readConfig();
+  let currentSetupSlug: string | null = null;
+  if (config.projectSetupLayer) {
+    const baseHash = currentBaseSlug.replace('ox-base-', '');
+    currentSetupSlug = getProjectSetupSnapshotSlug(
+      baseHash,
+      config.projectSetupLayer,
+    );
+
+    // Agent overlays built on setup layer are also current
+    const setupHash = currentSetupSlug.replace('oxl-', '');
+    for (const agent of AGENTS) {
+      currentAgentSlugs.add(getAgentSnapshotSlug(agent, setupHash));
+    }
+  }
+
   const [volumes, snapshots] = await Promise.all([
     client.listVolumes(),
     client.listSnapshots(),
@@ -459,6 +505,7 @@ async function discoverCloudResources(
     const classified = classifyCloudSnapshot(snapshot, {
       currentBaseSlug,
       currentAgentSlugs,
+      currentSetupSlug,
       sessionsBySnapshotSlug: lookups.sessionsBySnapshotSlug,
       deletedSessionsBySnapshotSlug: lookups.deletedSessionsBySnapshotSlug,
     });
@@ -537,6 +584,26 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     }),
   );
 
+  // Build the set of current setup layer tags (if configured)
+  const config = await readConfig();
+  const currentSetupLayerTags = new Set<string>();
+  if (config.projectSetupLayer) {
+    const setupTag = getProjectSetupTag(
+      localBaseImage,
+      config.projectSetupLayer,
+    );
+    const tagPart = setupTag.split(':')[1] ?? setupTag;
+    currentSetupLayerTags.add(tagPart);
+
+    // Agent overlays built on top of the setup layer are also current
+    const setupImage = setupTag;
+    for (const agent of agents) {
+      const fullTag = getAgentOverlayTag(setupImage, agent);
+      const overlayTagPart = fullTag.split(':')[1] ?? fullTag;
+      currentLocalOverlayTags.add(overlayTagPart);
+    }
+  }
+
   // Build set of container ID prefixes for matching resume images.
   // Resume image tags use the format: <containerId-12>-<nanoid-6>,
   // so we match by checking the container ID prefix in the tag.
@@ -552,6 +619,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
         currentDockerfileHash,
         currentGhcrTags,
         currentLocalOverlayTags,
+        currentSetupLayerTags,
         activeContainerIdPrefixes,
       }),
     );

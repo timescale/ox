@@ -95,6 +95,7 @@ describe('classifyCloudSnapshot', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -117,6 +118,7 @@ describe('classifyCloudSnapshot', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -139,6 +141,7 @@ describe('classifyCloudSnapshot', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map([['oxn-my-session-abc123', session]]),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -162,6 +165,7 @@ describe('classifyCloudSnapshot', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map([
           ['oxn-old-session-abc123', deletedSession],
@@ -183,6 +187,7 @@ describe('classifyCloudSnapshot', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -204,6 +209,7 @@ describe('classifyCloudSnapshot', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -223,6 +229,7 @@ describe('classifyCloudSnapshot', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -241,6 +248,7 @@ describe('classifyCloudSnapshot', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -258,6 +266,7 @@ describe('classifyCloudSnapshot', () => {
     const result = classifyCloudSnapshot(snapshot, {
       currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
       currentAgentSlugs: new Set(),
+      currentSetupSlug: null,
       sessionsBySnapshotSlug: new Map(),
       deletedSessionsBySnapshotSlug: new Map(),
     });
@@ -273,6 +282,7 @@ describe('classifyCloudSnapshot', () => {
     const result = classifyCloudSnapshot(snapshot, {
       currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
       currentAgentSlugs: new Set(),
+      currentSetupSlug: null,
       sessionsBySnapshotSlug: new Map(),
       deletedSessionsBySnapshotSlug: new Map(),
     });
@@ -538,6 +548,7 @@ describe('classifyCloudVolume', () => {
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
         currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
+        currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
         deletedSessionsBySnapshotSlug: new Map(),
       }),
@@ -584,6 +595,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -603,6 +615,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -620,6 +633,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -637,6 +651,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -654,6 +669,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -671,6 +687,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -691,6 +708,7 @@ describe('classifyDockerImage', () => {
         'ghcr.io/timescale/ox/sandbox:abcdef123456-claude-2.1.71',
       ]),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -708,6 +726,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -725,6 +744,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -743,6 +763,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(['abc123def456']),
     });
 
@@ -761,6 +782,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -780,6 +802,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
+      currentSetupLayerTags: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -804,6 +827,7 @@ describe('classifyDockerImage', () => {
       currentDockerfileHash: 'abcdef123456',
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set<string>(),
+      currentSetupLayerTags: new Set<string>(),
       activeContainerIdPrefixes: new Set<string>(),
     };
 
@@ -1227,5 +1251,149 @@ describe('groupResourcesByKind', () => {
     const groups = groupResourcesByKind(resources);
     expect(groups).toHaveLength(1);
     expect(groups[0]).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// classifyCloudSnapshot — project setup layer
+// ============================================================================
+
+describe('classifyCloudSnapshot — project setup layer', () => {
+  const baseCtx = {
+    currentBaseSlug: 'ox-base-abc123def456',
+    currentAgentSlugs: new Set<string>(),
+    currentSetupSlug: 'oxl-setup123abc',
+    sessionsBySnapshotSlug: new Map(),
+    deletedSessionsBySnapshotSlug: new Map(),
+  };
+
+  test('classifies current oxl- snapshot as current', () => {
+    const result = assertResource(
+      classifyCloudSnapshot(
+        makeSnapshot({
+          slug: 'oxl-setup123abc',
+          volume: { id: 'vol-1', slug: 'oxlb-vol1' },
+        }),
+        baseCtx,
+      ),
+    );
+    expect(result.category).toBe('Project Setup Snapshot');
+    expect(result.status).toBe('current');
+  });
+
+  test('classifies old oxl- snapshot as old', () => {
+    const result = assertResource(
+      classifyCloudSnapshot(
+        makeSnapshot({
+          slug: 'oxl-oldsetup456',
+          volume: { id: 'vol-2', slug: 'oxlb-vol2' },
+        }),
+        baseCtx,
+      ),
+    );
+    expect(result.category).toBe('Project Setup Snapshot');
+    expect(result.status).toBe('old');
+  });
+
+  test('classifies oxl- as old when no setup configured', () => {
+    const result = assertResource(
+      classifyCloudSnapshot(
+        makeSnapshot({
+          slug: 'oxl-anything',
+          volume: { id: 'vol-3', slug: 'oxlb-vol3' },
+        }),
+        { ...baseCtx, currentSetupSlug: null },
+      ),
+    );
+    expect(result.category).toBe('Project Setup Snapshot');
+    expect(result.status).toBe('old');
+  });
+});
+
+// ============================================================================
+// classifyCloudVolume — project setup build volume
+// ============================================================================
+
+describe('classifyCloudVolume — project setup build volume', () => {
+  const emptyCtx = {
+    currentBaseVolumeSlug: null,
+    sessionsByVolumeSlug: new Map(),
+    deletedSessionsByVolumeSlug: new Map(),
+    snapshotsByVolumeSlug: new Map(),
+  };
+
+  test('classifies oxlb- volume with current child as current', () => {
+    const result = assertResource(
+      classifyCloudVolume(makeVolume({ slug: 'oxlb-build1' }), {
+        ...emptyCtx,
+        snapshotsByVolumeSlug: new Map([
+          [
+            'oxlb-build1',
+            [{ slug: 'oxl-setup123abc', status: 'current' as const }],
+          ],
+        ]),
+      }),
+    );
+    expect(result.category).toBe('Project Setup Build Volume');
+    expect(result.status).toBe('current');
+  });
+
+  test('classifies oxlb- volume with no children as orphaned', () => {
+    const result = assertResource(
+      classifyCloudVolume(makeVolume({ slug: 'oxlb-orphan' }), emptyCtx),
+    );
+    expect(result.category).toBe('Project Setup Build Volume');
+    expect(result.status).toBe('orphaned');
+  });
+
+  test('classifies oxlb- volume with only old children as old', () => {
+    const result = assertResource(
+      classifyCloudVolume(makeVolume({ slug: 'oxlb-old' }), {
+        ...emptyCtx,
+        snapshotsByVolumeSlug: new Map([
+          ['oxlb-old', [{ slug: 'oxl-oldsetup', status: 'old' as const }]],
+        ]),
+      }),
+    );
+    expect(result.category).toBe('Project Setup Build Volume');
+    expect(result.status).toBe('old');
+  });
+});
+
+// ============================================================================
+// classifyDockerImage — project setup layer
+// ============================================================================
+
+describe('classifyDockerImage — project setup layer', () => {
+  const baseCtx = {
+    currentDockerfileHash: 'abc123def456',
+    currentGhcrTags: new Set<string>(),
+    currentLocalOverlayTags: new Set<string>(),
+    currentSetupLayerTags: new Set(['md5-abc123def456-l-setup789012']),
+    activeContainerIdPrefixes: new Set<string>(),
+  };
+
+  test('classifies current setup layer image as current', () => {
+    const result = classifyDockerImage(
+      makeImage({
+        repository: 'ox-sandbox',
+        tag: 'md5-abc123def456-l-setup789012',
+      }),
+      baseCtx,
+    );
+    expect(result.category).toBe('Local Build');
+    expect(result.status).toBe('current');
+  });
+
+  test('classifies old setup layer image as old', () => {
+    const result = classifyDockerImage(
+      makeImage({
+        repository: 'ox-sandbox',
+        tag: 'md5-abc123def456-l-oldsetup123',
+      }),
+      baseCtx,
+    );
+    expect(result.category).toBe('Local Build');
+    expect(result.status).toBe('old');
   });
 });
