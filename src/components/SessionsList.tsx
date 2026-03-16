@@ -24,7 +24,11 @@ import {
 import { useBackgroundTaskStore } from '../stores/backgroundTaskStore';
 import { useRepoStore } from '../stores/repoStore.ts';
 import { useRouterStore } from '../stores/routerStore.ts';
-import { useSessionStore } from '../stores/sessionStore';
+import {
+  type FilterMode,
+  type ScopeMode,
+  useSessionStore,
+} from '../stores/sessionStore';
 import { useSessionWorkflowStore } from '../stores/sessionWorkflowStore.ts';
 import { useTheme } from '../stores/themeStore';
 import { useToastStore } from '../stores/toastStore';
@@ -36,9 +40,6 @@ import { SessionDetailPanel } from './SessionDetailPanel.tsx';
 
 /** Cache TTL in milliseconds (60 seconds) */
 const PR_CACHE_TTL = 60_000;
-
-export type FilterMode = 'all' | 'running' | 'completed';
-export type ScopeMode = 'local' | 'global';
 
 const FILTER_LABELS: Record<FilterMode, string> = {
   all: 'All',
@@ -69,6 +70,13 @@ export function SessionsList() {
     clearPrCache,
     addPendingDelete,
     removePendingDelete,
+    filterText,
+    setFilterText,
+    filterMode,
+    setFilterMode,
+    scopeMode,
+    setScopeMode,
+    syncScopeModeWithRepo,
   } = useSessionStore();
   const [sessions, setSessions] = useState<OxSession[]>([]);
   // Ref to hold the latest sessions list so callbacks/effects can read it
@@ -79,12 +87,6 @@ export function SessionsList() {
   // Null until the first load completes (avoids false notifications on startup).
   const prevSessionStatusesRef = useRef<Map<string, string> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filterText, setFilterText] = useState('');
-  const [filterMode, setFilterMode] = useState<FilterMode>('all');
-  // Default to 'local' if in a repo, otherwise 'global'
-  const [scopeMode, setScopeMode] = useState<ScopeMode>(
-    currentRepo ? 'local' : 'global',
-  );
   const [deleteModal, setDeleteModal] = useState<OxSession | null>(null);
   const [stopModal, setStopModal] = useState<OxSession | null>(null);
   const [actionInProgress, setActionInProgress] = useState(false);
@@ -114,6 +116,10 @@ export function SessionsList() {
     [],
   );
   const containerStats = useContainerStats(runningIds, getStats);
+
+  useEffect(() => {
+    syncScopeModeWithRepo(!!currentRepo);
+  }, [currentRepo, syncScopeModeWithRepo]);
 
   // Filter sessions: first by scope/mode, then fuzzy text search
   const filteredSessions = useMemo(() => {
@@ -233,14 +239,14 @@ export function SessionsList() {
     const nextIdx = (currentIdx + 1) % FILTER_ORDER.length;
     const nextMode = FILTER_ORDER[nextIdx];
     if (nextMode) setFilterMode(nextMode);
-  }, [filterMode]);
+  }, [filterMode, setFilterMode]);
 
   const toggleScope = useCallback(() => {
     const currentIdx = SCOPE_ORDER.indexOf(scopeMode);
     const nextIdx = (currentIdx + 1) % SCOPE_ORDER.length;
     const nextScope = SCOPE_ORDER[nextIdx];
     if (nextScope) setScopeMode(nextScope);
-  }, [scopeMode]);
+  }, [scopeMode, setScopeMode]);
 
   // Delete session handler
   const handleDelete = useCallback(() => {

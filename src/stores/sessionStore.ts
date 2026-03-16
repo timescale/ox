@@ -9,6 +9,10 @@ import type { PrInfo } from '../services/github';
 // Types
 // ============================================================================
 
+export type FilterMode = 'all' | 'running' | 'completed';
+export type ScopeMode = 'local' | 'global';
+type StateUpdater<T> = T | ((prev: T) => T);
+
 export interface PrCacheEntry {
   prInfo: PrInfo | null;
   lastChecked: number; // Date.now() timestamp
@@ -24,6 +28,27 @@ export interface SessionState {
 
   /** Set the selected session ID */
   setSelectedSessionId: (id: string | null) => void;
+
+  /** Free-text filter applied to the sessions list */
+  filterText: string;
+
+  /** Set the free-text filter */
+  setFilterText: (text: StateUpdater<string>) => void;
+
+  /** Status filter applied to the sessions list */
+  filterMode: FilterMode;
+
+  /** Set the status filter */
+  setFilterMode: (mode: FilterMode) => void;
+
+  /** Repo scope applied to the sessions list */
+  scopeMode: ScopeMode;
+
+  /** Set the repo scope */
+  setScopeMode: (mode: ScopeMode) => void;
+
+  /** Initialize scope based on whether a repo is currently active */
+  syncScopeModeWithRepo: (hasCurrentRepo: boolean) => void;
 
   /** PR info cache keyed by session ID (containerId) */
   prCache: Record<string, PrCacheEntry>;
@@ -52,10 +77,39 @@ export interface SessionState {
 
 export const useSessionStore = create<SessionState>()((set, get) => ({
   selectedSessionId: null,
+  filterText: '',
+  filterMode: 'all',
+  scopeMode: 'global',
   prCache: {},
 
   setSelectedSessionId: (id: string | null) => {
     set({ selectedSessionId: id });
+  },
+
+  setFilterText: (text: StateUpdater<string>) => {
+    set((state) => ({
+      filterText:
+        typeof text === 'function'
+          ? (text as (prev: string) => string)(state.filterText)
+          : text,
+    }));
+  },
+
+  setFilterMode: (mode: FilterMode) => {
+    set({ filterMode: mode });
+  },
+
+  setScopeMode: (mode: ScopeMode) => {
+    set({ scopeMode: mode });
+  },
+
+  syncScopeModeWithRepo: (hasCurrentRepo: boolean) => {
+    const { scopeMode } = get();
+    if (hasCurrentRepo && scopeMode === 'global') {
+      set({ scopeMode: 'local' });
+    } else if (!hasCurrentRepo && scopeMode === 'local') {
+      set({ scopeMode: 'global' });
+    }
   },
 
   setPrInfo: (sessionId: string, prInfo: PrInfo | null) => {
