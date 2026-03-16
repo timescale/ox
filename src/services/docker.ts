@@ -375,11 +375,11 @@ export async function ensureProjectSetupLayer(
     // 2. Write setup script into the container
     await writeFileToContainer(containerName, '/tmp/project-setup.sh', script);
 
-    // 3. Execute setup script
-    await $`docker exec ${containerName} bash /tmp/project-setup.sh`.quiet();
+    // 3. Execute setup script as root (so it can apt-get install, etc.)
+    await $`docker exec --user root ${containerName} bash /tmp/project-setup.sh`.quiet();
 
     // 4. Clean up temp files and commit
-    await $`docker exec ${containerName} rm -f /tmp/project-setup.sh`.quiet();
+    await $`docker exec --user root ${containerName} rm -f /tmp/project-setup.sh`.quiet();
     await $`docker commit ${containerName} ${setupTag}`.quiet();
     invalidateImageExistsCache(setupTag);
 

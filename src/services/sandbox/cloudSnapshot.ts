@@ -401,12 +401,13 @@ export async function ensureProjectSetupCloudSnapshot(options: {
     await sandboxExec(
       sandbox,
       `cat > /tmp/project-setup.sh << 'SETUP_EOF'\n${script}\nSETUP_EOF\nbash /tmp/project-setup.sh`,
-      { label: 'Project setup' },
+      { label: 'Project setup', sudo: true },
     );
 
     // Clean up temp files
     await sandboxExec(sandbox, 'rm -f /tmp/project-setup.sh', {
       label: 'Clean up project setup script',
+      sudo: true,
     });
 
     // 5. Kill sandbox and wait for volume detachment
