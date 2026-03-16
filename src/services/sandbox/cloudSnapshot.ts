@@ -302,6 +302,8 @@ export async function ensureProjectSetupCloudSnapshot(options: {
   baseSnapshotSlug: string;
   script: string;
   force?: boolean;
+  /** Stream the setup script's output to the terminal */
+  stream?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
 }): Promise<string> {
   const { token, region, baseSnapshotSlug, script, force, onProgress } =
@@ -401,7 +403,7 @@ export async function ensureProjectSetupCloudSnapshot(options: {
     await sandboxExec(
       sandbox,
       `cat > /tmp/project-setup.sh << 'SETUP_EOF'\n${script}\nSETUP_EOF\nbash /tmp/project-setup.sh`,
-      { label: 'Project setup', sudo: true },
+      { label: 'Project setup', sudo: true, stream: options.stream },
     );
 
     // Clean up temp files

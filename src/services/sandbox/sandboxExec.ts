@@ -10,6 +10,8 @@ import { log } from '../logger.ts';
 export interface SandboxExecOptions {
   sudo?: boolean;
   capture?: boolean;
+  /** Stream stdout/stderr to the terminal in real-time */
+  stream?: boolean;
   label?: string;
   cwd?: string;
 }
@@ -35,7 +37,7 @@ export async function sandboxExec(
   command: string,
   options?: SandboxExecOptions,
 ): Promise<string> {
-  const { sudo, capture, label, cwd } = options ?? {};
+  const { sudo, capture, stream, label, cwd } = options ?? {};
 
   // Optionally prefix with cd
   let effectiveCommand = cwd ? `cd ${shellEscape(cwd)} && ${command}` : command;
@@ -59,6 +61,24 @@ export async function sandboxExec(
     stderr: 'piped',
     env: { BASH_ENV: '$HOME/.bashrc' },
   });
+
+  // When streaming, tee stdout/stderr to the terminal in real-time
+  if (stream && proc.stdout && proc.stderr) {
+    const tee = async (
+      reader: ReadableStream<Uint8Array>,
+      dest: NodeJS.WriteStream,
+    ) => {
+      for await (const chunk of reader) {
+        dest.write(chunk);
+      }
+    };
+    await Promise.all([
+      tee(proc.stdout, process.stderr),
+      tee(proc.stderr, process.stderr),
+      proc.status,
+    ]);
+  }
+
   const result = await proc.output();
 
   if (!result.status.success) {

@@ -207,15 +207,15 @@ export const sandboxCommand = new Command('sandbox')
             ) => Promise<T>,
           ): Promise<T> => {
             process.stderr.write(`${label}: `);
-            let wrote = false;
+            let needsNewline = true;
             const onProgress = (p: { type: string; message?: string }) => {
               switch (p.type) {
                 case 'checking':
                   process.stderr.write('checking... ');
                   break;
                 case 'exists':
-                  process.stderr.write('exists');
-                  wrote = true;
+                  process.stderr.write('exists\n');
+                  needsNewline = false;
                   break;
                 case 'pulling':
                 case 'pulling-cache':
@@ -225,24 +225,24 @@ export const sandboxCommand = new Command('sandbox')
                 case 'installing':
                 case 'snapshotting':
                 case 'cleaning-up':
-                  process.stderr.write(p.message ?? p.type);
-                  wrote = true;
+                  process.stderr.write(`${p.message ?? p.type}\n`);
+                  needsNewline = false;
                   break;
                 case 'done':
-                  if (!wrote) {
-                    process.stderr.write('done');
+                  // 'done' only prints if nothing else did
+                  if (needsNewline) {
+                    process.stderr.write('done\n');
+                    needsNewline = false;
                   }
-                  wrote = true;
                   break;
               }
             };
             const result = await fn(onProgress);
             // Ensure the line is terminated — some ensure functions
             // return early (cache hit) without emitting any progress.
-            if (!wrote) {
-              process.stderr.write('exists');
+            if (needsNewline) {
+              process.stderr.write('exists\n');
             }
-            process.stderr.write('\n');
             return result;
           };
 
@@ -286,6 +286,7 @@ export const sandboxCommand = new Command('sandbox')
                       baseSnapshotSlug: baseSlug,
                       script: cloudSetupScript,
                       force,
+                      stream: true,
                       onProgress,
                     }),
                 );
@@ -332,6 +333,7 @@ export const sandboxCommand = new Command('sandbox')
                     ensureProjectSetupLayer(baseImage, dockerSetupScript, {
                       onProgress,
                       force,
+                      stream: true,
                     }),
                 );
               }

@@ -349,6 +349,8 @@ export async function ensureProjectSetupLayer(
   options?: {
     onProgress?: (progress: ImageBuildProgress) => void;
     force?: boolean;
+    /** Stream the setup script's stdout/stderr to the terminal */
+    stream?: boolean;
   },
 ): Promise<string> {
   const setupTag = getProjectSetupTag(baseImage, script);
@@ -376,7 +378,31 @@ export async function ensureProjectSetupLayer(
     await writeFileToContainer(containerName, '/tmp/project-setup.sh', script);
 
     // 3. Execute setup script as root (so it can apt-get install, etc.)
-    await $`docker exec --user root ${containerName} bash /tmp/project-setup.sh`.quiet();
+    if (options?.stream) {
+      // Stream stdout/stderr to the terminal so the user sees progress
+      const proc = Bun.spawn(
+        [
+          'docker',
+          'exec',
+          '--user',
+          'root',
+          containerName,
+          'bash',
+          '/tmp/project-setup.sh',
+        ],
+        { stdout: 'inherit', stderr: 'inherit' },
+      );
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) {
+        throw Object.assign(new Error(`Failed with exit code ${exitCode}`), {
+          exitCode,
+          stderr: '',
+          stdout: '',
+        });
+      }
+    } else {
+      await $`docker exec --user root ${containerName} bash /tmp/project-setup.sh`.quiet();
+    }
 
     // 4. Clean up temp files and commit
     await $`docker exec --user root ${containerName} rm -f /tmp/project-setup.sh`.quiet();
