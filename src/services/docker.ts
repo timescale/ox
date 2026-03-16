@@ -342,12 +342,15 @@ export function getAgentOverlayTag(
 export async function ensureProjectSetupLayer(
   baseImage: string,
   script: string,
-  options?: { onProgress?: (progress: ImageBuildProgress) => void },
+  options?: {
+    onProgress?: (progress: ImageBuildProgress) => void;
+    force?: boolean;
+  },
 ): Promise<string> {
   const setupTag = getProjectSetupTag(baseImage, script);
 
   // Check if setup layer already exists locally
-  if (await imageExists(setupTag)) {
+  if (!options?.force && (await imageExists(setupTag))) {
     log.debug('Project setup layer image already exists');
     return setupTag;
   }
@@ -402,12 +405,15 @@ export async function ensureProjectSetupLayer(
 export async function ensureAgentOverlay(
   baseImage: string,
   agent: AgentType,
-  options?: { onProgress?: (progress: ImageBuildProgress) => void },
+  options?: {
+    onProgress?: (progress: ImageBuildProgress) => void;
+    force?: boolean;
+  },
 ): Promise<string> {
   const overlayTag = getAgentOverlayTag(baseImage, agent);
 
   // Check if overlay already exists locally
-  if (await imageExists(overlayTag)) {
+  if (!options?.force && (await imageExists(overlayTag))) {
     log.debug(`${agent} overlay image already exists`);
     return overlayTag;
   }
@@ -893,6 +899,8 @@ export type ImageBuildProgress =
 
 export interface EnsureDockerImageOptions {
   onProgress?: (progress: ImageBuildProgress) => void;
+  /** Skip existence checks and force a rebuild */
+  force?: boolean;
 }
 
 /**
@@ -916,7 +924,7 @@ export async function ensureDockerImage(
   // Flow 1: Build from Dockerfile
   if (imageConfig.needsBuild) {
     // Check if image already exists locally
-    if (await imageExists(imageConfig.image)) {
+    if (!options.force && (await imageExists(imageConfig.image))) {
       onProgress?.({ type: 'exists' });
       return imageConfig.image;
     }
@@ -951,7 +959,7 @@ export async function ensureDockerImage(
   // Flow 2: sandboxBaseImage configured - must pull, fail if unavailable
   if (config.sandboxBaseImage) {
     // Check if already exists locally
-    if (await imageExists(imageConfig.image)) {
+    if (!options.force && (await imageExists(imageConfig.image))) {
       onProgress?.({ type: 'exists' });
       return imageConfig.image;
     }
@@ -980,7 +988,7 @@ export async function ensureDockerImage(
   // Hash-based tags are immutable: once pulled, never needs refreshing.
 
   // Check if image exists locally (no pull needed)
-  if (await imageExists(imageConfig.image)) {
+  if (!options.force && (await imageExists(imageConfig.image))) {
     onProgress?.({ type: 'exists' });
     return imageConfig.image;
   }
@@ -1035,7 +1043,7 @@ export async function ensureDockerImageForAgent(
   options: EnsureDockerImageOptions = {},
 ): Promise<string> {
   const existing = agentImageInFlight.get(agent);
-  if (existing) return existing;
+  if (!options.force && existing) return existing;
 
   const promise = (async () => {
     const baseImage = await ensureDockerImage(options);

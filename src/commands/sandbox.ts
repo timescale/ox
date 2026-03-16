@@ -3,6 +3,7 @@ import { Command, Option } from 'commander';
 import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
+import type { AgentType } from '../services/config.ts';
 import {
   computeDockerfileHash,
   getAgentVersion,
@@ -147,6 +148,189 @@ export const sandboxCommand = new Command('sandbox')
               console.log(`${base}-${options.agent}-${version}`);
             } else {
               console.log(hash);
+            }
+          }
+        },
+      ),
+  )
+  .addCommand(
+    new Command('build')
+      .description(
+        'build sandbox image layers (and all parent layers if needed)',
+      )
+      .addOption(
+        new Option(
+          '-a, --agent <name>',
+          'build up through the agent overlay layer',
+        ).choices(['claude', 'opencode', 'codex']),
+      )
+      .option('-c, --cloud', 'build cloud snapshots instead of Docker images')
+      .option(
+        '-p, --project',
+        'build up through the project setup layer (requires projectSetupLayer config)',
+      )
+      .option('--no-cache', 'force rebuild, ignoring existing cached layers')
+      .action(
+        async (options: {
+          agent?: 'claude' | 'opencode' | 'codex';
+          cloud?: boolean;
+          project?: boolean;
+          cache?: boolean; // commander inverts --no-cache to cache=false
+        }) => {
+          // Validate flag combinations
+          if (options.project && options.agent) {
+            console.error(
+              'Error: --project and --agent cannot be used together.\n' +
+                'Use --agent to build through all layers (including project setup if configured).',
+            );
+            process.exit(1);
+          }
+
+          const force = options.cache === false;
+
+          const { readConfig } = await import('../services/config.ts');
+          const config = await readConfig();
+
+          if (options.project && !config.projectSetupLayer) {
+            console.error('Error: no projectSetupLayer configured');
+            process.exit(1);
+          }
+
+          if (options.cloud) {
+            // --- Cloud build path ---
+            const { getDenoToken } = await import('../services/deno.ts');
+            const token = await getDenoToken();
+            if (!token) {
+              console.error(
+                'Error: no Deno Deploy token configured. Run cloud setup first.',
+              );
+              process.exit(1);
+            }
+
+            const region = config.cloudRegion ?? 'ord';
+            const {
+              ensureCloudSnapshot,
+              ensureProjectSetupCloudSnapshot,
+              ensureAgentCloudSnapshot,
+            } = await import('../services/sandbox/cloudSnapshot.ts');
+            const onProgress = (p: { type: string; message?: string }) => {
+              switch (p.type) {
+                case 'checking':
+                  process.stderr.write('Checking... ');
+                  break;
+                case 'exists':
+                  process.stderr.write('exists\n');
+                  break;
+                case 'creating-volume':
+                case 'booting-sandbox':
+                case 'installing':
+                case 'snapshotting':
+                case 'cleaning-up':
+                  process.stderr.write(`${p.message ?? p.type}\n`);
+                  break;
+                case 'done':
+                  process.stderr.write('Done\n');
+                  break;
+              }
+            };
+
+            // 1. Build base
+            process.stderr.write('Base snapshot: ');
+            const baseSlug = await ensureCloudSnapshot({
+              token,
+              region,
+              force,
+              onProgress,
+            });
+
+            // 2. Build project setup layer (if needed)
+            let effectiveBaseSlug = baseSlug;
+            let setupHash: string | undefined;
+            if (
+              config.projectSetupLayer &&
+              (options.project || options.agent)
+            ) {
+              process.stderr.write('Project setup snapshot: ');
+              effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
+                token,
+                region,
+                baseSnapshotSlug: baseSlug,
+                script: config.projectSetupLayer,
+                force,
+                onProgress,
+              });
+              setupHash = effectiveBaseSlug.replace('oxl-', '');
+            }
+
+            // 3. Build agent overlay (if requested)
+            if (options.agent) {
+              process.stderr.write(`Agent (${options.agent}) snapshot: `);
+              await ensureAgentCloudSnapshot({
+                token,
+                region,
+                agent: options.agent as AgentType,
+                baseSnapshotSlug: effectiveBaseSlug,
+                setupHash,
+                force,
+                onProgress,
+              });
+            }
+          } else {
+            // --- Docker build path ---
+            const {
+              ensureDockerImage,
+              ensureProjectSetupLayer,
+              ensureAgentOverlay,
+            } = await import('../services/docker.ts');
+
+            const onProgress = (p: { type: string; message?: string }) => {
+              switch (p.type) {
+                case 'checking':
+                  process.stderr.write('Checking... ');
+                  break;
+                case 'exists':
+                  process.stderr.write('exists\n');
+                  break;
+                case 'pulling':
+                case 'pulling-cache':
+                case 'building':
+                  process.stderr.write(`${p.message ?? p.type}\n`);
+                  break;
+                case 'done':
+                  process.stderr.write('Done\n');
+                  break;
+              }
+            };
+
+            // 1. Build base
+            process.stderr.write('Base image: ');
+            const baseImage = await ensureDockerImage({
+              onProgress,
+              force,
+            });
+
+            // 2. Build project setup layer (if needed)
+            let effectiveBase = baseImage;
+            if (
+              config.projectSetupLayer &&
+              (options.project || options.agent)
+            ) {
+              process.stderr.write('Project setup layer: ');
+              effectiveBase = await ensureProjectSetupLayer(
+                baseImage,
+                config.projectSetupLayer,
+                { onProgress, force },
+              );
+            }
+
+            // 3. Build agent overlay (if requested)
+            if (options.agent) {
+              process.stderr.write(`Agent (${options.agent}) overlay: `);
+              await ensureAgentOverlay(
+                effectiveBase,
+                options.agent as AgentType,
+                { onProgress, force },
+              );
             }
           }
         },

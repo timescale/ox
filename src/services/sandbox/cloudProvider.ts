@@ -533,6 +533,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
   async ensureImage(options?: {
     agent?: AgentType;
+    force?: boolean;
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string> {
     const token = await getDenoToken();
@@ -580,6 +581,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const baseSlug = await ensureCloudSnapshot({
       token,
       region,
+      force: options?.force,
       onProgress: mapProgress,
     });
 
@@ -592,6 +594,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         region,
         baseSnapshotSlug: baseSlug,
         script: config.projectSetupLayer,
+        force: options?.force,
         onProgress: mapProgress,
       });
       // Extract the setup hash for use in agent slug computation
@@ -606,6 +609,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         agent: options.agent,
         baseSnapshotSlug: effectiveBaseSlug,
         setupHash,
+        force: options?.force,
         onProgress: mapProgress,
       });
       return agentSlug;

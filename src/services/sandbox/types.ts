@@ -134,6 +134,8 @@ export interface SandboxProvider {
   // Image/snapshot management
   ensureImage(options?: {
     agent?: AgentType;
+    /** Skip existence checks and force a rebuild of all layers */
+    force?: boolean;
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string>;
 

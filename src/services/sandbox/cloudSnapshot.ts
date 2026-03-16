@@ -106,36 +106,49 @@ async function isSnapshotBootable(
 export async function ensureCloudSnapshot(options: {
   token: string;
   region: string;
+  force?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
 }): Promise<string> {
-  const { token, region, onProgress } = options;
+  const { token, region, force, onProgress } = options;
   const client = new DenoApiClient(token);
   const snapshotSlug = getBaseSnapshotSlug();
 
   // 1. Check if snapshot already exists AND is bootable
   onProgress?.({ type: 'checking' });
-  try {
-    const existing = await client.getSnapshot(snapshotSlug);
-    if (existing) {
-      // Verify it's actually bootable
-      const bootable = await isSnapshotBootable(token, snapshotSlug);
-      if (bootable) {
-        onProgress?.({ type: 'exists', snapshotSlug });
-        return snapshotSlug;
-      }
-      // Snapshot exists but is not bootable — delete and rebuild
-      log.warn(
-        { snapshotSlug },
-        'Snapshot exists but is not bootable — deleting and rebuilding',
-      );
-      try {
+  if (force) {
+    // Force rebuild: delete existing snapshot if present
+    try {
+      const existing = await client.getSnapshot(snapshotSlug);
+      if (existing) {
+        log.info({ snapshotSlug }, 'Force rebuild: deleting existing snapshot');
         await client.deleteSnapshot(existing.id);
-      } catch (err) {
-        log.debug({ err }, 'Failed to delete non-bootable snapshot');
       }
+    } catch {
+      // Snapshot doesn't exist, nothing to delete
     }
-  } catch (err) {
-    log.debug({ err }, 'Failed to check snapshot');
+  } else {
+    // Normal flow: check if snapshot already exists AND is bootable
+    try {
+      const existing = await client.getSnapshot(snapshotSlug);
+      if (existing) {
+        const bootable = await isSnapshotBootable(token, snapshotSlug);
+        if (bootable) {
+          onProgress?.({ type: 'exists', snapshotSlug });
+          return snapshotSlug;
+        }
+        log.warn(
+          { snapshotSlug },
+          'Snapshot exists but is not bootable — deleting and rebuilding',
+        );
+        try {
+          await client.deleteSnapshot(existing.id);
+        } catch (err) {
+          log.debug({ err }, 'Failed to delete non-bootable snapshot');
+        }
+      }
+    } catch (err) {
+      log.debug({ err }, 'Failed to check snapshot');
+    }
   }
 
   // 2. Create a bootable volume from the Debian base image
@@ -288,9 +301,11 @@ export async function ensureProjectSetupCloudSnapshot(options: {
   region: string;
   baseSnapshotSlug: string;
   script: string;
+  force?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
 }): Promise<string> {
-  const { token, region, baseSnapshotSlug, script, onProgress } = options;
+  const { token, region, baseSnapshotSlug, script, force, onProgress } =
+    options;
   const client = new DenoApiClient(token);
 
   // Derive the base hash from the base snapshot slug (ox-base-{hash} -> {hash})
@@ -299,29 +314,46 @@ export async function ensureProjectSetupCloudSnapshot(options: {
 
   // 1. Check if setup snapshot already exists AND is bootable
   onProgress?.({ type: 'checking' });
-  try {
-    const existing = await client.getSnapshot(snapshotSlug);
-    if (existing) {
-      const bootable = await isSnapshotBootable(token, snapshotSlug);
-      if (bootable) {
-        onProgress?.({ type: 'exists', snapshotSlug });
-        return snapshotSlug;
-      }
-      log.warn(
-        { snapshotSlug },
-        'Project setup snapshot exists but is not bootable — deleting and rebuilding',
-      );
-      try {
-        await client.deleteSnapshot(existing.id);
-      } catch (err) {
-        log.debug(
-          { err },
-          'Failed to delete non-bootable project setup snapshot',
+  if (force) {
+    // Force rebuild: delete existing snapshot if present
+    try {
+      const existing = await client.getSnapshot(snapshotSlug);
+      if (existing) {
+        log.info(
+          { snapshotSlug },
+          'Force rebuild: deleting existing project setup snapshot',
         );
+        await client.deleteSnapshot(existing.id);
       }
+    } catch {
+      // Snapshot doesn't exist, nothing to delete
     }
-  } catch (err) {
-    log.debug({ err }, 'Failed to check project setup snapshot');
+  } else {
+    // Normal flow: check if setup snapshot already exists AND is bootable
+    try {
+      const existing = await client.getSnapshot(snapshotSlug);
+      if (existing) {
+        const bootable = await isSnapshotBootable(token, snapshotSlug);
+        if (bootable) {
+          onProgress?.({ type: 'exists', snapshotSlug });
+          return snapshotSlug;
+        }
+        log.warn(
+          { snapshotSlug },
+          'Project setup snapshot exists but is not bootable — deleting and rebuilding',
+        );
+        try {
+          await client.deleteSnapshot(existing.id);
+        } catch (err) {
+          log.debug(
+            { err },
+            'Failed to delete non-bootable project setup snapshot',
+          );
+        }
+      }
+    } catch (err) {
+      log.debug({ err }, 'Failed to check project setup snapshot');
+    }
   }
 
   // 2. Create a bootable volume from the base snapshot
@@ -464,34 +496,52 @@ export async function ensureAgentCloudSnapshot(options: {
   /** If a project setup layer is active, its hash. Ensures the agent overlay
    *  slug changes when the setup layer changes, triggering a rebuild. */
   setupHash?: string;
+  force?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
 }): Promise<string> {
-  const { token, region, agent, baseSnapshotSlug, onProgress } = options;
+  const { token, region, agent, baseSnapshotSlug, force, onProgress } = options;
   const client = new DenoApiClient(token);
   const snapshotSlug = getAgentSnapshotSlug(agent, options.setupHash);
 
   // 1. Check if agent overlay snapshot already exists AND is bootable
   onProgress?.({ type: 'checking' });
-  try {
-    const existing = await client.getSnapshot(snapshotSlug);
-    if (existing) {
-      const bootable = await isSnapshotBootable(token, snapshotSlug);
-      if (bootable) {
-        onProgress?.({ type: 'exists', snapshotSlug });
-        return snapshotSlug;
-      }
-      log.warn(
-        { snapshotSlug },
-        'Agent snapshot exists but is not bootable — deleting and rebuilding',
-      );
-      try {
+  if (force) {
+    // Force rebuild: delete existing snapshot if present
+    try {
+      const existing = await client.getSnapshot(snapshotSlug);
+      if (existing) {
+        log.info(
+          { snapshotSlug },
+          'Force rebuild: deleting existing agent snapshot',
+        );
         await client.deleteSnapshot(existing.id);
-      } catch (err) {
-        log.debug({ err }, 'Failed to delete non-bootable agent snapshot');
       }
+    } catch {
+      // Snapshot doesn't exist, nothing to delete
     }
-  } catch (err) {
-    log.debug({ err }, 'Failed to check agent snapshot');
+  } else {
+    // Normal flow: check if agent overlay snapshot already exists AND is bootable
+    try {
+      const existing = await client.getSnapshot(snapshotSlug);
+      if (existing) {
+        const bootable = await isSnapshotBootable(token, snapshotSlug);
+        if (bootable) {
+          onProgress?.({ type: 'exists', snapshotSlug });
+          return snapshotSlug;
+        }
+        log.warn(
+          { snapshotSlug },
+          'Agent snapshot exists but is not bootable — deleting and rebuilding',
+        );
+        try {
+          await client.deleteSnapshot(existing.id);
+        } catch (err) {
+          log.debug({ err }, 'Failed to delete non-bootable agent snapshot');
+        }
+      }
+    } catch (err) {
+      log.debug({ err }, 'Failed to check agent snapshot');
+    }
   }
 
   // 2. Create a bootable volume from the base snapshot

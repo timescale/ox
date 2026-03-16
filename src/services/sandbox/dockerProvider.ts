@@ -130,14 +130,19 @@ export class DockerSandboxProvider implements SandboxProvider {
 
   async ensureImage(options?: {
     agent?: AgentType;
+    force?: boolean;
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string> {
     if (options?.agent) {
       return ensureDockerImageForAgent(options.agent, {
         onProgress: options?.onProgress,
+        force: options?.force,
       });
     }
-    return ensureDockerImage({ onProgress: options?.onProgress });
+    return ensureDockerImage({
+      onProgress: options?.onProgress,
+      force: options?.force,
+    });
   }
 
   async create(options: CreateSandboxOptions): Promise<OxSession> {
