@@ -919,7 +919,7 @@ export async function sessionsAction(options: SessionsOptions): Promise<void> {
 // ============================================================================
 
 export const sessionsCommand = new Command('sessions')
-  .aliases(['list', 'status', 's'])
+  .aliases(['list', 'status', 'ps', 'ls'])
   .description('Show all ox sessions and their status')
   .option(
     '-o, --output <format>',

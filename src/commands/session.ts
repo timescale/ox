@@ -219,7 +219,7 @@ const sessionCleanCommand = new Command('clean')
 // ============================================================================
 
 export const sessionCommand = new Command('session')
-  .alias('container')
+  .aliases(['container', 's'])
   .description('Manage ox sessions')
   .addCommand(rmCommand)
   .addCommand(stopCommand)
