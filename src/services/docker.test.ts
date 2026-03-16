@@ -180,9 +180,29 @@ describe('computeProjectSetupHash', () => {
 });
 
 describe('getProjectSetupTag', () => {
-  test('returns tag with -l- infix', () => {
+  test('returns local ox-sandbox tag with -l- infix', () => {
     const tag = getProjectSetupTag('ox-sandbox:md5-abc123def456', 'my-script');
     expect(tag).toMatch(/^ox-sandbox:md5-abc123def456-l-[a-f0-9]{12}$/);
+  });
+
+  test('normalizes GHCR base image to local ox-sandbox prefix', () => {
+    const tag = getProjectSetupTag(
+      'ghcr.io/timescale/ox/sandbox:abc123def456',
+      'my-script',
+    );
+    expect(tag).toMatch(/^ox-sandbox:md5-abc123def456-l-[a-f0-9]{12}$/);
+  });
+
+  test('produces same hash regardless of base image prefix', () => {
+    const local = getProjectSetupTag(
+      'ox-sandbox:md5-abc123def456',
+      'my-script',
+    );
+    const ghcr = getProjectSetupTag(
+      'ghcr.io/timescale/ox/sandbox:abc123def456',
+      'my-script',
+    );
+    expect(local).toBe(ghcr);
   });
 });
 

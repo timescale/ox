@@ -273,13 +273,17 @@ export function computeProjectSetupHash(
 
 /**
  * Compute the project setup layer image tag.
- * Format: <baseImage>-l-<setupHash>
+ * Always uses the local `ox-sandbox` name — project setup layers are built
+ * locally and never published to GHCR.
+ * Format: ox-sandbox:md5-<baseHash>-l-<setupHash>
  */
 export function getProjectSetupTag(baseImage: string, script: string): string {
-  // Extract the base hash from the image tag (e.g. 'ox-sandbox:md5-abc123def456' -> 'abc123def456')
-  const baseHash = baseImage.split(':')[1]?.replace(/^md5-/, '') ?? baseImage;
+  // Extract the base hash from the image tag, regardless of whether it's
+  // a local (ox-sandbox:md5-{hash}) or GHCR (ghcr.io/.../sandbox:{hash}) tag.
+  const tagPart = baseImage.split(':')[1] ?? baseImage;
+  const baseHash = tagPart.replace(/^md5-/, '');
   const setupHash = computeProjectSetupHash(baseHash, script);
-  return `${baseImage}-l-${setupHash}`;
+  return `${DOCKER_IMAGE_NAME}:md5-${baseHash}-l-${setupHash}`;
 }
 
 // ============================================================================
