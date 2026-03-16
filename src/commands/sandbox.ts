@@ -196,6 +196,58 @@ export const sandboxCommand = new Command('sandbox')
             process.exit(1);
           }
 
+          // Helper: run a build step with progress, print result to stderr,
+          // return the image/slug produced.
+          const { printErr } = await import('../utils/shell.ts');
+
+          const runStep = async <T extends string>(
+            label: string,
+            fn: (
+              onProgress: (p: { type: string; message?: string }) => void,
+            ) => Promise<T>,
+          ): Promise<T> => {
+            process.stderr.write(`${label}: `);
+            let wrote = false;
+            const onProgress = (p: { type: string; message?: string }) => {
+              switch (p.type) {
+                case 'checking':
+                  process.stderr.write('checking... ');
+                  break;
+                case 'exists':
+                  process.stderr.write('exists');
+                  wrote = true;
+                  break;
+                case 'pulling':
+                case 'pulling-cache':
+                case 'building':
+                case 'creating-volume':
+                case 'booting-sandbox':
+                case 'installing':
+                case 'snapshotting':
+                case 'cleaning-up':
+                  process.stderr.write(p.message ?? p.type);
+                  wrote = true;
+                  break;
+                case 'done':
+                  if (!wrote) {
+                    process.stderr.write('done');
+                  }
+                  wrote = true;
+                  break;
+              }
+            };
+            const result = await fn(onProgress);
+            // Ensure the line is terminated — some ensure functions
+            // return early (cache hit) without emitting any progress.
+            if (!wrote) {
+              process.stderr.write('exists');
+            }
+            process.stderr.write('\n');
+            return result;
+          };
+
+          let finalImage: string;
+
           try {
             if (options.cloud) {
               // --- Cloud build path ---
@@ -214,67 +266,48 @@ export const sandboxCommand = new Command('sandbox')
                 ensureProjectSetupCloudSnapshot,
                 ensureAgentCloudSnapshot,
               } = await import('../services/sandbox/cloudSnapshot.ts');
-              const onProgress = (p: { type: string; message?: string }) => {
-                switch (p.type) {
-                  case 'checking':
-                    process.stderr.write('Checking... ');
-                    break;
-                  case 'exists':
-                    process.stderr.write('exists\n');
-                    break;
-                  case 'creating-volume':
-                  case 'booting-sandbox':
-                  case 'installing':
-                  case 'snapshotting':
-                  case 'cleaning-up':
-                    process.stderr.write(`${p.message ?? p.type}\n`);
-                    break;
-                  case 'done':
-                    process.stderr.write('Done\n');
-                    break;
-                }
-              };
 
               // 1. Build base
-              process.stderr.write('Base snapshot: ');
-              const baseSlug = await ensureCloudSnapshot({
-                token,
-                region,
-                force,
-                onProgress,
-              });
+              const baseSlug = await runStep('Base snapshot', (onProgress) =>
+                ensureCloudSnapshot({ token, region, force, onProgress }),
+              );
 
               // 2. Build project setup layer (if needed)
               let effectiveBaseSlug = baseSlug;
               let setupHash: string | undefined;
-              if (
-                config.projectSetupLayer &&
-                (options.project || options.agent)
-              ) {
-                process.stderr.write('Project setup snapshot: ');
-                effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
-                  token,
-                  region,
-                  baseSnapshotSlug: baseSlug,
-                  script: config.projectSetupLayer,
-                  force,
-                  onProgress,
-                });
+              const cloudSetupScript = config.projectSetupLayer;
+              if (cloudSetupScript && (options.project || options.agent)) {
+                effectiveBaseSlug = await runStep(
+                  'Project setup snapshot',
+                  (onProgress) =>
+                    ensureProjectSetupCloudSnapshot({
+                      token,
+                      region,
+                      baseSnapshotSlug: baseSlug,
+                      script: cloudSetupScript,
+                      force,
+                      onProgress,
+                    }),
+                );
                 setupHash = effectiveBaseSlug.replace('oxl-', '');
               }
 
               // 3. Build agent overlay (if requested)
+              finalImage = effectiveBaseSlug;
               if (options.agent) {
-                process.stderr.write(`Agent (${options.agent}) snapshot: `);
-                await ensureAgentCloudSnapshot({
-                  token,
-                  region,
-                  agent: options.agent as AgentType,
-                  baseSnapshotSlug: effectiveBaseSlug,
-                  setupHash,
-                  force,
-                  onProgress,
-                });
+                finalImage = await runStep(
+                  `Agent (${options.agent}) snapshot`,
+                  (onProgress) =>
+                    ensureAgentCloudSnapshot({
+                      token,
+                      region,
+                      agent: options.agent as AgentType,
+                      baseSnapshotSlug: effectiveBaseSlug,
+                      setupHash,
+                      force,
+                      onProgress,
+                    }),
+                );
               }
             } else {
               // --- Docker build path ---
@@ -284,59 +317,50 @@ export const sandboxCommand = new Command('sandbox')
                 ensureAgentOverlay,
               } = await import('../services/docker.ts');
 
-              const onProgress = (p: { type: string; message?: string }) => {
-                switch (p.type) {
-                  case 'checking':
-                    process.stderr.write('Checking... ');
-                    break;
-                  case 'exists':
-                    process.stderr.write('exists\n');
-                    break;
-                  case 'pulling':
-                  case 'pulling-cache':
-                  case 'building':
-                    process.stderr.write(`${p.message ?? p.type}\n`);
-                    break;
-                  case 'done':
-                    process.stderr.write('Done\n');
-                    break;
-                }
-              };
-
               // 1. Build base
-              process.stderr.write('Base image: ');
-              const baseImage = await ensureDockerImage({
-                onProgress,
-                force,
-              });
+              const baseImage = await runStep('Base image', (onProgress) =>
+                ensureDockerImage({ onProgress, force }),
+              );
 
               // 2. Build project setup layer (if needed)
               let effectiveBase = baseImage;
-              if (
-                config.projectSetupLayer &&
-                (options.project || options.agent)
-              ) {
-                process.stderr.write('Project setup layer: ');
-                effectiveBase = await ensureProjectSetupLayer(
-                  baseImage,
-                  config.projectSetupLayer,
-                  { onProgress, force },
+              const dockerSetupScript = config.projectSetupLayer;
+              if (dockerSetupScript && (options.project || options.agent)) {
+                effectiveBase = await runStep(
+                  'Project setup layer',
+                  (onProgress) =>
+                    ensureProjectSetupLayer(baseImage, dockerSetupScript, {
+                      onProgress,
+                      force,
+                    }),
                 );
               }
 
               // 3. Build agent overlay (if requested)
+              finalImage = effectiveBase;
               if (options.agent) {
-                process.stderr.write(`Agent (${options.agent}) overlay: `);
-                await ensureAgentOverlay(
-                  effectiveBase,
-                  options.agent as AgentType,
-                  { onProgress, force },
+                finalImage = await runStep(
+                  `Agent (${options.agent}) overlay`,
+                  (onProgress) =>
+                    ensureAgentOverlay(
+                      effectiveBase,
+                      options.agent as AgentType,
+                      {
+                        onProgress,
+                        force,
+                      },
+                    ),
                 );
               }
             }
+
+            // Print the final image name to stdout
+            console.log(finalImage);
           } catch (err) {
+            // Ensure we're on a new line after any partial progress output
+            printErr('');
             const message = err instanceof Error ? err.message : String(err);
-            console.error(`\nError: ${message}`);
+            printErr(`Error: ${message}`);
             process.exit(1);
           }
         },
