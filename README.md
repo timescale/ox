@@ -71,6 +71,14 @@ cd ox
 source ~/.zshrc  # or restart your shell
 ```
 
+## Recommended Terminal
+
+While any terminal should work, we recommend [Ghostty](https://ghostty.org/) for the best TUI experience -- it has proper truecolor support, fast rendering, and correct Unicode handling:
+
+```bash
+brew install --cask ghostty
+```
+
 ## Agent Support
 
 | Agent | Description |

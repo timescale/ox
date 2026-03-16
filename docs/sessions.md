@@ -37,7 +37,10 @@ ox sessions -o yaml
 ox sessions -o tui
 ```
 
-`ox session ps`, `ox session list`, and `ox session ls` are all aliases for `ox sessions`.
+These are all equivalent ways to list sessions:
+
+- `ox sessions` (with top-level aliases `ox ps`, `ox ls`, `ox list`, `ox status`)
+- `ox session ps` (with sub-aliases `ox session list`, `ox session ls`)
 
 ### TUI
 
@@ -45,7 +48,7 @@ Press `ctrl+l` from the prompt screen to open the sessions list. The list shows:
 
 | Column | Description |
 |--------|-------------|
-| Status | Color-coded icon (running, completed, failed, stopped) |
+| Icon | Color-coded status icon (running, completed, failed, stopped) |
 | Provider | `D` for Docker, `C` for Cloud |
 | Name | Session name (derived from the generated branch) |
 | Status | Human-readable status text |

@@ -38,7 +38,7 @@ In the TUI sessions list, you can see:
 - PR links (once the agent creates one)
 - Which agent and model are being used
 
-Ox sends a **desktop notification** when an async session completes, so you don't need to keep checking.
+Ox sends a **desktop notification** when an async session completes (on supported systems where notification tooling like `osascript` on macOS or `notify-send` on Linux is available), so you don't need to keep checking.
 
 ### 3. Review the PR
 

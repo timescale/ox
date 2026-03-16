@@ -173,8 +173,8 @@ Available themes:
 
 | | | | |
 |---|---|---|---|
-| aura | ayu | carbonfox | catppuccin-frappe |
-| catppuccin-macchiato | catppuccin-mocha | cobalt2 | cursor |
+| aura | ayu | carbonfox | catppuccin |
+| catppuccin-frappe | catppuccin-macchiato | cobalt2 | cursor |
 | dracula | everforest | flexoki | github |
 | gruvbox | kanagawa | lucent-orng | material |
 | matrix | mercury | monokai | nightowl |

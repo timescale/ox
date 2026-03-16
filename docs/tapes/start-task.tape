@@ -13,7 +13,7 @@ Set Framerate 30
 Set TypingSpeed 40ms
 
 # Show the basic command
-Type `ox -f "Fix the failing unit tests in the auth module"`
+Type "ox -f 'Fix the failing unit tests in the auth module'"
 Sleep 1s
 Enter
 

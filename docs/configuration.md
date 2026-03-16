@@ -65,7 +65,7 @@ See [Port Forwarding](sandbox-providers.md#port-forwarding) for details.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `themeName` | `string` | `opencode` | TUI color theme. See [Themes](tui.md#themes) for the full list. |
+| `themeName` | `string` | `opencode` or `aura` | TUI color theme. Defaults to `opencode` when your terminal supports truecolor, otherwise `aura`. See [Themes](tui.md#themes) for the full list. |
 
 ### Telemetry
 

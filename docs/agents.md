@@ -103,9 +103,9 @@ Set different default models for each agent:
 ```yaml
 # .ox/config.yml
 agentModels:
-  claude: opus
-  opencode: sonnet
-  codex: o3
+  claude: claude-sonnet-4-6
+  opencode: anthropic/claude-sonnet-4-6
+  codex: gpt-5.4
 ```
 
 ### TUI

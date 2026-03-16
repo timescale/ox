@@ -36,7 +36,7 @@ See [Usage](usage.md) for detailed explanations and the flag compatibility matri
 
 ### `ox sessions`
 
-List sessions. Aliases: `ox session ps`, `ox session list`, `ox session ls`.
+List sessions. Top-level aliases: `ox ps`, `ox ls`, `ox list`, `ox status`. The same listing is also available as `ox session ps` (with sub-aliases `ox session list`, `ox session ls`).
 
 ```bash
 ox sessions                   # table of running sessions
@@ -66,7 +66,7 @@ ox session info -o json my-feature-branch
 
 | Flag | Description |
 |------|-------------|
-| `-o, --output <format>` | Output format: `table` (default), `json` |
+| `-o, --output <format>` | Output format: `table` (default), `json`, `yaml` |
 
 ### `ox session logs <session>`
 
@@ -141,6 +141,7 @@ ox session clean --all    # all containers
 | Flag | Description |
 |------|-------------|
 | `-a, --all` | Remove all containers, including running |
+| `-f, --force` | Skip the confirmation prompt |
 
 ---
 
