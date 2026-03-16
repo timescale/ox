@@ -277,7 +277,7 @@ export function computeProjectSetupHash(
  */
 export function getProjectSetupTag(baseImage: string, script: string): string {
   // Extract the base hash from the image tag (e.g. 'ox-sandbox:md5-abc123def456' -> 'abc123def456')
-  const baseHash = baseImage.split(':')[1]?.replace('md5-', '') ?? baseImage;
+  const baseHash = baseImage.split(':')[1]?.replace(/^md5-/, '') ?? baseImage;
   const setupHash = computeProjectSetupHash(baseHash, script);
   return `${baseImage}-l-${setupHash}`;
 }
