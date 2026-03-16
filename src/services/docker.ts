@@ -387,9 +387,13 @@ export async function ensureProjectSetupLayer(
     return setupTag;
   } catch (err) {
     log.error({ err, setupTag }, 'Failed to build project setup layer');
-    throw new Error(
-      `Failed to build project setup layer: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    // Surface stderr from shell errors so users can see what went wrong
+    const detail =
+      err != null && typeof err === 'object' && 'stderr' in err && err.stderr
+        ? String(err.stderr).trim()
+        : '';
+    const base = `Failed to build project setup layer (exit code ${(err as { exitCode?: number }).exitCode ?? '?'})`;
+    throw new Error(detail ? `${base}\n${detail}` : base);
   } finally {
     await $`docker rm -f ${containerName}`.quiet().nothrow();
   }
