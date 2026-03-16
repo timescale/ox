@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { useSessionStore } from './sessionStore';
 
+afterEach(() => {
+  useSessionStore.setState({
+    selectedSessionId: null,
+    filterText: '',
+    filterMode: 'all',
+    scopeMode: 'global',
+    prCache: {},
+    pendingDeletes: new Set(),
+  });
+});
+
 describe('sessionStore - pendingDeletes', () => {
   afterEach(() => {
     // Reset pendingDeletes
@@ -40,5 +51,36 @@ describe('sessionStore - pendingDeletes', () => {
     expect(useSessionStore.getState().isPendingDelete('a')).toBe(true);
     expect(useSessionStore.getState().isPendingDelete('b')).toBe(false);
     expect(useSessionStore.getState().isPendingDelete('c')).toBe(true);
+  });
+});
+
+describe('sessionStore - filters', () => {
+  test('stores filter text', () => {
+    useSessionStore.getState().setFilterText('bugfix');
+    expect(useSessionStore.getState().filterText).toBe('bugfix');
+  });
+
+  test('stores filter mode', () => {
+    useSessionStore.getState().setFilterMode('running');
+    expect(useSessionStore.getState().filterMode).toBe('running');
+  });
+
+  test('syncScopeModeWithRepo defaults to local when entering a repo', () => {
+    useSessionStore.getState().syncScopeModeWithRepo(true);
+    expect(useSessionStore.getState().scopeMode).toBe('local');
+  });
+
+  test('syncScopeModeWithRepo resets to global when leaving a repo', () => {
+    const store = useSessionStore.getState();
+    store.setScopeMode('local');
+    store.syncScopeModeWithRepo(false);
+    expect(useSessionStore.getState().scopeMode).toBe('global');
+  });
+
+  test('syncScopeModeWithRepo preserves explicit local scope in a repo', () => {
+    const store = useSessionStore.getState();
+    store.setScopeMode('local');
+    store.syncScopeModeWithRepo(true);
+    expect(useSessionStore.getState().scopeMode).toBe('local');
   });
 });
