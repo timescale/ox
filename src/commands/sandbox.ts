@@ -196,142 +196,148 @@ export const sandboxCommand = new Command('sandbox')
             process.exit(1);
           }
 
-          if (options.cloud) {
-            // --- Cloud build path ---
-            const { getDenoToken } = await import('../services/deno.ts');
-            const token = await getDenoToken();
-            if (!token) {
-              console.error(
-                'Error: no Deno Deploy token configured. Run cloud setup first.',
-              );
-              process.exit(1);
-            }
-
-            const region = config.cloudRegion ?? 'ord';
-            const {
-              ensureCloudSnapshot,
-              ensureProjectSetupCloudSnapshot,
-              ensureAgentCloudSnapshot,
-            } = await import('../services/sandbox/cloudSnapshot.ts');
-            const onProgress = (p: { type: string; message?: string }) => {
-              switch (p.type) {
-                case 'checking':
-                  process.stderr.write('Checking... ');
-                  break;
-                case 'exists':
-                  process.stderr.write('exists\n');
-                  break;
-                case 'creating-volume':
-                case 'booting-sandbox':
-                case 'installing':
-                case 'snapshotting':
-                case 'cleaning-up':
-                  process.stderr.write(`${p.message ?? p.type}\n`);
-                  break;
-                case 'done':
-                  process.stderr.write('Done\n');
-                  break;
+          try {
+            if (options.cloud) {
+              // --- Cloud build path ---
+              const { getDenoToken } = await import('../services/deno.ts');
+              const token = await getDenoToken();
+              if (!token) {
+                console.error(
+                  'Error: no Deno Deploy token configured. Run cloud setup first.',
+                );
+                process.exit(1);
               }
-            };
 
-            // 1. Build base
-            process.stderr.write('Base snapshot: ');
-            const baseSlug = await ensureCloudSnapshot({
-              token,
-              region,
-              force,
-              onProgress,
-            });
+              const region = config.cloudRegion ?? 'ord';
+              const {
+                ensureCloudSnapshot,
+                ensureProjectSetupCloudSnapshot,
+                ensureAgentCloudSnapshot,
+              } = await import('../services/sandbox/cloudSnapshot.ts');
+              const onProgress = (p: { type: string; message?: string }) => {
+                switch (p.type) {
+                  case 'checking':
+                    process.stderr.write('Checking... ');
+                    break;
+                  case 'exists':
+                    process.stderr.write('exists\n');
+                    break;
+                  case 'creating-volume':
+                  case 'booting-sandbox':
+                  case 'installing':
+                  case 'snapshotting':
+                  case 'cleaning-up':
+                    process.stderr.write(`${p.message ?? p.type}\n`);
+                    break;
+                  case 'done':
+                    process.stderr.write('Done\n');
+                    break;
+                }
+              };
 
-            // 2. Build project setup layer (if needed)
-            let effectiveBaseSlug = baseSlug;
-            let setupHash: string | undefined;
-            if (
-              config.projectSetupLayer &&
-              (options.project || options.agent)
-            ) {
-              process.stderr.write('Project setup snapshot: ');
-              effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
+              // 1. Build base
+              process.stderr.write('Base snapshot: ');
+              const baseSlug = await ensureCloudSnapshot({
                 token,
                 region,
-                baseSnapshotSlug: baseSlug,
-                script: config.projectSetupLayer,
                 force,
                 onProgress,
               });
-              setupHash = effectiveBaseSlug.replace('oxl-', '');
-            }
 
-            // 3. Build agent overlay (if requested)
-            if (options.agent) {
-              process.stderr.write(`Agent (${options.agent}) snapshot: `);
-              await ensureAgentCloudSnapshot({
-                token,
-                region,
-                agent: options.agent as AgentType,
-                baseSnapshotSlug: effectiveBaseSlug,
-                setupHash,
-                force,
-                onProgress,
-              });
-            }
-          } else {
-            // --- Docker build path ---
-            const {
-              ensureDockerImage,
-              ensureProjectSetupLayer,
-              ensureAgentOverlay,
-            } = await import('../services/docker.ts');
-
-            const onProgress = (p: { type: string; message?: string }) => {
-              switch (p.type) {
-                case 'checking':
-                  process.stderr.write('Checking... ');
-                  break;
-                case 'exists':
-                  process.stderr.write('exists\n');
-                  break;
-                case 'pulling':
-                case 'pulling-cache':
-                case 'building':
-                  process.stderr.write(`${p.message ?? p.type}\n`);
-                  break;
-                case 'done':
-                  process.stderr.write('Done\n');
-                  break;
+              // 2. Build project setup layer (if needed)
+              let effectiveBaseSlug = baseSlug;
+              let setupHash: string | undefined;
+              if (
+                config.projectSetupLayer &&
+                (options.project || options.agent)
+              ) {
+                process.stderr.write('Project setup snapshot: ');
+                effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
+                  token,
+                  region,
+                  baseSnapshotSlug: baseSlug,
+                  script: config.projectSetupLayer,
+                  force,
+                  onProgress,
+                });
+                setupHash = effectiveBaseSlug.replace('oxl-', '');
               }
-            };
 
-            // 1. Build base
-            process.stderr.write('Base image: ');
-            const baseImage = await ensureDockerImage({
-              onProgress,
-              force,
-            });
+              // 3. Build agent overlay (if requested)
+              if (options.agent) {
+                process.stderr.write(`Agent (${options.agent}) snapshot: `);
+                await ensureAgentCloudSnapshot({
+                  token,
+                  region,
+                  agent: options.agent as AgentType,
+                  baseSnapshotSlug: effectiveBaseSlug,
+                  setupHash,
+                  force,
+                  onProgress,
+                });
+              }
+            } else {
+              // --- Docker build path ---
+              const {
+                ensureDockerImage,
+                ensureProjectSetupLayer,
+                ensureAgentOverlay,
+              } = await import('../services/docker.ts');
 
-            // 2. Build project setup layer (if needed)
-            let effectiveBase = baseImage;
-            if (
-              config.projectSetupLayer &&
-              (options.project || options.agent)
-            ) {
-              process.stderr.write('Project setup layer: ');
-              effectiveBase = await ensureProjectSetupLayer(
-                baseImage,
-                config.projectSetupLayer,
-                { onProgress, force },
-              );
+              const onProgress = (p: { type: string; message?: string }) => {
+                switch (p.type) {
+                  case 'checking':
+                    process.stderr.write('Checking... ');
+                    break;
+                  case 'exists':
+                    process.stderr.write('exists\n');
+                    break;
+                  case 'pulling':
+                  case 'pulling-cache':
+                  case 'building':
+                    process.stderr.write(`${p.message ?? p.type}\n`);
+                    break;
+                  case 'done':
+                    process.stderr.write('Done\n');
+                    break;
+                }
+              };
+
+              // 1. Build base
+              process.stderr.write('Base image: ');
+              const baseImage = await ensureDockerImage({
+                onProgress,
+                force,
+              });
+
+              // 2. Build project setup layer (if needed)
+              let effectiveBase = baseImage;
+              if (
+                config.projectSetupLayer &&
+                (options.project || options.agent)
+              ) {
+                process.stderr.write('Project setup layer: ');
+                effectiveBase = await ensureProjectSetupLayer(
+                  baseImage,
+                  config.projectSetupLayer,
+                  { onProgress, force },
+                );
+              }
+
+              // 3. Build agent overlay (if requested)
+              if (options.agent) {
+                process.stderr.write(`Agent (${options.agent}) overlay: `);
+                await ensureAgentOverlay(
+                  effectiveBase,
+                  options.agent as AgentType,
+                  { onProgress, force },
+                );
+              }
             }
-
-            // 3. Build agent overlay (if requested)
-            if (options.agent) {
-              process.stderr.write(`Agent (${options.agent}) overlay: `);
-              await ensureAgentOverlay(
-                effectiveBase,
-                options.agent as AgentType,
-                { onProgress, force },
-              );
-            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error(`\nError: ${message}`);
+            process.exit(1);
           }
         },
       ),
