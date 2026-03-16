@@ -7,7 +7,6 @@ import packageJson from '../package.json' with { type: 'json' };
 import { authCommand } from './commands/auth';
 import {
   branchAction,
-  branchCommand,
   validateBranchOptions,
   withBranchOptions,
 } from './commands/branch';
@@ -127,6 +126,22 @@ withBranchOptions(program)
       process.exit(1);
     }
 
+    // Reject task-start-only flags when no prompt is given — these only
+    // make sense when starting a session, not when opening the TUI.
+    const taskOnlyFlags: [string, unknown][] = [
+      ['--follow', options.follow],
+      ['--agent-mode', options.agentMode],
+      ['--output', options.output !== 'id' && options.output],
+      ['--mount', options.mount],
+    ];
+    const setFlags = taskOnlyFlags.filter(([, v]) => v).map(([name]) => name);
+    if (setFlags.length > 0) {
+      console.error(
+        `Error: ${setFlags.join(', ')} require a prompt. Usage: ox [options] "<prompt>"`,
+      );
+      process.exit(1);
+    }
+
     // No prompt + TTY: launch TUI session manager
     await runSessionsTui({
       initialView: 'prompt',
@@ -140,7 +155,6 @@ withBranchOptions(program)
 
 // Add subcommands (after root options so they take precedence)
 program.addCommand(authCommand);
-program.addCommand(branchCommand);
 program.addCommand(claudeCommand);
 program.addCommand(codexCommand);
 program.addCommand(colorsCommand);

@@ -5,7 +5,7 @@
 import t, { type Complete } from '@bomb.sh/tab';
 import createTabFromCommander from '@bomb.sh/tab/commander';
 import { Command, type Command as CommandType } from 'commander';
-import type { OxSession } from '../services/sandbox/types.ts';
+import { listSessions, openSessionDb } from '../services/sandbox/sessionDb.ts';
 
 type Shell = 'zsh' | 'bash' | 'fish' | 'powershell';
 const SHELLS: Shell[] = ['zsh', 'bash', 'fish', 'powershell'];
@@ -55,14 +55,6 @@ function getSessionCompletions(): { name: string; description: string }[] {
 
   // Cloud sessions: synchronous SQLite read
   try {
-    const { openSessionDb, listSessions } =
-      require('../services/sandbox/sessionDb.ts') as {
-        openSessionDb: () => import('bun:sqlite').Database;
-        listSessions: (
-          db: import('bun:sqlite').Database,
-          filter?: { provider?: string },
-        ) => OxSession[];
-      };
     const db = openSessionDb();
     const cloudSessions = listSessions(db, { provider: 'cloud' });
     for (const s of cloudSessions) {

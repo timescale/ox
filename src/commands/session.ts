@@ -132,10 +132,10 @@ const attachCommand = new Command('attach')
 const psCommand = new Command('ps')
   .aliases(['list', 'ls'])
   .description('List all sessions')
-  .option(
-    '-o, --output <format>',
-    'Output format: tui, table, json, yaml',
-    'table',
+  .addOption(
+    new Option('-o, --output <format>', 'Output format')
+      .choices(['tui', 'table', 'json', 'yaml'])
+      .default('table'),
   )
   .option(
     '-a, --all',
@@ -170,7 +170,16 @@ const logsCommand = new Command('logs')
       }
       process.exit(0);
     } else {
-      const tail = options.tail ? Number.parseInt(options.tail, 10) : undefined;
+      let tail: number | undefined;
+      if (options.tail) {
+        tail = Number.parseInt(options.tail, 10);
+        if (Number.isNaN(tail) || tail <= 0) {
+          console.error(
+            `Error: --tail must be a positive integer, got: ${options.tail}`,
+          );
+          process.exit(1);
+        }
+      }
       const logs = await provider.getLogs(session.id, tail);
       if (logs) {
         process.stdout.write(logs);
@@ -183,7 +192,7 @@ const infoCommand = new Command('info')
   .description('Show detailed information about a session')
   .argument('<id>', 'Session name or ID')
   .addOption(
-    new Option('-o, --output <format>', 'Output format: table, json, yaml')
+    new Option('-o, --output <format>', 'Output format')
       .choices(['table', 'json', 'yaml'])
       .default('table'),
   )

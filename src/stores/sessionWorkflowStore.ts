@@ -479,7 +479,6 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           repoInfo,
           agent,
           model,
-          detach: !isInteractive,
           interactive: isInteractive,
           envVars: forkResult?.envVars,
           mountDir,

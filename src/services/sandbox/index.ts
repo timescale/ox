@@ -229,7 +229,17 @@ export async function resolveSession(
   const sessions = await listAllSessions();
 
   // 1. Try matching by name
-  let session = sessions.find((s) => s.name === idOrName);
+  const nameMatches = sessions.filter((s) => s.name === idOrName);
+  let session: OxSession | undefined;
+
+  if (nameMatches.length > 1) {
+    // Ambiguous — require full ID to disambiguate
+    const ids = nameMatches.map((s) => `  ${s.id} (${s.provider})`).join('\n');
+    throw new Error(
+      `Ambiguous session name "${idOrName}" matches ${nameMatches.length} sessions. Use the full ID:\n${ids}`,
+    );
+  }
+  session = nameMatches[0];
 
   // 2. Fallback: match by containerName or ID
   if (!session) {

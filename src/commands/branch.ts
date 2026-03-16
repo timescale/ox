@@ -1,9 +1,9 @@
 // ============================================================================
-// Branch Command - Creates feature branch with isolated DB fork and agent
+// Branch Action - Creates feature branch with isolated DB fork and agent
 // ============================================================================
 
 import { YAML } from 'bun';
-import { Command, Option } from 'commander';
+import { type Command, Option } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { ensureClaudeAuth } from '../services/claude';
 import { ensureCodexAuth } from '../services/codex';
@@ -14,7 +14,6 @@ import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
 import type { SandboxProviderType } from '../services/sandbox';
 import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
-import { resolvePromptInput } from '../services/stdinPrompt.ts';
 import { ensureGitignore, printErr } from '../utils/shell.ts';
 import { configAction } from './config';
 
@@ -220,7 +219,6 @@ export async function branchAction(
     repoInfo,
     agent: effectiveAgent,
     model: effectiveModel,
-    detach: true,
     interactive: isInteractiveAgent,
     envVars: forkResult?.envVars,
     mountDir,
@@ -296,16 +294,14 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
     )
     .option('-i, --interactive', 'Launch full TUI experience')
     .addOption(
-      new Option(
-        '-M, --agent-mode <mode>',
-        'Agent mode: async (default), interactive, or plan',
-      ).choices(['async', 'interactive', 'plan']),
+      new Option('-M, --agent-mode <mode>', 'Agent execution mode').choices([
+        'async',
+        'interactive',
+        'plan',
+      ]),
     )
     .addOption(
-      new Option(
-        '-o, --output <format>',
-        'Output format for session info: id (default), json, yaml',
-      )
+      new Option('-o, --output <format>', 'Output format for session info')
         .choices(['id', 'json', 'yaml'])
         .default('id'),
     )
@@ -316,69 +312,7 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
     .addOption(
       new Option(
         '-r, --provider <type>',
-        'Sandbox provider: docker or cloud (overrides config)',
+        'Sandbox provider (overrides config)',
       ).choices(['docker', 'cloud']),
     ) as T;
 }
-
-export const branchCommand = withBranchOptions(
-  new Command('branch')
-    .description(
-      'Create a feature branch with isolated DB fork and start agent sandbox',
-    )
-    .argument('[prompt]', 'Natural language description of the task'),
-).action(async (prompt: string | undefined, options: BranchOptions) => {
-  // Validate mutually exclusive flags before any routing
-  validateBranchOptions(options);
-
-  let resolved: Awaited<ReturnType<typeof resolvePromptInput>>;
-  try {
-    resolved = await resolvePromptInput(prompt);
-  } catch (err) {
-    console.error(`Error: ${(err as Error).message}`);
-    process.exit(1);
-  }
-  if (!resolved.prompt) {
-    console.error(
-      !process.stdin.isTTY
-        ? 'Error: prompt is required (stdin was redirected but empty)'
-        : 'Error: prompt is required',
-    );
-    process.exit(1);
-  }
-
-  // --interactive: launch TUI with auto-submit
-  if (options.interactive) {
-    const repoInfo = await tryGetRepoInfo();
-    const isGitRepo = repoInfo !== null;
-    if (!isGitRepo && !options.mount) {
-      options.mount = true;
-    }
-    const mountDir =
-      options.mount === true
-        ? process.cwd()
-        : typeof options.mount === 'string'
-          ? options.mount
-          : undefined;
-
-    const agentMode = options.agentMode ?? 'interactive';
-
-    const { runSessionsTui } = await import('./sessions.tsx');
-    await runSessionsTui({
-      initialView: 'starting',
-      initialPrompt: resolved.prompt,
-      initialAgent: options.agent,
-      initialModel: options.model,
-      serviceId: options.serviceId,
-      dbFork: options.dbFork,
-      mountDir,
-      isGitRepo,
-      sandboxProvider: options.provider,
-      autoSubmitAgentMode: agentMode,
-    });
-    return;
-  }
-
-  // --follow or default (detached): non-TUI flow
-  await branchAction(resolved.prompt, options);
-});

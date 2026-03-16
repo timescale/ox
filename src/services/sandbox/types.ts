@@ -59,7 +59,6 @@ export interface CreateSandboxOptions {
   agent: AgentType;
   model?: string;
   interactive: boolean;
-  detach: boolean;
   envVars?: Record<string, string>;
   mountDir?: string; // Docker-only: local dir mount
   isGitRepo?: boolean;

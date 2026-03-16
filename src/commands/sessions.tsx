@@ -987,11 +987,3 @@ export async function cleanAction(options: {
   }
   process.exit(0);
 }
-
-const cleanCommand = new Command('clean')
-  .description('Remove stopped ox containers')
-  .option('-a, --all', 'Remove all containers (including running)')
-  .option('-f, --force', 'Skip confirmation')
-  .action(cleanAction);
-
-sessionsCommand.addCommand(cleanCommand);
