@@ -18,7 +18,7 @@ The TUI has several views. Navigate between them with keyboard shortcuts or the 
 
 The main input area where you write task descriptions for the agent.
 
-<!-- screenshot: docs/assets/prompt-screen.gif -->
+![Prompt screen showing the ox TUI input area, status badges, and readiness indicators](images/prompt-screen.gif)
 
 **Elements:**
 - **Text area** -- Multi-line input with the placeholder "Ask anything... Type '/' for commands"
@@ -53,7 +53,7 @@ The main input area where you write task descriptions for the agent.
 
 Browse and manage all sessions across providers.
 
-<!-- screenshot: docs/assets/sessions-list.gif -->
+![Sessions list showing saved sessions, filters, and selection state](images/sessions-list.gif)
 
 **Keyboard shortcuts:**
 
@@ -159,7 +159,7 @@ Type `/` in an empty prompt to open the slash command popover. Slash commands ar
 | `/plan` | Switch to plan mode |
 | `/feedback` | Send feedback to the ox team |
 
-<!-- screenshot: docs/assets/slash-commands.gif -->
+![Slash command popover filtered from the prompt screen](images/slash-commands.gif)
 
 Type a partial name to fuzzy-filter the list. Press `Enter` to execute or `Escape` to dismiss.
 
@@ -167,7 +167,7 @@ Type a partial name to fuzzy-filter the list. Press `Enter` to execute or `Escap
 
 Ox ships with 33 built-in color themes. Change the theme with `/theme` or `ctrl+t` from the prompt screen.
 
-<!-- screenshot: docs/assets/theme-picker.gif -->
+![Theme picker showing live previews while browsing themes](images/theme-picker.gif)
 
 Available themes:
 

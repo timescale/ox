@@ -1,6 +1,6 @@
 # VHS Tape Files
 
-This directory contains [VHS](https://github.com/charmbracelet/vhs) tape files for generating GIF screenshots of the ox TUI. The generated GIFs are saved to `docs/assets/`.
+This directory contains [VHS](https://github.com/charmbracelet/vhs) tape files for generating GIF screenshots of the ox TUI. The generated GIFs are saved to `docs/images/`.
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ Or run a single tape:
 vhs docs/tapes/prompt-screen.tape
 ```
 
-Generated GIFs are written to `docs/assets/`.
+Generated GIFs are written to `docs/images/`.
 
 ## Tape Files
 
@@ -53,4 +53,5 @@ Generated GIFs are written to `docs/assets/`.
 - Tape files assume `ox` is available on your PATH or in the current directory
 - Some tapes require Docker to be running (for sessions list to show real data)
 - The `generate.sh` script runs all tapes sequentially
+- `generate.sh` creates a temporary `ox` wrapper so you can run tapes from the repo without installing the CLI globally
 - Edit tape timing (`Sleep` values) if animations are too fast or slow
