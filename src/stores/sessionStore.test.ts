@@ -60,6 +60,15 @@ describe('sessionStore - filters', () => {
     expect(useSessionStore.getState().filterText).toBe('bugfix');
   });
 
+  test('composes consecutive filter text updates from the latest state', () => {
+    const { setFilterText } = useSessionStore.getState();
+
+    setFilterText((prev) => `${prev}a`);
+    setFilterText((prev) => `${prev}b`);
+
+    expect(useSessionStore.getState().filterText).toBe('ab');
+  });
+
   test('stores filter mode', () => {
     useSessionStore.getState().setFilterMode('running');
     expect(useSessionStore.getState().filterMode).toBe('running');

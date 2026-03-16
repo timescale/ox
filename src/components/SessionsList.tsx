@@ -657,14 +657,14 @@ export function SessionsList() {
     }
 
     if (key.name === 'backspace') {
-      setFilterText(filterText.slice(0, -1));
+      setFilterText((prev) => prev.slice(0, -1));
       // Don't reset selection when changing filter text - preserve selection if possible
       return;
     }
 
     // Printable characters for filter
     if (key.raw && key.raw.length === 1 && key.raw.match(/[a-zA-Z0-9-_./]/)) {
-      setFilterText(filterText + key.raw);
+      setFilterText((prev) => prev + key.raw);
       // Don't reset selection when changing filter text - preserve selection if possible
     }
   });

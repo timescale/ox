@@ -11,6 +11,7 @@ import type { PrInfo } from '../services/github';
 
 export type FilterMode = 'all' | 'running' | 'completed';
 export type ScopeMode = 'local' | 'global';
+type StateUpdater<T> = T | ((prev: T) => T);
 
 export interface PrCacheEntry {
   prInfo: PrInfo | null;
@@ -32,7 +33,7 @@ export interface SessionState {
   filterText: string;
 
   /** Set the free-text filter */
-  setFilterText: (text: string) => void;
+  setFilterText: (text: StateUpdater<string>) => void;
 
   /** Status filter applied to the sessions list */
   filterMode: FilterMode;
@@ -85,8 +86,13 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
     set({ selectedSessionId: id });
   },
 
-  setFilterText: (text: string) => {
-    set({ filterText: text });
+  setFilterText: (text: StateUpdater<string>) => {
+    set((state) => ({
+      filterText:
+        typeof text === 'function'
+          ? (text as (prev: string) => string)(state.filterText)
+          : text,
+    }));
   },
 
   setFilterMode: (mode: FilterMode) => {
