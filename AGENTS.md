@@ -239,6 +239,23 @@ This project uses `bun patch` to maintain patches against npm dependencies. Patc
 - If `bun patch --commit` fails with a `gitattributes` symlink error, temporarily move `~/.gitattributes` aside, run the commit, then restore it.
 - After committing, always verify with `./bun install` followed by checking that your changes are present in the installed file.
 
+## Documentation
+
+When making user-facing changes, update the relevant documentation:
+
+- **`README.md`** -- Update if the change affects the high-level feature list or quick start
+- **`docs/getting-started.md`** -- Update for installation, first-run, or setup changes
+- **`docs/usage.md`** -- Update for changes to invocation modes, flags, or core workflow
+- **`docs/workflow.md`** -- Update for changes to the async PR workflow
+- **`docs/sessions.md`** -- Update for session lifecycle or management changes
+- **`docs/configuration.md`** -- Update when adding, removing, or changing config keys
+- **`docs/sandbox-providers.md`** -- Update for Docker, Cloud, mount mode, or port forwarding changes
+- **`docs/agents.md`** -- Update when adding agents, changing auth flows, or modifying model selection
+- **`docs/tui.md`** -- Update when adding/changing keyboard shortcuts, views, slash commands, command palette entries, or themes
+- **`docs/cli-reference.md`** -- Update when adding, removing, or changing CLI commands or flags
+
+Cross-link related pages instead of duplicating information. Keep docs concise.
+
 ## CLI Framework
 
 Uses `commander` for argument parsing. Commands are in `src/commands/`.
