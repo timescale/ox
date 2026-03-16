@@ -584,23 +584,30 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     }),
   );
 
-  // Build the set of current setup layer tags (if configured)
+  // Build the set of current setup layer tags (if configured).
+  // Images may be tagged under either the local (ox-sandbox:md5-...) or
+  // GHCR (ghcr.io/timescale/ox/sandbox:...) prefix depending on how the
+  // base image was resolved, so we compute tags for both prefixes.
   const config = await readConfig();
+  const ghcrBaseImage = getGhcrBaseTag();
   const currentSetupLayerTags = new Set<string>();
   if (config.projectSetupLayer) {
-    const setupTag = getProjectSetupTag(
-      localBaseImage,
-      config.projectSetupLayer,
-    );
-    const tagPart = setupTag.split(':')[1] ?? setupTag;
-    currentSetupLayerTags.add(tagPart);
+    for (const baseImg of [localBaseImage, ghcrBaseImage]) {
+      const setupTag = getProjectSetupTag(baseImg, config.projectSetupLayer);
+      const tagPart = setupTag.split(':')[1] ?? setupTag;
+      currentSetupLayerTags.add(tagPart);
 
-    // Agent overlays built on top of the setup layer are also current
-    const setupImage = setupTag;
-    for (const agent of agents) {
-      const fullTag = getAgentOverlayTag(setupImage, agent);
-      const overlayTagPart = fullTag.split(':')[1] ?? fullTag;
-      currentLocalOverlayTags.add(overlayTagPart);
+      // The full image reference is also current (for GHCR classification)
+      currentGhcrTags.add(setupTag);
+
+      // Agent overlays built on top of the setup layer are also current
+      for (const agent of agents) {
+        const fullTag = getAgentOverlayTag(setupTag, agent);
+        const overlayTagPart = fullTag.split(':')[1] ?? fullTag;
+        currentLocalOverlayTags.add(overlayTagPart);
+        // Also add the full image reference for GHCR classification
+        currentGhcrTags.add(fullTag);
+      }
     }
   }
 
