@@ -23,7 +23,7 @@ export const shellCommand = new Command('shell')
   .addOption(
     new Option(
       '-r, --provider <type>',
-      'Sandbox provider: docker or cloud (overrides config)',
+      'Sandbox provider (overrides config)',
     ).choices(['docker', 'cloud']),
   )
   .action(async (options: ShellOptions) => {

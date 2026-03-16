@@ -51,7 +51,7 @@ import {
   hasValidOpencodeFileCredentials,
 } from './opencode';
 import { runInDocker, type VirtualFile } from './runInDocker';
-import type { AttachOptions, SubmitMode } from './sandbox/types';
+import type { AgentMode, AttachOptions } from './sandbox/types';
 
 export const toVolumeArgs = (volumes: string[]): string[] =>
   volumes.flatMap((v) => ['-v', v]);
@@ -107,8 +107,8 @@ export interface OxContainerLabels {
   resumedFrom?: string;
   /** Docker image used for resume */
   resumeImage?: string;
-  /** How the user submitted the session (async, interactive, plan) */
-  submitMode?: SubmitMode;
+  /** How the agent runs in the sandbox (async, interactive, plan) */
+  agentMode?: AgentMode;
 }
 
 /**
@@ -136,7 +136,7 @@ export function buildOxLabels(
   if (input.noGit) result['ox.no-git'] = 'true';
   if (input.resumedFrom) result['ox.resumed-from'] = input.resumedFrom;
   if (input.resumeImage) result['ox.resume-image'] = input.resumeImage;
-  if (input.submitMode) result['ox.submit-mode'] = input.submitMode;
+  if (input.agentMode) result['ox.agent-mode'] = input.agentMode;
   return result;
 }
 
@@ -973,7 +973,6 @@ export interface StartContainerOptions {
   repoInfo: RepoInfo | null;
   agent: AgentType;
   model?: string;
-  detach: boolean;
   interactive: boolean;
   envVars?: Record<string, string>;
   /** If set, mount this local directory into the container instead of git clone */
@@ -982,8 +981,8 @@ export interface StartContainerOptions {
   isGitRepo?: boolean;
   /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
   agentArgs?: string[];
-  /** How the user submitted the session (async, interactive, plan) */
-  submitMode?: SubmitMode;
+  /** How the agent runs in the sandbox (async, interactive, plan) */
+  agentMode?: AgentMode;
   /** Pre-resolved Docker image to use (e.g., agent overlay image). If not set, uses the default resolved image. */
   dockerImage?: string;
 }
@@ -1011,7 +1010,7 @@ export interface OxSession {
   exitCode?: number;
   startedAt?: string;
   finishedAt?: string;
-  submitMode?: SubmitMode;
+  agentMode?: AgentMode;
 }
 
 interface DockerInspectResult {
@@ -1090,7 +1089,10 @@ export async function listOxSessions(): Promise<OxSession[]> {
         resumedFrom: labels['ox.resumed-from'],
         interactive: labels['ox.interactive'] === 'true',
         mountDir: labels['ox.mount'],
-        submitMode: (labels['ox.submit-mode'] as SubmitMode) || undefined,
+        agentMode:
+          (labels['ox.agent-mode'] as AgentMode) ||
+          (labels['ox.submit-mode'] as AgentMode) ||
+          undefined,
         status,
         exitCode: status === 'exited' ? state.ExitCode : undefined,
         startedAt: state.StartedAt,
@@ -1476,8 +1478,8 @@ export interface ResumeSessionOptions {
   mountDir?: string;
   /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
   agentArgs?: string[];
-  /** How the user submitted the session (async, interactive, plan) */
-  submitMode?: SubmitMode;
+  /** How the agent runs in the sandbox (async, interactive, plan) */
+  agentMode?: AgentMode;
   /** Pre-resolved Docker image to use for the resumed container. If not set, commits from the stopped container. */
   dockerImage?: string;
 }
@@ -1606,9 +1608,11 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
     mount: absoluteMountDir,
     resumedFrom: container.Name.replace(/^\//, ''),
     resumeImage,
-    submitMode:
-      options.submitMode ??
-      ((containerLabels['ox.submit-mode'] as SubmitMode) || undefined),
+    agentMode:
+      options.agentMode ??
+      ((containerLabels['ox.agent-mode'] as AgentMode) ||
+        (containerLabels['ox.submit-mode'] as AgentMode) ||
+        undefined),
   });
 
   try {
@@ -1688,7 +1692,10 @@ export async function getSession(nameOrId: string): Promise<OxSession | null> {
       resumedFrom: labels['ox.resumed-from'],
       interactive: labels['ox.interactive'] === 'true',
       mountDir: labels['ox.mount'],
-      submitMode: (labels['ox.submit-mode'] as SubmitMode) || undefined,
+      agentMode:
+        (labels['ox.agent-mode'] as AgentMode) ||
+        (labels['ox.submit-mode'] as AgentMode) ||
+        undefined,
       status,
       exitCode: status === 'exited' ? state.ExitCode : undefined,
       startedAt: state.StartedAt,
@@ -1716,13 +1723,12 @@ export async function startContainer(
     repoInfo,
     agent,
     model,
-    detach,
     interactive,
     envVars,
     mountDir,
     isGitRepo = true,
     agentArgs,
-    submitMode,
+    agentMode,
     dockerImage,
   } = options;
 
@@ -1822,9 +1828,9 @@ export async function startContainer(
     agentArgs,
   });
 
-  // Only add PR instructions in async mode (detached) with a git repo
+  // Only add PR instructions in async agent mode with a git repo
   const fullPrompt =
-    detach && isGitRepo
+    agentMode === 'async' && isGitRepo
       ? `${prompt}
 
 ---
@@ -1886,7 +1892,7 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
     model,
     mount: absoluteMountDir,
     noGit: !isGitRepo || undefined,
-    submitMode,
+    agentMode,
   });
 
   try {

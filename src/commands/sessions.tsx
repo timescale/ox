@@ -128,6 +128,11 @@ export interface RunSessionsTuiOptions {
   isGitRepo?: boolean;
   /** Sandbox provider override from CLI flag (overrides config) */
   sandboxProvider?: SandboxProviderType;
+  /**
+   * When set with initialView='starting', auto-submit the prompt with this agent mode.
+   * Skips the prompt screen and goes directly to session creation.
+   */
+  autoSubmitAgentMode?: 'async' | 'interactive' | 'plan';
 }
 
 // ============================================================================
@@ -148,6 +153,7 @@ interface SessionsAppProps {
   dbFork?: boolean;
   /** Mount local directory instead of git clone */
   initialMountDir?: string;
+  autoSubmitAgentMode?: 'async' | 'interactive' | 'plan';
 }
 
 function SessionsApp({
@@ -161,6 +167,7 @@ function SessionsApp({
   serviceId,
   dbFork = true,
   initialMountDir,
+  autoSubmitAgentMode,
 }: SessionsAppProps) {
   const view = useRouterStore((s) => s.view);
 
@@ -178,6 +185,7 @@ function SessionsApp({
       initialAgent,
       initialModel,
       initialSession,
+      autoSubmitAgentMode,
     });
   }, [
     workflowInit,
@@ -191,6 +199,7 @@ function SessionsApp({
     initialAgent,
     initialModel,
     initialSession,
+    autoSubmitAgentMode,
   ]);
 
   // Graceful shutdown: Ctrl+C handler
@@ -435,6 +444,7 @@ export async function runSessionsTui({
   mountDir,
   isGitRepo,
   sandboxProvider,
+  autoSubmitAgentMode,
 }: RunSessionsTuiOptions = {}): Promise<void> {
   const provider = sandboxProvider
     ? getSandboxProvider(sandboxProvider)
@@ -489,6 +499,7 @@ export async function runSessionsTui({
           serviceId={serviceId}
           dbFork={dbFork}
           initialMountDir={nextMountDir}
+          autoSubmitAgentMode={autoSubmitAgentMode}
         />
       </CopyOnSelect>,
     );
@@ -763,9 +774,9 @@ export async function runSessionsTui({
 // CLI Output Functions
 // ============================================================================
 
-type OutputFormat = 'tui' | 'table' | 'json' | 'yaml';
+export type OutputFormat = 'tui' | 'table' | 'json' | 'yaml';
 
-interface SessionsOptions {
+export interface SessionsOptions {
   output: OutputFormat;
   all: boolean;
 }
@@ -796,7 +807,7 @@ export function truncate(str: string, maxLen: number): string {
   return `${str.slice(0, maxLen - 3)}...`;
 }
 
-function printTable(sessions: OxSession[]): void {
+export function printTable(sessions: OxSession[]): void {
   const headers = ['NAME', 'STATUS', 'AGENT', 'REPO', 'CREATED', 'PROMPT'];
   const rows = sessions.map((s) => [
     s.name,
@@ -847,7 +858,7 @@ function printTable(sessions: OxSession[]): void {
 // Command Action
 // ============================================================================
 
-async function sessionsAction(options: SessionsOptions): Promise<void> {
+export async function sessionsAction(options: SessionsOptions): Promise<void> {
   // TUI mode is default
   if (options.output === 'tui') {
     await runSessionsTui({ initialView: 'list' });
@@ -864,7 +875,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
 
   if (options.output === 'json') {
     console.log(JSON.stringify(filteredSessions, null, 2));
-    return;
+    process.exit(0);
   }
 
   if (options.output === 'yaml') {
@@ -873,7 +884,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
     } else {
       console.log(YAML.stringify(filteredSessions, null, 2));
     }
-    return;
+    process.exit(0);
   }
 
   // Table output
@@ -883,7 +894,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
     } else {
       console.log('No running ox sessions. Use --all to see all sessions.');
     }
-    return;
+    process.exit(0);
   }
 
   console.log('');
@@ -900,6 +911,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
       console.log('');
     }
   }
+  process.exit(0);
 }
 
 // ============================================================================
@@ -907,7 +919,7 @@ async function sessionsAction(options: SessionsOptions): Promise<void> {
 // ============================================================================
 
 export const sessionsCommand = new Command('sessions')
-  .aliases(['list', 'session', 'status', 's'])
+  .aliases(['list', 'status', 'ps', 'ls'])
   .description('Show all ox sessions and their status')
   .option(
     '-o, --output <format>',
@@ -921,59 +933,57 @@ export const sessionsCommand = new Command('sessions')
   .action(sessionsAction);
 
 // Subcommand to remove/clean up sessions
-const cleanCommand = new Command('clean')
-  .description('Remove stopped ox containers')
-  .option('-a, --all', 'Remove all containers (including running)')
-  .option('-f, --force', 'Skip confirmation')
-  .action(async (options: { all: boolean; force: boolean }) => {
-    const sessions = await listAllSessions();
+export async function cleanAction(options: {
+  all: boolean;
+  force: boolean;
+}): Promise<void> {
+  const sessions = await listAllSessions();
 
-    const toRemove = options.all
-      ? sessions
-      : sessions.filter((s) => s.status !== 'running');
+  const toRemove = options.all
+    ? sessions
+    : sessions.filter((s) => s.status !== 'running');
 
-    if (toRemove.length === 0) {
-      console.log('No containers to remove.');
-      return;
+  if (toRemove.length === 0) {
+    console.log('No containers to remove.');
+    process.exit(0);
+  }
+
+  const displayName = (s: OxSession) => s.containerName ?? s.id;
+
+  console.log(`Found ${toRemove.length} container(s) to remove:`);
+  for (const session of toRemove) {
+    console.log(`  - ${displayName(session)} (${session.status})`);
+  }
+
+  if (!options.force) {
+    const readline = await import('node:readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const answer = await new Promise<string>((resolve) => {
+      rl.question('\nProceed? [y/N] ', resolve);
+    });
+    rl.close();
+
+    if (answer.toLowerCase() !== 'y') {
+      console.log('Cancelled.');
+      process.exit(0);
     }
+  }
 
-    const displayName = (s: OxSession) => s.containerName ?? s.id;
-
-    console.log(`Found ${toRemove.length} container(s) to remove:`);
-    for (const session of toRemove) {
-      console.log(`  - ${displayName(session)} (${session.status})`);
+  console.log('');
+  for (const session of toRemove) {
+    const name = displayName(session);
+    try {
+      const actionProvider = getProviderForSession(session);
+      await actionProvider.remove(session.id);
+      console.log(`Removed ${name}`);
+    } catch (err) {
+      log.error({ err }, `Failed to remove ${name}`);
+      console.error(`Failed to remove ${name}: ${err}`);
     }
-
-    if (!options.force) {
-      const readline = await import('node:readline');
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-
-      const answer = await new Promise<string>((resolve) => {
-        rl.question('\nProceed? [y/N] ', resolve);
-      });
-      rl.close();
-
-      if (answer.toLowerCase() !== 'y') {
-        console.log('Cancelled.');
-        return;
-      }
-    }
-
-    console.log('');
-    for (const session of toRemove) {
-      const name = displayName(session);
-      try {
-        const actionProvider = getProviderForSession(session);
-        await actionProvider.remove(session.id);
-        console.log(`Removed ${name}`);
-      } catch (err) {
-        log.error({ err }, `Failed to remove ${name}`);
-        console.error(`Failed to remove ${name}: ${err}`);
-      }
-    }
-  });
-
-sessionsCommand.addCommand(cleanCommand);
+  }
+  process.exit(0);
+}

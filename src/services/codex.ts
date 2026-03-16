@@ -203,6 +203,9 @@ const captureCodexCredentialsFromContainer = async (
  */
 const CODEX_CONFIG_TOML = `[projects."/work/app"]
 trust_level = "trusted"
+
+[notice.model_migrations]
+"gpt-5.3-codex" = "gpt-5.4"
 `;
 
 /**

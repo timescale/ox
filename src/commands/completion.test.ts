@@ -18,7 +18,6 @@ const CLI = resolve(PROJECT_ROOT, 'index.ts');
 // All subcommands registered in src/index.ts
 const EXPECTED_SUBCOMMANDS = [
   'auth',
-  'branch',
   'claude',
   'colors',
   'completions',
@@ -171,22 +170,25 @@ describe('completion resolution', () => {
   });
 
   test('partial command narrows to matching subcommands', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--', 'br');
+    const { stdout, exitCode } = await runOx('complete', '--', 'se');
     expect(exitCode).toBe(0);
 
     const { completions } = parseCompletionOutput(stdout);
-    expect(completions).toContain('branch');
+    expect(completions).toContain('session');
+    expect(completions).toContain('sessions');
     // Should not contain non-matching commands
     expect(completions).not.toContain('auth');
     expect(completions).not.toContain('shell');
   });
 
-  test('unique prefix completes to single subcommand', async () => {
+  test('unique prefix completes to matching commands and aliases', async () => {
     const { stdout, exitCode } = await runOx('complete', '--', 'up');
     expect(exitCode).toBe(0);
 
     const { completions } = parseCompletionOutput(stdout);
-    expect(completions).toEqual(['upgrade']);
+    expect(completions).toContain('upgrade');
+    expect(completions).toContain('update');
+    expect(completions).not.toContain('auth');
   });
 
   test('root flags complete when -- prefix is used', async () => {
@@ -198,14 +200,18 @@ describe('completion resolution', () => {
   });
 
   test('subcommand flags complete correctly', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--', 'branch', '--');
+    const { stdout, exitCode } = await runOx(
+      'complete',
+      '--',
+      'session',
+      'logs',
+      '--',
+    );
     expect(exitCode).toBe(0);
 
     const { completions } = parseCompletionOutput(stdout);
-    expect(completions).toContain('--agent');
-    expect(completions).toContain('--model');
-    expect(completions).toContain('--print');
-    expect(completions).toContain('--provider');
+    expect(completions).toContain('--follow');
+    expect(completions).toContain('--tail');
   });
 
   test('completion output uses correct tab-separated format', async () => {
@@ -233,11 +239,11 @@ describe('completion resolution', () => {
     const { stdout, exitCode } = await runOx('complete', '--', '');
     expect(exitCode).toBe(0);
 
-    // Find the branch line and verify it has a description
+    // Find the session line and verify it has a description
     const lines = stdout.trim().split('\n');
-    const branchLine = lines.find((l) => l.startsWith('branch\t'));
-    expect(branchLine).toBeDefined();
-    expect(branchLine).toContain('branch');
+    const sessionLine = lines.find((l) => l.startsWith('session\t'));
+    expect(sessionLine).toBeDefined();
+    expect(sessionLine).toContain('session');
   });
 });
 
@@ -441,10 +447,11 @@ complete -p ox
     }
   });
 
-  test('ox br<TAB> narrows to branch', async () => {
+  test('ox se<TAB> narrows to session/sessions', async () => {
     if (!bashPath) return;
-    const completions = await bashComplete('ox br');
-    expect(completions).toContain('branch');
+    const completions = await bashComplete('ox se');
+    expect(completions).toContain('session');
+    expect(completions).toContain('sessions');
     expect(completions).not.toContain('auth');
     expect(completions).not.toContain('shell');
   });
@@ -455,22 +462,14 @@ complete -p ox
     expect(completions).toContain('colors');
     expect(completions).toContain('completions');
     expect(completions).toContain('config');
-    expect(completions).not.toContain('branch');
+    expect(completions).not.toContain('auth');
   });
 
-  test('ox branch --<TAB> shows branch flags', async () => {
+  test('ox session logs --<TAB> shows logs flags', async () => {
     if (!bashPath) return;
-    const completions = await bashComplete('ox branch --');
-    expect(completions).toContain('--agent');
-    expect(completions).toContain('--model');
-    expect(completions).toContain('--provider');
-  });
-
-  test('ox branch --a<TAB> narrows to --agent', async () => {
-    if (!bashPath) return;
-    const completions = await bashComplete('ox branch --a');
-    expect(completions).toContain('--agent');
-    expect(completions).not.toContain('--model');
+    const completions = await bashComplete('ox session logs --');
+    expect(completions).toContain('--follow');
+    expect(completions).toContain('--tail');
   });
 
   afterAll(() => {

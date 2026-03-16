@@ -19,7 +19,7 @@ import {
 import { useCommandStore, useRegisterCommands } from '../services/commands.tsx';
 import type { AgentType } from '../services/config';
 import { log } from '../services/logger';
-import type { SandboxProviderType, SubmitMode } from '../services/sandbox';
+import type { AgentMode, SandboxProviderType } from '../services/sandbox';
 import type { SlashCommand } from '../services/slashCommands.ts';
 import { usePromptHistoryStore } from '../stores/promptHistoryStore.ts';
 import { usePromptSettingsStore } from '../stores/promptSettingsStore.ts';
@@ -133,19 +133,19 @@ export function PromptScreen() {
   const storedSandboxProvider = usePromptSettingsStore(
     (s) => s.sandboxProvider,
   );
-  const storedSubmitMode = usePromptSettingsStore((s) => s.submitMode);
+  const storedAgentMode = usePromptSettingsStore((s) => s.agentMode);
 
   const agent = resumeSession?.agent ?? storedAgent;
   const modelId = resumeSession?.model ?? storedModelId;
   const sandboxProvider = resumeSession?.provider ?? storedSandboxProvider;
-  const submitMode = resumeSession?.submitMode ?? storedSubmitMode;
+  const agentMode = resumeSession?.agentMode ?? storedAgentMode;
 
   const storeSetAgent = usePromptSettingsStore((s) => s.setAgent);
   const storeSetModelId = usePromptSettingsStore((s) => s.setModelId);
   const storeSetSandboxProvider = usePromptSettingsStore(
     (s) => s.setSandboxProvider,
   );
-  const storeSetSubmitMode = usePromptSettingsStore((s) => s.setSubmitMode);
+  const storeSetAgentMode = usePromptSettingsStore((s) => s.setAgentMode);
 
   const setAgent = useCallback(
     (a: AgentType) => {
@@ -165,11 +165,11 @@ export function PromptScreen() {
     },
     [resumeSession, storeSetSandboxProvider],
   );
-  const setSubmitMode = useCallback(
-    (m: SubmitMode) => {
-      if (!resumeSession) storeSetSubmitMode(m);
+  const setAgentMode = useCallback(
+    (m: AgentMode) => {
+      if (!resumeSession) storeSetAgentMode(m);
     },
-    [resumeSession, storeSetSubmitMode],
+    [resumeSession, storeSetAgentMode],
   );
 
   const [showModelSelector, setShowModelSelector] = useState(false);
@@ -351,10 +351,10 @@ export function PromptScreen() {
         category: 'Prompt',
         keybind: { key: 'tab', shift: true, display: 'shift+tab' },
         onSelect: () => {
-          const m = submitMode;
-          if (m === 'async') setSubmitMode('interactive');
-          else if (m === 'interactive') setSubmitMode('plan');
-          else setSubmitMode('async');
+          const m = agentMode;
+          if (m === 'async') setAgentMode('interactive');
+          else if (m === 'interactive') setAgentMode('plan');
+          else setAgentMode('async');
         },
       },
       {
@@ -474,9 +474,9 @@ export function PromptScreen() {
       forceMountMode,
       mountDir,
       sandboxProvider,
-      submitMode,
+      agentMode,
       setSandboxProvider,
-      setSubmitMode,
+      setAgentMode,
       isGitRepo,
       startShellSession,
     ],
@@ -711,7 +711,7 @@ export function PromptScreen() {
           if (textareaRef.current) {
             textareaRef.current.clear();
           }
-          setSubmitMode('async');
+          setAgentMode('async');
         },
       },
       {
@@ -723,7 +723,7 @@ export function PromptScreen() {
           if (textareaRef.current) {
             textareaRef.current.clear();
           }
-          setSubmitMode('interactive');
+          setAgentMode('interactive');
         },
       },
       {
@@ -735,7 +735,7 @@ export function PromptScreen() {
           if (textareaRef.current) {
             textareaRef.current.clear();
           }
-          setSubmitMode('plan');
+          setAgentMode('plan');
         },
       },
       {
@@ -759,7 +759,7 @@ export function PromptScreen() {
       forceMountMode,
       sandboxProvider,
       setSandboxProvider,
-      setSubmitMode,
+      setAgentMode,
       goToList,
     ],
   );
@@ -787,7 +787,7 @@ export function PromptScreen() {
     const promptText = textareaRef.current?.plainText.trim() || '';
 
     // Prompt validation only applies in async mode
-    if (submitMode === 'async') {
+    if (agentMode === 'async') {
       if (!promptText) {
         setToast({ message: 'Please enter a prompt', type: 'error' });
         return;
@@ -808,7 +808,7 @@ export function PromptScreen() {
       {
         agent: agent,
         model: modelId,
-        mode: submitMode,
+        mode: agentMode,
         mountMode,
         mountDir,
       },
@@ -826,7 +826,7 @@ export function PromptScreen() {
         resumeSession,
         promptText,
         modelId,
-        submitMode,
+        agentMode,
         effectiveMountDir,
         sandboxProvider,
       );
@@ -835,7 +835,7 @@ export function PromptScreen() {
         promptText,
         agent,
         modelId,
-        submitMode,
+        agentMode,
         effectiveMountDir,
         sandboxProvider,
       );
@@ -1047,9 +1047,9 @@ export function PromptScreen() {
                 <text fg={agentInfo?.color} onMouseDown={() => switchAgent()}>
                   {agentInfo?.name || agent}
                 </text>
-                {submitMode === 'async' ? (
+                {agentMode === 'async' ? (
                   <text fg={theme.success}>[async]</text>
-                ) : submitMode === 'plan' ? (
+                ) : agentMode === 'plan' ? (
                   <text fg={theme.info}>[plan]</text>
                 ) : null}
                 <text

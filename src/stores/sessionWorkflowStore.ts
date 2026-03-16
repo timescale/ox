@@ -27,10 +27,10 @@ import { log } from '../services/logger.ts';
 import type { RequestSudoFn } from '../services/portForwarding/sudo.ts';
 import { getSandboxProvider } from '../services/sandbox/index.ts';
 import type {
+  AgentMode,
   OxSession,
   SandboxProvider,
   SandboxProviderType,
-  SubmitMode,
 } from '../services/sandbox/types.ts';
 import { ensureGitignore } from '../utils/shell.ts';
 import { usePromptSettingsStore } from './promptSettingsStore.ts';
@@ -63,6 +63,7 @@ export interface SessionWorkflowState {
   initialAgent: AgentType | undefined;
   initialModel: string | undefined;
   initialSession: OxSession | undefined;
+  autoSubmitAgentMode: AgentMode | undefined;
   renderer: CliRenderer | null;
   requestSudo: RequestSudoFn | undefined;
 
@@ -78,6 +79,7 @@ export interface SessionWorkflowState {
     initialAgent?: AgentType;
     initialModel?: string;
     initialSession?: OxSession;
+    autoSubmitAgentMode?: AgentMode;
   }) => void;
 
   setConfig: (config: OxConfig) => void;
@@ -86,7 +88,7 @@ export interface SessionWorkflowState {
     prompt: string,
     agent: AgentType,
     model: string,
-    mode?: SubmitMode,
+    mode?: AgentMode,
     passedMountDir?: string,
     selectedProvider?: SandboxProviderType,
   ) => Promise<void>;
@@ -95,7 +97,7 @@ export interface SessionWorkflowState {
     session: OxSession,
     prompt: string,
     model: string,
-    mode?: SubmitMode,
+    mode?: AgentMode,
     mountDir?: string,
     selectedProvider?: SandboxProviderType,
   ) => Promise<void>;
@@ -143,6 +145,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
     initialAgent: undefined,
     initialModel: undefined,
     initialSession: undefined,
+    autoSubmitAgentMode: undefined,
     renderer: null,
     requestSudo: undefined,
 
@@ -184,6 +187,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         initialAgent: params.initialAgent,
         initialModel: params.initialModel,
         initialSession: params.initialSession,
+        autoSubmitAgentMode: params.autoSubmitAgentMode,
       });
     },
 
@@ -475,13 +479,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           repoInfo,
           agent,
           model,
-          detach: !isInteractive,
           interactive: isInteractive,
           envVars: forkResult?.envVars,
           mountDir,
           isGitRepo: inGitRepo,
           agentArgs,
-          submitMode: mode,
+          agentMode: mode,
           onProgress: (step) => {
             updateView((v) => (v.type === 'starting' ? { ...v, step } : v));
           },
@@ -588,7 +591,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           model,
           mountDir,
           agentArgs,
-          submitMode: mode,
+          agentMode: mode,
           onProgress: (step) => {
             updateView((v) => (v.type === 'resuming' ? { ...v, step } : v));
           },
@@ -688,7 +691,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           session,
           '', // no prompt for interactive continue
           session.model ?? '',
-          session.submitMode ?? 'interactive',
+          session.agentMode ?? 'interactive',
           session.mountDir,
           session.provider,
         );
@@ -861,7 +864,8 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         goToDetail(state.initialSession);
       } else if (initialView === 'starting' && initialPrompt != null) {
         const agent = state.initialAgent ?? cfg.agent ?? 'opencode';
-        const model = state.initialModel ?? cfg.model ?? '';
+        const model =
+          state.initialModel ?? cfg.agentModels?.[agent] ?? cfg.model ?? '';
 
         // Non-interactive path: wait for readiness before starting session
         goToStarting({
@@ -869,7 +873,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           agent,
           model,
           step: 'Preparing environment',
-          mode: 'async',
+          mode: state.autoSubmitAgentMode ?? 'async',
         });
 
         // Wait for Docker + image to be ready, then start
@@ -924,7 +928,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             });
           }
 
-          get().startSession(initialPrompt, agent, model);
+          get().startSession(
+            initialPrompt,
+            agent,
+            model,
+            state.autoSubmitAgentMode,
+          );
         };
 
         waitAndStart().catch((err) => {

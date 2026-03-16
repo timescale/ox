@@ -5,6 +5,7 @@
 export { CloudSandboxProvider } from './cloudProvider.ts';
 export { DockerSandboxProvider } from './dockerProvider.ts';
 export type {
+  AgentMode,
   CreateSandboxOptions,
   CreateShellSandboxOptions,
   ExecType,
@@ -16,7 +17,6 @@ export type {
   SandboxProviderType,
   SandboxStats,
   ShellSession,
-  SubmitMode,
 } from './types.ts';
 
 import { track } from '../analytics.ts';
@@ -217,4 +217,50 @@ export async function listAllSessions(): Promise<OxSession[]> {
   });
 
   return sessions;
+}
+
+/**
+ * Resolve a session by name, container name, or ID.
+ * Returns the session and its provider, or null if not found.
+ */
+export async function resolveSession(
+  idOrName: string,
+): Promise<{ session: OxSession; provider: SandboxProvider } | null> {
+  const sessions = await listAllSessions();
+
+  // 1. Try matching by name
+  const nameMatches = sessions.filter((s) => s.name === idOrName);
+  let session: OxSession | undefined;
+
+  if (nameMatches.length > 1) {
+    // Ambiguous — require full ID to disambiguate
+    const ids = nameMatches.map((s) => `  ${s.id} (${s.provider})`).join('\n');
+    throw new Error(
+      `Ambiguous session name "${idOrName}" matches ${nameMatches.length} sessions. Use the full ID:\n${ids}`,
+    );
+  }
+  session = nameMatches[0];
+
+  // 2. Fallback: match by containerName or ID
+  if (!session) {
+    session = sessions.find(
+      (s) => s.containerName === idOrName || s.id === idOrName,
+    );
+  }
+
+  // 3. Fallback: query each provider directly
+  if (!session) {
+    for (const providerType of ['docker', 'cloud'] as const) {
+      const p = getSandboxProvider(providerType);
+      const found = await p.get(idOrName);
+      if (found) {
+        session = found;
+        break;
+      }
+    }
+  }
+
+  if (!session) return null;
+
+  return { session, provider: getProviderForSession(session) };
 }

@@ -52,6 +52,7 @@
     "zustand": "^5.0.11"
   },
   "patchedDependencies": {
-    "@deno/sandbox@0.13.1": "patches/@deno%2Fsandbox@0.13.1.patch"
+    "@deno/sandbox@0.13.1": "patches/@deno%2Fsandbox@0.13.1.patch",
+    "@bomb.sh/tab@0.0.14": "patches/@bomb.sh%2Ftab@0.0.14.patch"
   }
 }

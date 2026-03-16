@@ -30,8 +30,14 @@ curl -fsSL https://get.ox.build | bash
 # Run the interactive TUI
 ox
 
-# Or start a task directly
+# Start a task (runs in background, prints session ID)
 ox "Add input validation to the signup form"
+
+# Start a task and follow the output
+ox -f "Fix the broken unit tests"
+
+# Check on your sessions
+ox session ps
 ```
 
 ## Installation
@@ -85,23 +91,71 @@ Run `ox` with no arguments to open the full terminal UI. From here you can write
 ox
 ```
 
-### Single Task
+### Start a Task
 
-Pass a natural-language description to start a task directly:
+Pass a natural-language description to start a task. By default, Ox creates the session in the background and prints the session ID:
 
 ```bash
 ox "Refactor the auth middleware to use JWT tokens"
+# Prints session ID to stdout, progress to stderr, exits immediately
 ```
 
-Ox will create a branch, set up a sandbox, and launch the configured agent with your prompt. The agent runs in the background -- use `ox sessions` to check on it, or `ox` to open the TUI and attach.
+This is designed for scripting -- you can capture the session ID:
+
+```bash
+SESSION=$(ox "Add input validation to the signup form")
+ox session logs -f "$SESSION"
+```
+
+### Follow Mode
+
+Stream the agent's output to your terminal:
+
+```bash
+ox -f "Fix the failing integration tests"
+```
+
+The process exits with the agent's exit code when the session finishes.
 
 ### Interactive Mode
 
-To work alongside the agent in a live terminal session:
+Launch the full TUI and work alongside the agent in a live terminal session:
 
 ```bash
-ox -i "Fix the failing integration tests"
+ox -i "Implement the new dashboard component"
 ```
+
+The `-i` flag implies `--agent-mode=interactive` unless you specify otherwise.
+
+### Agent Modes
+
+Control how the agent runs inside the sandbox with `--agent-mode` / `-M`:
+
+| Mode | Description |
+|------|-------------|
+| `async` (default) | Agent runs in the background. Best for fire-and-forget tasks. |
+| `interactive` | Agent runs with a TTY for live interaction. Use with `-i`. |
+| `plan` | Agent runs in read-only/plan mode. Can review but not modify code. |
+
+```bash
+# Start a plan-mode agent (detached)
+ox -M plan "Review the authentication flow for security issues"
+
+# Start an async agent but view it in the TUI
+ox -i -M async "Add comprehensive test coverage"
+```
+
+### Flag Compatibility
+
+| Flags | Behavior |
+|-------|----------|
+| `ox "task"` | Detached async -- print session ID, exit |
+| `ox -f "task"` | Follow async -- stream output, exit with agent code |
+| `ox -i "task"` | Interactive TUI -- launch TUI, auto-submit |
+| `ox -M plan "task"` | Detached plan -- print session ID, exit |
+| `ox -i -M async "task"` | TUI + async -- launch TUI, show session detail |
+| `ox -f -i "task"` | **Error** -- mutually exclusive |
+| `ox -f -M interactive "task"` | **Error** -- follow requires async mode |
 
 ### Shell Access
 
@@ -229,20 +283,82 @@ API_KEY=your-key-here
 
 ## Session Management
 
+Ox provides two ways to manage sessions: the `ox session` command (alias: `ox container`) for individual session operations, and `ox sessions` for listing.
+
+In all commands below, `<session>` can be the session name or ID. Tab completion is supported.
+
 ### Listing Sessions
 
 ```bash
-# Open the TUI session list
-ox sessions
-
-# Table output
-ox sessions --output table
-
-# JSON output for scripting
-ox sessions --output json
+# Table of running sessions
+ox session ps
 
 # Include stopped sessions
-ox sessions --all
+ox session ps --all
+
+# JSON output for scripting
+ox session ps -o json
+
+# YAML output
+ox session ps -o yaml
+
+# Open the TUI session list
+ox session ps -o tui
+```
+
+`ox sessions` is an alias for `ox session ps` and supports the same flags.
+
+### Session Details
+
+```bash
+# Show detailed info for a session
+ox session info <session>
+
+# JSON output
+ox session info -o json <session>
+```
+
+### Session Logs
+
+```bash
+# Print logs for a session
+ox session logs <session>
+
+# Follow logs in real time (like tail -f)
+ox session logs -f <session>
+
+# Show last N lines
+ox session logs --tail 50 <session>
+```
+
+### Session URLs
+
+```bash
+# Print proxied URLs for a session (if appPort configured)
+ox session urls <session>
+```
+
+### Stopping and Removing Sessions
+
+```bash
+# Stop a running session
+ox session stop <session>
+
+# Remove a session (aliases: rm, remove, delete)
+ox session rm <session>
+
+# Remove all stopped containers
+ox session clean
+
+# Remove all containers including running
+ox session clean --all
+```
+
+### Attaching to Sessions
+
+```bash
+# Attach to a running session's terminal
+ox session attach <session>
 ```
 
 ### Resuming Sessions
@@ -258,26 +374,43 @@ ox resume <session> "Continue by adding error handling"
 ox resume --detach <session>
 ```
 
-### Cleanup
+### Resource Cleanup
 
 ```bash
-# Remove stopped containers
-ox sessions clean
-
-# Remove all containers (including running)
-ox sessions clean --all
-
 # Clean up old images, volumes, and snapshots
 ox resources clean
 ```
 
 ## CLI Reference
 
+### Root Command
+
 | Command | Description |
 |---------|-------------|
-| `ox [prompt]` | Start a new task or open the TUI |
-| `ox sessions` | List and manage sessions |
+| `ox [prompt]` | Start a new task (detached) or open the TUI (no prompt) |
+| `ox -f [prompt]` | Start a task and follow the agent output |
+| `ox -i [prompt]` | Start a task in the interactive TUI |
+| `ox -M <mode> [prompt]` | Start a task with a specific agent mode (async/interactive/plan) |
+
+### Session Management
+
+| Command | Description |
+|---------|-------------|
+| `ox session ps` | List sessions (aliases: `list`, `ls`) |
+| `ox session info <id>` | Show detailed session information |
+| `ox session logs <id>` | Print session logs (`-f` to follow) |
+| `ox session stop <id>` | Stop a running session |
+| `ox session rm <id>` | Remove a session (aliases: `remove`, `delete`) |
+| `ox session attach <id>` | Attach to a running session |
+| `ox session urls <id>` | Print proxied URLs for a session |
+| `ox session clean` | Remove stopped containers (`-a` for all) |
+| `ox sessions` | Alias for `ox session ps` |
 | `ox resume <session>` | Resume a stopped session |
+
+### Other Commands
+
+| Command | Description |
+|---------|-------------|
 | `ox shell` | Open a shell in a new sandbox |
 | `ox config` | Interactive configuration wizard |
 | `ox auth check <provider>` | Check authentication status |
@@ -286,7 +419,9 @@ ox resources clean
 | `ox logs` | View ox logs |
 | `ox upgrade` | Check for and install updates |
 | `ox completions [shell]` | Set up shell tab completions |
+| `ox feedback <message>` | Send product feedback to the ox team |
 | `ox claude [args...]` | Run Claude Code inside a sandbox |
+| `ox codex [args...]` | Run Codex inside a sandbox |
 | `ox opencode [args...]` | Run OpenCode inside a sandbox |
 | `ox gh [args...]` | Run the GitHub CLI inside a sandbox |
 | `ox colors` | Display theme color swatches |

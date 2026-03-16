@@ -87,7 +87,7 @@ export function mapDockerSession(docker: DockerSession): OxSession {
     containerName: docker.containerName,
     startedAt: docker.startedAt,
     finishedAt: docker.finishedAt,
-    submitMode: docker.submitMode,
+    agentMode: docker.agentMode,
   };
 }
 
@@ -162,13 +162,12 @@ export class DockerSandboxProvider implements SandboxProvider {
       repoInfo: options.repoInfo,
       agent: options.agent,
       model: options.model,
-      detach: options.detach,
       interactive: options.interactive,
       envVars: options.envVars,
       mountDir: options.mountDir,
       isGitRepo: options.isGitRepo,
       agentArgs: options.agentArgs,
-      submitMode: options.submitMode,
+      agentMode: options.agentMode,
       dockerImage: agentImage,
     });
 
