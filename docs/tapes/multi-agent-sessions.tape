@@ -12,23 +12,23 @@ Set Padding 20
 Set Framerate 30
 Set TypingSpeed 55ms
 
-Type "ox sessions"
+Type "./bun index.ts sessions"
 Enter
 Sleep 2s
 
-Type "ox session attach demo-claude-auth"
+Type "./bun index.ts session attach demo-claude-auth"
 Enter
 Sleep 3s
 Ctrl+\
 Sleep 1500ms
 
-Type "ox session attach demo-opencode-tests"
+Type "./bun index.ts session attach demo-opencode-tests"
 Enter
 Sleep 3s
 Ctrl+\
 Sleep 1500ms
 
-Type "ox session attach demo-codex-validation"
+Type "./bun index.ts session attach demo-codex-validation"
 Enter
 Sleep 3s
 Ctrl+\
