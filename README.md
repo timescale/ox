@@ -103,6 +103,51 @@ We'd love to support more agents. Let us know your favorite to help us prioritiz
 | [TUI Guide](docs/tui.md) | Views, keyboard shortcuts, command palette, slash commands, themes |
 | [CLI Reference](docs/cli-reference.md) | Complete command and flag reference |
 
+## Development
+
+### Prerequisites
+
+- [Bun](https://bun.sh/) (pinned version auto-installed by `./bun` wrapper)
+- Node.js 18+ (for TypeScript support)
+
+### Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/timescale/ox.git
+cd ox
+
+# Install dependencies
+./bun install
+
+# Run all checks (typecheck, lint, test)
+./bun run check
+```
+
+### Common Commands
+
+```bash
+# Type checking
+./bun run typecheck
+
+# Linting and formatting (check)
+./bun run lint
+
+# Linting and formatting (auto-fix)
+./bun run lint --write
+
+# Run tests
+./bun test
+
+# Build standalone binary
+./bun run build
+
+# Run the CLI directly
+./bun index.ts <command>
+```
+
+For more details, see [CLAUDE.md](CLAUDE.md).
+
 ## License
 
 Apache 2.0 -- see [LICENSE](LICENSE) for details.
