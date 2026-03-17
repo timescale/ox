@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TMP_DIR="$(mktemp -d)"
+VHS_CONFIG_DIR="$TMP_DIR/ox-config"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
@@ -34,6 +35,7 @@ else
 fi
 
 mkdir -p "$REPO_ROOT/docs/images"
+mkdir -p "$VHS_CONFIG_DIR"
 
 cat >"$TMP_DIR/chromium" <<EOF
 #!/bin/sh
@@ -46,7 +48,12 @@ run_tape() {
   local name
   name="$(basename "$tape" .tape)"
   echo "Generating $name.gif..."
-  (cd "$REPO_ROOT" && PATH="$TMP_DIR:$REPO_ROOT:$PATH" "$VHS_BIN" "$tape")
+  (
+    cd "$REPO_ROOT" &&
+      PATH="$TMP_DIR:$REPO_ROOT:$PATH" \
+      OX_USER_CONFIG_DIR="$VHS_CONFIG_DIR" \
+      "$VHS_BIN" "$tape"
+  )
   echo "  -> docs/images/$name.gif"
 }
 
