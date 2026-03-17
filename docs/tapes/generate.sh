@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-mkdir -p "$REPO_ROOT/docs/assets"
+mkdir -p "$REPO_ROOT/docs/images"
 
 run_tape() {
   local tape="$1"
@@ -19,7 +19,7 @@ run_tape() {
   name="$(basename "$tape" .tape)"
   echo "Generating $name.gif..."
   (cd "$REPO_ROOT" && vhs "$tape")
-  echo "  -> docs/assets/$name.gif"
+  echo "  -> docs/images/$name.gif"
 }
 
 if [ $# -gt 0 ]; then

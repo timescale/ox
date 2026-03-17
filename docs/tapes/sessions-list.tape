@@ -1,7 +1,7 @@
 # Sessions List
 # Shows the sessions list view with session entries and filter controls.
 
-Output docs/assets/sessions-list.gif
+Output docs/images/sessions-list.gif
 
 Set Shell bash
 Set Width 1200

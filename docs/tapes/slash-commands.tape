@@ -1,7 +1,7 @@
 # Slash Commands
 # Shows the slash command popover appearing when typing "/" in the prompt.
 
-Output docs/assets/slash-commands.gif
+Output docs/images/slash-commands.gif
 
 Set Shell bash
 Set Width 1000

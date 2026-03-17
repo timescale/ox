@@ -1,7 +1,7 @@
 # Theme Picker
 # Shows the theme picker with live preview of different themes.
 
-Output docs/assets/theme-picker.gif
+Output docs/images/theme-picker.gif
 
 Set Shell bash
 Set Width 1000
