@@ -1,6 +1,6 @@
 # VHS Tape Files
 
-This directory contains [VHS](https://github.com/charmbracelet/vhs) tape files for generating GIF screenshots of the ox TUI. The generated GIFs are saved to `docs/assets/`.
+This directory contains [VHS](https://github.com/charmbracelet/vhs) tape files for generating GIF screenshots of the ox TUI. The generated GIFs are saved to `docs/images/`.
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ Or run a single tape:
 vhs docs/tapes/prompt-screen.tape
 ```
 
-Generated GIFs are written to `docs/assets/`.
+Generated GIFs are written to `docs/images/`.
 
 ## Tape Files
 

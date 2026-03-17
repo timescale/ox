@@ -27,6 +27,8 @@ Stream the agent's output to your terminal in real time:
 ox -f "Fix the failing integration tests"
 ```
 
+![Follow Mode](images/start-task.gif)
+
 The process exits with the agent's exit code when the session finishes. Useful when you want to watch the agent work without the full TUI.
 
 ### Interactive TUI (`-i`)

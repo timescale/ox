@@ -1,7 +1,7 @@
 # Prompt Screen
 # Shows the main TUI prompt screen with agent badge, model, and readiness indicators.
 
-Output docs/assets/prompt-screen.gif
+Output docs/images/prompt-screen.gif
 
 Set Shell bash
 Set Width 1000

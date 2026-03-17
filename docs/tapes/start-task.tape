@@ -1,7 +1,7 @@
 # Start Task
 # Shows starting a task from the CLI in follow mode.
 
-Output docs/assets/start-task.gif
+Output docs/images/start-task.gif
 
 Set Shell bash
 Set Width 1000
@@ -13,9 +13,9 @@ Set Framerate 30
 Set TypingSpeed 40ms
 
 # Show the basic command
-Type "ox -f 'Fix the failing unit tests in the auth module'"
+Type "ox -f -m haiku --no-db-fork 'Add a README with project name and setup instructions'"
 Sleep 1s
 Enter
 
-# Wait for output
-Sleep 8s
+# Wait for container startup and agent output
+Sleep 30s
