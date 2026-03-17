@@ -12,7 +12,7 @@ const SEED_IDS = [
   'vhs-seed-session-001',
   'vhs-seed-session-002',
   'vhs-seed-session-003',
-];
+] as const;
 
 const db = openSessionDb();
 
@@ -31,7 +31,7 @@ const now = new Date();
 // machine will also appear in the sessions list automatically.
 const sessions: OxSession[] = [
   {
-    id: SEED_IDS[0]!,
+    id: SEED_IDS[0],
     provider: 'cloud',
     name: 'add-jwt-auth-middleware',
     branch: 'add-jwt-auth-middleware',
@@ -46,7 +46,7 @@ const sessions: OxSession[] = [
     startedAt: new Date(now.getTime() - 45 * 60_000).toISOString(),
   },
   {
-    id: SEED_IDS[1]!,
+    id: SEED_IDS[1],
     provider: 'cloud',
     name: 'feat-dashboard-redesign',
     branch: 'feat-dashboard-redesign',
@@ -63,7 +63,7 @@ const sessions: OxSession[] = [
     finishedAt: new Date(now.getTime() - 4 * 3600_000).toISOString(),
   },
   {
-    id: SEED_IDS[2]!,
+    id: SEED_IDS[2],
     provider: 'cloud',
     name: 'fix-signup-form-validation',
     branch: 'fix-signup-form-validation',
