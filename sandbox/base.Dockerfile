@@ -5,16 +5,17 @@ LABEL description="Minimal base sandbox environment (no agents)"
 LABEL org.opencontainers.image.source=https://github.com/timescale/ox
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  git \
-  ripgrep \
-  curl \
   ca-certificates \
-  zip \
-  unzip \
-  tar \
+  curl \
+  git \
   gzip \
   jq \
+  ripgrep \
+  software-properties-common \
+  tar \
   tmux \
+  unzip \
+  zip \
   && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI
