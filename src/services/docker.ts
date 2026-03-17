@@ -1229,6 +1229,12 @@ export interface StartContainerOptions {
   agentMode?: AgentMode;
   /** Pre-resolved Docker image to use (e.g., agent overlay image). If not set, uses the default resolved image. */
   dockerImage?: string;
+  /** Extra initialization commands to run in the container before the agent starts. */
+  initScript?: string;
+  /** Extra root-level initialization commands to run before the container starts. */
+  rootInitScript?: string;
+  /** Extra overlay mount paths to isolate inside the mounted worktree. */
+  overlayMounts?: string[];
 }
 
 // ============================================================================
@@ -1976,6 +1982,9 @@ export async function startContainer(
     agentArgs,
     agentMode,
     dockerImage,
+    initScript,
+    rootInitScript,
+    overlayMounts,
   } = options;
 
   const oxEnvPath = '.ox/.env';
@@ -2054,9 +2063,13 @@ export async function startContainer(
 
     // Add overlay bind mounts for paths that need container isolation
     // These must come after the bind mount so they overlay on top
+    const effectiveOverlayMounts = [
+      ...(config.overlayMounts ?? []),
+      ...(overlayMounts ?? []),
+    ];
     const overlayVolumes = await createOverlayDirs(
       containerName,
-      config.overlayMounts,
+      effectiveOverlayMounts,
     );
     volumes.push(...overlayVolumes);
   }
@@ -2085,6 +2098,10 @@ Unless otherwise instructed above, use the \`gh\` command to create a PR when do
         ? prompt
         : null;
 
+  const effectiveInitScript = [config.initScript, initScript]
+    .filter((value) => value && value.trim().length > 0)
+    .join('\n');
+
   // Different startup script based on mount mode and git repo status
   let startupScript: string;
   if (absoluteMountDir) {
@@ -2099,7 +2116,7 @@ current_branch=$(git rev-parse --abbrev-ref HEAD)
 if [ "$current_branch" = "main" ] || [ "$current_branch" = "master" ]; then
   git switch -c "ox/${branchName}"
 fi
-${config.initScript || ''}
+${effectiveInitScript}
 ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
     } else {
@@ -2107,7 +2124,7 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
       startupScript = `
 set -e
 cd /work/app
-${config.initScript || ''}
+${effectiveInitScript}
 ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
     }
@@ -2123,7 +2140,7 @@ gh auth setup-git
 gh repo clone ${repoInfo.fullName} app
 cd app
 git switch -c "ox/${branchName}"
-${config.initScript || ''}
+${effectiveInitScript}
 ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
 `.trim();
   }
@@ -2163,7 +2180,9 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
       files,
       labels: oxLabels,
       privileged: config.privileged,
-      rootExecBeforeStart: config.rootInitScript,
+      rootExecBeforeStart: [config.rootInitScript, rootInitScript]
+        .filter((value) => value && value.trim().length > 0)
+        .join('\n'),
     });
     await result.exited;
     return containerName;

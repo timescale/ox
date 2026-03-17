@@ -53,5 +53,6 @@ Generated GIFs are written to `docs/images/`.
 
 - Tape files assume `ox` is available on your PATH or in the current directory
 - Some tapes require Docker to be running (for sessions list to show real data)
+- The multi-agent session tape seeds real Docker-backed interactive demo sessions before recording
 - The `generate.sh` script runs all tapes sequentially
 - Edit tape timing (`Sleep` values) if animations are too fast or slow

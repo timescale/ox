@@ -1,5 +1,5 @@
 # Multi-Agent Interactive Sessions
-# Shows three interactive sessions running in parallel and hopping between them.
+# Shows real ox session listing and attachment across three interactive sessions.
 
 Output docs/images/multi-agent-sessions.gif
 
@@ -12,41 +12,24 @@ Set Padding 20
 Set Framerate 30
 Set TypingSpeed 55ms
 
-Type "alias ox='bash ./docs/tapes/showcase-ox.sh'"
-Enter
-Sleep 500ms
-
-Type "ox --agent claude -M interactive 'Refactor the auth middleware into smaller composable steps'"
-Enter
-Sleep 1500ms
-
-Type "ox --agent opencode -M interactive 'Add integration coverage for the dashboard loading states'"
-Enter
-Sleep 1500ms
-
-Type "ox --agent codex -M interactive 'Tighten signup validation and preserve inline form errors'"
-Enter
-Sleep 1500ms
-
 Type "ox sessions"
 Enter
-Sleep 1800ms
+Sleep 2s
 
 Type "ox session attach demo-claude-auth"
 Enter
-Sleep 2500ms
+Sleep 3s
 Ctrl+\
-Sleep 1200ms
+Sleep 1500ms
 
 Type "ox session attach demo-opencode-tests"
 Enter
-Sleep 2500ms
+Sleep 3s
 Ctrl+\
-Sleep 1200ms
+Sleep 1500ms
 
 Type "ox session attach demo-codex-validation"
 Enter
-Sleep 2500ms
+Sleep 3s
 Ctrl+\
-Sleep 1200ms
-
+Sleep 1500ms

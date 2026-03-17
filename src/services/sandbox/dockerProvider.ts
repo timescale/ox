@@ -186,6 +186,9 @@ export class DockerSandboxProvider implements SandboxProvider {
       agentArgs: options.agentArgs,
       agentMode: options.agentMode,
       dockerImage: agentImage,
+      initScript: options.initScript,
+      rootInitScript: options.rootInitScript,
+      overlayMounts: options.overlayMounts,
     });
 
     // Fetch the full session info for the container
