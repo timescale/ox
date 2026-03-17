@@ -42,6 +42,7 @@ fi
 
 cleanup() {
   rm -rf "$TAPE_BIN"
+  "$REPO_ROOT/bun" "$SCRIPT_DIR/seed-sessions.ts" --cleanup 2>/dev/null || true
   if [ "$CREATED_CONFIG" = "1" ]; then
     rm -f "$OX_CONFIG"
     rmdir "$REPO_ROOT/.ox" 2>/dev/null || true
@@ -57,9 +58,20 @@ run_tape() {
   local tape="$1"
   local name
   name="$(basename "$tape" .tape)"
+
+  # Seed sample sessions before recording the sessions-list tape
+  if [ "$name" = "sessions-list" ]; then
+    echo "Seeding sample sessions..."
+    "$REPO_ROOT/bun" "$SCRIPT_DIR/seed-sessions.ts"
+  fi
+
   echo "Generating $name.gif..."
   (cd "$REPO_ROOT" && vhs "$tape")
   echo "  -> docs/images/$name.gif"
+
+  if [ "$name" = "sessions-list" ]; then
+    "$REPO_ROOT/bun" "$SCRIPT_DIR/seed-sessions.ts" --cleanup
+  fi
 }
 
 if [ $# -gt 0 ]; then
