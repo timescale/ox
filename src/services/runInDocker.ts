@@ -46,6 +46,11 @@ export interface RunInDockerOptionsBase {
    */
   quiet?: boolean;
   /**
+   * Run the container in privileged mode (--privileged).
+   * Required for Docker-in-Docker and workloads needing full kernel access.
+   */
+  privileged?: boolean;
+  /**
    * Shell command to run as root inside the container before signalling the
    * main process to start.  Executed via `docker exec --user root` after
    * virtual files are written but before the entrypoint is unblocked.
@@ -104,6 +109,7 @@ export const runInDocker = async ({
   files = [],
   mountCwd = false,
   labels = {},
+  privileged = false,
   rootExecBeforeStart,
   signal,
   quiet = false,
@@ -133,6 +139,8 @@ export const runInDocker = async ({
     containerName,
     // Allocate a TTY when interactive or when explicitly requested for later attachment
     ...(interactive || allocateTty ? ['-it'] : []),
+    // Privileged mode for Docker-in-Docker and similar workloads
+    ...(privileged ? ['--privileged'] : []),
     ...dockerArgs,
     ...labelArgs,
     ...(mountCwd

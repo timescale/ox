@@ -80,6 +80,14 @@ export interface OxConfig {
    */
   projectSetupLayer?: string;
 
+  /**
+   * Run Docker sandbox containers in privileged mode (--privileged).
+   * Required for Docker-in-Docker and other workloads that need full
+   * kernel access inside the container. Only applies to the Docker
+   * sandbox provider — cloud sandboxes already support nested containers.
+   */
+  privileged?: boolean;
+
   /** Sandbox provider: 'docker' (default) or 'cloud' (Deno Cloud) */
   sandboxProvider?: 'docker' | 'cloud';
 
@@ -136,6 +144,7 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   rootInitScript: 'string',
   initScript: 'string',
   projectSetupLayer: 'string',
+  privileged: 'boolean',
   sandboxProvider: 'string',
   cloudRegion: 'string',
   analytics: 'boolean',

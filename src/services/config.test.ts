@@ -315,6 +315,19 @@ agent: claude
       expect(readBack).toEqual(original);
     });
 
+    test('config with privileged boolean can be written and read back', async () => {
+      const original: OxConfig = {
+        agent: 'claude',
+        privileged: true,
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack).toEqual(original);
+      expect(readBack?.privileged).toBe(true);
+    });
+
     test('config with empty overlayMounts array', async () => {
       const original: OxConfig = {
         agent: 'claude',

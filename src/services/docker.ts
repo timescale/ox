@@ -1862,6 +1862,7 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
       allocateTty: mode !== 'detached',
       files,
       labels: oxLabels,
+      privileged: config.privileged,
       rootExecBeforeStart: config.rootInitScript,
     });
     await result.exited;
@@ -2149,6 +2150,7 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
       allocateTty: interactive,
       files,
       labels: oxLabels,
+      privileged: config.privileged,
       rootExecBeforeStart: config.rootInitScript,
     });
     await result.exited;
@@ -2285,6 +2287,7 @@ exec bash
     cmdArgs: ['-c', startupScript],
     files,
     labels: oxLabels,
+    privileged: config.privileged,
     rootExecBeforeStart: config.rootInitScript,
   });
 }
