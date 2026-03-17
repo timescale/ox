@@ -57,7 +57,13 @@ export type SessionsView =
   | { type: 'detail'; session: OxSession }
   | { type: 'list' }
   | { type: 'resources' }
-  | { type: 'setup-db'; returnToPrompt?: { resumeSession?: OxSession } };
+  | { type: 'setup-db'; returnToPrompt?: { resumeSession?: OxSession } }
+  | {
+      type: 'build-error';
+      title: string;
+      message: string;
+      outputLines: string[];
+    };
 
 // ============================================================================
 // Result Types (for exiting the TUI)
@@ -164,6 +170,11 @@ interface RouterState {
   goToDocker: () => void;
   goToConfig: (returnToPrompt?: { resumeSession?: OxSession }) => void;
   goToSetupDb: (returnToPrompt?: { resumeSession?: OxSession }) => void;
+  goToBuildError: (
+    title: string,
+    message: string,
+    outputLines: string[],
+  ) => void;
 
   // Low-level: for async workflows that do conditional/functional updates
   updateView: (updater: (prev: SessionsView) => SessionsView) => void;
@@ -256,6 +267,10 @@ export const useRouterStore = create<RouterState>()((set, get) => ({
 
   goToSetupDb: (returnToPrompt) => {
     set({ view: { type: 'setup-db', returnToPrompt } });
+  },
+
+  goToBuildError: (title, message, outputLines) => {
+    set({ view: { type: 'build-error', title, message, outputLines } });
   },
 
   updateView: (updater) => {

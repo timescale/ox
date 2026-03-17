@@ -1,5 +1,7 @@
+import { useKeyboard } from '@opentui/react';
 import type { AgentType } from '../services/config.ts';
 import { useReadinessStore } from '../stores/readinessStore.ts';
+import { useRouterStore } from '../stores/routerStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
 import { Dots } from './Dots.tsx';
 
@@ -27,6 +29,18 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
   const codexAuth = useReadinessStore((s) => s.codexAuth);
   const ghAuth = useReadinessStore((s) => s.ghAuth);
   const error = useReadinessStore((s) => s.error);
+  const errorOutputLines = useReadinessStore((s) => s.errorOutputLines);
+
+  const hasErrorDetails = error && errorOutputLines.length > 0;
+
+  // Navigate to build error view when Enter is pressed on an error with details
+  useKeyboard((key) => {
+    if (hasErrorDetails && key.name === 'return') {
+      useRouterStore
+        .getState()
+        .goToBuildError('Build Failed', error, errorOutputLines);
+    }
+  });
 
   // Error state
   if (
@@ -36,9 +50,16 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
       sandboxAgentImage === 'error')
   ) {
     return (
-      <text fg={theme.error}>
-        {'\u2717 '} {error}
-      </text>
+      <box flexDirection="column">
+        <text fg={theme.error}>
+          {'\u2717 '} {error}
+        </text>
+        {hasErrorDetails ? (
+          <text fg={theme.textMuted}>
+            {'  '} Press Enter to view build output
+          </text>
+        ) : null}
+      </box>
     );
   }
 
@@ -146,8 +167,23 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
 }
 
 export function ReadinessStatus({ agent }: ReadinessStatusProps) {
+  const error = useReadinessStore((s) => s.error);
+  const errorOutputLines = useReadinessStore((s) => s.errorOutputLines);
+  const sandboxAgentImage = useReadinessStore((s) => s.sandboxAgentImage);
+  const sandboxBaseImage = useReadinessStore((s) => s.sandboxBaseImage);
+  const dockerRunning = useReadinessStore((s) => s.dockerRunning);
+
+  // Need an extra row when showing "Press Enter to view build output" hint
+  const hasErrorWithDetails =
+    error &&
+    errorOutputLines.length > 0 &&
+    (dockerRunning === 'not-running' ||
+      sandboxBaseImage === 'error' ||
+      sandboxAgentImage === 'error');
+  const height = hasErrorWithDetails ? 3 : 2;
+
   return (
-    <box height={2} paddingLeft={1} paddingRight={1} overflow="hidden">
+    <box height={height} paddingLeft={1} paddingRight={1} overflow="hidden">
       <ReadinessStatusInner agent={agent} />
     </box>
   );

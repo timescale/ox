@@ -2,6 +2,7 @@
 // Cloud Snapshot Management - Base + agent overlay snapshots for cloud sandboxes
 // ============================================================================
 
+import { BuildError } from '../buildError.ts';
 import type { AgentType } from '../config.ts';
 import {
   computeProjectSetupHash,
@@ -396,30 +397,40 @@ export async function ensureProjectSetupCloudSnapshot(options: {
     );
 
     // 4. Execute the project setup script
+    //    Accumulate output lines so they can be included in errors.
     onProgress?.({
       type: 'installing',
       message: 'Running project setup script',
     });
-    await sandboxExec(
-      sandbox,
-      `cat > /tmp/project-setup.sh << 'SETUP_EOF'\n${script}\nSETUP_EOF\nbash /tmp/project-setup.sh`,
-      {
-        label: 'Project setup',
-        sudo: true,
-        stream: options.stream,
-        // Only send line-by-line progress when not streaming to terminal
-        // (streaming already shows raw output)
-        onLine: options.stream
-          ? undefined
-          : (line) => {
-              onProgress?.({
-                type: 'installing',
-                message: 'Running project setup script',
-                detail: line,
-              });
-            },
-      },
-    );
+    const outputLines: string[] = [];
+    try {
+      await sandboxExec(
+        sandbox,
+        `cat > /tmp/project-setup.sh << 'SETUP_EOF'\n${script}\nSETUP_EOF\nbash /tmp/project-setup.sh`,
+        {
+          label: 'Project setup',
+          sudo: true,
+          stream: options.stream,
+          // Only send line-by-line progress when not streaming to terminal
+          // (streaming already shows raw output)
+          onLine: options.stream
+            ? undefined
+            : (line) => {
+                outputLines.push(line);
+                onProgress?.({
+                  type: 'installing',
+                  message: 'Running project setup script',
+                  detail: line,
+                });
+              },
+        },
+      );
+    } catch (err) {
+      throw new BuildError(
+        err instanceof Error ? err.message : String(err),
+        outputLines,
+      );
+    }
 
     // Clean up temp files
     await sandboxExec(sandbox, 'rm -f /tmp/project-setup.sh', {

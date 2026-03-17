@@ -7,6 +7,7 @@ import { YAML } from 'bun';
 import { Command } from 'commander';
 import { useEffect } from 'react';
 import { BackgroundTaskIndicator } from '../components/BackgroundTaskIndicator.tsx';
+import { BuildErrorScreen } from '../components/BuildErrorScreen.tsx';
 import { CloudSetup } from '../components/CloudSetup.tsx';
 import { CopyOnSelect } from '../components/CopyOnSelect.tsx';
 import { DockerSetup } from '../components/DockerSetup.tsx';
@@ -399,6 +400,15 @@ function SessionsApp({
     }
     case 'starting-shell':
       content = <StartingScreen step={view.step} subDetail={view.detail} />;
+      break;
+    case 'build-error':
+      content = (
+        <BuildErrorScreen
+          title={view.title}
+          message={view.message}
+          outputLines={view.outputLines}
+        />
+      );
       break;
     case 'detail':
       content = <SessionDetail />;

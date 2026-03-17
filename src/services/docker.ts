@@ -34,6 +34,7 @@ import {
   shellEscape,
 } from '../utils/shell.ts';
 import { buildAgentCommand, wrapWithPrompt } from './agentCommand';
+import { BuildError } from './buildError.ts';
 import { getClaudeConfigFiles, hasValidClaudeFileCredentials } from './claude';
 import { getCodexConfigFiles, hasValidCodexFileCredentials } from './codex';
 import {
@@ -380,7 +381,9 @@ export async function ensureProjectSetupLayer(
     // 3. Execute setup script as root (so it can apt-get install, etc.)
     //    Pipe stdout/stderr so we can surface output lines via onProgress
     //    and optionally stream to the terminal.
+    //    Always accumulate output lines so they can be included in errors.
     {
+      const outputLines: string[] = [];
       const proc = Bun.spawn(
         [
           'docker',
@@ -405,13 +408,14 @@ export async function ensureProjectSetupLayer(
           if (shouldStream) {
             process.stderr.write(chunk);
           }
-          if (shouldReport) {
-            partial += new TextDecoder().decode(chunk);
-            const lines = partial.split('\n');
-            partial = lines.pop() ?? '';
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (trimmed) {
+          partial += new TextDecoder().decode(chunk);
+          const lines = partial.split('\n');
+          partial = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) {
+              outputLines.push(trimmed);
+              if (shouldReport) {
                 options?.onProgress?.({
                   type: 'building',
                   message: 'Running project setup layer',
@@ -421,9 +425,10 @@ export async function ensureProjectSetupLayer(
             }
           }
         }
-        if (shouldReport) {
-          const trimmed = partial.trim();
-          if (trimmed) {
+        const trimmed = partial.trim();
+        if (trimmed) {
+          outputLines.push(trimmed);
+          if (shouldReport) {
             options?.onProgress?.({
               type: 'building',
               message: 'Running project setup layer',
@@ -445,6 +450,7 @@ export async function ensureProjectSetupLayer(
           exitCode,
           stderr: '',
           stdout: '',
+          outputLines,
         });
       }
     }
@@ -458,13 +464,19 @@ export async function ensureProjectSetupLayer(
     return setupTag;
   } catch (err) {
     log.error({ err, setupTag }, 'Failed to build project setup layer');
-    // Surface stderr from shell errors so users can see what went wrong
     const detail =
       err != null && typeof err === 'object' && 'stderr' in err && err.stderr
         ? String(err.stderr).trim()
         : '';
+    const lines: string[] =
+      err != null &&
+      typeof err === 'object' &&
+      'outputLines' in err &&
+      Array.isArray(err.outputLines)
+        ? (err.outputLines as string[])
+        : [];
     const base = `Failed to build project setup layer (exit code ${(err as { exitCode?: number }).exitCode ?? '?'})`;
-    throw new Error(detail ? `${base}\n${detail}` : base);
+    throw new BuildError(detail ? `${base}\n${detail}` : base, lines);
   } finally {
     await $`docker rm -f ${containerName}`.quiet().nothrow();
   }

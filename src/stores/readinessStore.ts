@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { BuildError } from '../services/buildError.ts';
 import type { AgentType } from '../services/config.ts';
 import type { PullLayer } from '../services/docker.ts';
 import type { DockerProvider, DockerStatus } from '../services/dockerSetup.ts';
@@ -54,6 +55,8 @@ export interface ReadinessState {
 
   // Error details
   error: string | null;
+  /** Build output lines captured from a failed image build (for the error view) */
+  errorOutputLines: string[];
 
   // Actions
   runChecks: () => Promise<void>;
@@ -105,6 +108,7 @@ const initialState: Omit<
   opencodeAuthModel: undefined,
   codexAuthModel: undefined,
   error: null,
+  errorOutputLines: [],
 };
 
 // ============================================================================
@@ -456,6 +460,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
             agentBuildMessage: null,
             agentBuildDetail: null,
             error: err instanceof Error ? err.message : String(err),
+            errorOutputLines: err instanceof BuildError ? err.outputLines : [],
           });
         }
       }
