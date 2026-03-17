@@ -7,6 +7,7 @@ afterEach(() => {
     filterText: '',
     filterMode: 'all',
     scopeMode: 'global',
+    scopeModeSource: 'auto',
     prCache: {},
     pendingDeletes: new Set(),
   });
@@ -91,5 +92,28 @@ describe('sessionStore - filters', () => {
     store.setScopeMode('local');
     store.syncScopeModeWithRepo(true);
     expect(useSessionStore.getState().scopeMode).toBe('local');
+  });
+
+  test('syncScopeModeWithRepo preserves explicit global scope in a repo', () => {
+    const store = useSessionStore.getState();
+
+    store.syncScopeModeWithRepo(true);
+    expect(useSessionStore.getState().scopeMode).toBe('local');
+
+    store.setScopeMode('global');
+    store.syncScopeModeWithRepo(true);
+
+    expect(useSessionStore.getState().scopeMode).toBe('global');
+  });
+
+  test('syncScopeModeWithRepo preserves explicit global scope across repo changes', () => {
+    const store = useSessionStore.getState();
+
+    store.syncScopeModeWithRepo(true);
+    store.setScopeMode('global');
+    store.syncScopeModeWithRepo(false);
+    store.syncScopeModeWithRepo(true);
+
+    expect(useSessionStore.getState().scopeMode).toBe('global');
   });
 });
