@@ -11,6 +11,7 @@ import type { PrInfo } from '../services/github';
 
 export type FilterMode = 'all' | 'running' | 'completed';
 export type ScopeMode = 'local' | 'global';
+type ScopeModeSource = 'auto' | 'manual';
 type StateUpdater<T> = T | ((prev: T) => T);
 
 export interface PrCacheEntry {
@@ -43,6 +44,9 @@ export interface SessionState {
 
   /** Repo scope applied to the sessions list */
   scopeMode: ScopeMode;
+
+  /** Whether the current scope is auto-derived or manually chosen */
+  scopeModeSource: ScopeModeSource;
 
   /** Set the repo scope */
   setScopeMode: (mode: ScopeMode) => void;
@@ -80,6 +84,7 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   filterText: '',
   filterMode: 'all',
   scopeMode: 'global',
+  scopeModeSource: 'auto',
   prCache: {},
 
   setSelectedSessionId: (id: string | null) => {
@@ -100,15 +105,19 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   },
 
   setScopeMode: (mode: ScopeMode) => {
-    set({ scopeMode: mode });
+    set({ scopeMode: mode, scopeModeSource: 'manual' });
   },
 
   syncScopeModeWithRepo: (hasCurrentRepo: boolean) => {
-    const { scopeMode } = get();
-    if (hasCurrentRepo && scopeMode === 'global') {
-      set({ scopeMode: 'local' });
+    const { scopeMode, scopeModeSource } = get();
+    if (
+      hasCurrentRepo &&
+      scopeMode === 'global' &&
+      scopeModeSource === 'auto'
+    ) {
+      set({ scopeMode: 'local', scopeModeSource: 'auto' });
     } else if (!hasCurrentRepo && scopeMode === 'local') {
-      set({ scopeMode: 'global' });
+      set({ scopeMode: 'global', scopeModeSource: 'auto' });
     }
   },
 
