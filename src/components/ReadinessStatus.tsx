@@ -88,7 +88,7 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
           <Dots />
         </text>
         {agentBuildDetail ? (
-          <text fg={theme.textMuted}>
+          <text fg={theme.textMuted} overflow="hidden" wrapMode="none">
             {'  \u2502 '}
             {agentBuildDetail}
           </text>
@@ -146,11 +146,8 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
 }
 
 export function ReadinessStatus({ agent }: ReadinessStatusProps) {
-  const hasDetail = useReadinessStore(
-    (s) => s.sandboxAgentImage === 'building' && s.agentBuildDetail != null,
-  );
   return (
-    <box height={hasDetail ? 2 : 1} paddingLeft={1} paddingRight={1}>
+    <box height={2} paddingLeft={1} paddingRight={1} overflow="hidden">
       <ReadinessStatusInner agent={agent} />
     </box>
   );
