@@ -146,8 +146,11 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
 }
 
 export function ReadinessStatus({ agent }: ReadinessStatusProps) {
+  const hasDetail = useReadinessStore(
+    (s) => s.sandboxAgentImage === 'building' && s.agentBuildDetail != null,
+  );
   return (
-    <box height={1} paddingLeft={1} paddingRight={1}>
+    <box height={hasDetail ? 2 : 1} paddingLeft={1} paddingRight={1}>
       <ReadinessStatusInner agent={agent} />
     </box>
   );
