@@ -42,6 +42,7 @@ The wizard walks through sandbox provider, agent, model, and authentication setu
 | `cloudRegion` | `string` | `ord` | Cloud sandbox region: `ord` (Chicago) or `ams` (Amsterdam) |
 | `sandboxBaseImage` | `string` | -- | Override Docker image for sandbox containers |
 | `buildSandboxFromDockerfile` | `boolean\|string` | `false` | Build sandbox image from Dockerfile. `true` uses the built-in Dockerfile; a string value specifies a path to a custom Dockerfile. Takes precedence over `sandboxBaseImage`. |
+| `projectSetupLayer` | `string` | -- | Bash script to run on top of the base sandbox image and cache as a reusable layer. Use for system-level dependencies like apt packages, language runtimes, Docker, or browser tooling. Runs before the agent overlay and without your project repo mounted. |
 | `overlayMounts` | `string[]` | -- | Paths to isolate with Docker volume mounts in [mount mode](sandbox-providers.md#mount-mode). E.g., `["node_modules"]` |
 | `privileged` | `boolean` | `false` | Run Docker sandbox containers in privileged mode (`--privileged`). Required for Docker-in-Docker. Only applies to the Docker sandbox provider. |
 | `rootInitScript` | `string` | -- | Shell command to run as **root** inside the sandbox before `initScript`. Useful for installing system packages. E.g., `"apt-get update && apt-get install -y build-essential"` |
@@ -143,6 +144,18 @@ API_KEY=your-key-here
 
 These variables are injected into the sandbox container at startup and are available to both the init script and the agent.
 
+## Build-Time vs Run-Time Setup
+
+Ox supports three different setup hooks for sandbox customization:
+
+- `projectSetupLayer` -- build-time, cached image layer; best for system packages and heavyweight tooling that should be reused across sessions
+- `rootInitScript` -- run-time, runs as root on every session start, resume, and shell creation
+- `initScript` -- run-time, runs as the sandbox user on every session start, resume, and shell creation
+
+Use `projectSetupLayer` for things like `apt-get install`, browser dependencies, Docker tooling, or language runtimes that do not depend on your repository contents. Because it runs before your repo is mounted and is cached as an image/snapshot layer, it avoids repeating expensive setup work on every session.
+
+Use `rootInitScript` or `initScript` for per-session setup that depends on the working directory, environment variables, checked-out code, or other state that is only available at container startup.
+
 ## Example Config
 
 ```yaml
@@ -155,6 +168,9 @@ tigerServiceId: null
 themeName: tokyonight
 overlayMounts:
   - node_modules
+projectSetupLayer: |
+  apt-get update
+  apt-get install -y ffmpeg chromium
 privileged: true
 rootInitScript: "apt-get update && apt-get install -y build-essential"
 initScript: "npm install"

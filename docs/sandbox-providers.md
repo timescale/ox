@@ -9,10 +9,31 @@ Agents run in local Docker containers built from purpose-built images that inclu
 ### How It Works
 
 1. **Base image** -- Ox uses a pre-built image from GHCR (`ghcr.io/timescale/ox`) based on Ubuntu 24.04 with git, ripgrep, curl, tmux, GitHub CLI, and other essentials
-2. **Agent overlay** -- On top of the base, ox builds an agent-specific overlay that installs the chosen agent CLI (Claude Code, OpenCode, or Codex)
-3. **Container creation** -- A container is created with your code (cloned from GitHub or mounted from your filesystem), credentials injected, and the agent launched
+2. **Project setup layer** -- If `projectSetupLayer` is configured, ox runs that script on top of the base image and caches the result as a reusable image/snapshot layer
+3. **Agent overlay** -- On top of the base or project setup layer, ox builds an agent-specific overlay that installs the chosen agent CLI (Claude Code, OpenCode, or Codex)
+4. **Container creation** -- A container is created with your code (cloned from GitHub or mounted from your filesystem), credentials injected, any runtime init scripts run, and the agent launched
 
 Images are cached locally. The first run pulls and builds the images, which takes a few minutes. Subsequent runs start in seconds.
+
+### Project Setup Layer
+
+Use `projectSetupLayer` when you want to install heavyweight system dependencies once and reuse them across many sessions:
+
+```yaml
+# .ox/config.yml
+projectSetupLayer: |
+  apt-get update
+  apt-get install -y ffmpeg chromium
+```
+
+This script runs as root on top of the sandbox base image and is cached as its own layer before the agent overlay is built.
+
+- It runs **without** your repository mounted, so it should only be used for system-level setup
+- It is ideal for `apt-get install`, browser/runtime dependencies, Docker tooling, and other expensive base environment changes
+- When the script changes, ox automatically rebuilds the cached layer
+- It works for both Docker and Cloud providers
+
+For one-off or repo-dependent setup, use `rootInitScript` or `initScript` instead.
 
 ### Custom Base Image
 
@@ -65,6 +86,15 @@ initScript: "npm install"
 ```
 
 The init script runs after the working directory is set up, in all modes (async, interactive, plan). Useful for installing dependencies, setting up databases, or any other preparation.
+
+If you need root access at runtime, use `rootInitScript`:
+
+```yaml
+# .ox/config.yml
+rootInitScript: "apt-get update && apt-get install -y build-essential"
+```
+
+`rootInitScript` runs before `initScript` on every session start, resume, and shell creation. Unlike `projectSetupLayer`, it is not cached as an image layer.
 
 ## Cloud
 
