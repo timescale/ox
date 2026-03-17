@@ -131,7 +131,7 @@ Manage sandbox images, volumes, and snapshots.
 
 Press `ctrl+p` from any view to open the command palette -- a fuzzy-searchable list of all available actions.
 
-<!-- screenshot: docs/assets/command-palette.gif -->
+![Command Palette](images/command-palette.gif)
 
 The palette shows each command's name, description, keyboard shortcut, and category. Type to filter, use arrow keys to navigate, and press `Enter` to execute.
 
