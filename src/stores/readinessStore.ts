@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { BuildError } from '../services/buildError.ts';
 import type { AgentType } from '../services/config.ts';
 import type { PullLayer } from '../services/docker.ts';
 import type { DockerProvider, DockerStatus } from '../services/dockerSetup.ts';
@@ -33,6 +34,10 @@ export interface ReadinessState {
   agentImageAgent: AgentType | null;
   agentImageProvider: SandboxProviderType | null;
   agentBuildLayers: PullLayer[];
+  /** Current build step message (e.g. 'Running project setup layer') */
+  agentBuildMessage: string | null;
+  /** Latest output line from the build (e.g. apt-get progress) */
+  agentBuildDetail: string | null;
 
   // Tier 3: Models
   models: CheckStatus;
@@ -50,6 +55,8 @@ export interface ReadinessState {
 
   // Error details
   error: string | null;
+  /** Build output lines captured from a failed image build (for the error view) */
+  errorOutputLines: string[];
 
   // Actions
   runChecks: () => Promise<void>;
@@ -90,6 +97,8 @@ const initialState: Omit<
   agentImageAgent: null,
   agentImageProvider: null,
   agentBuildLayers: [],
+  agentBuildMessage: null,
+  agentBuildDetail: null,
   models: 'unknown',
   claudeAuth: 'unknown',
   opencodeAuth: 'unknown',
@@ -99,6 +108,7 @@ const initialState: Omit<
   opencodeAuthModel: undefined,
   codexAuthModel: undefined,
   error: null,
+  errorOutputLines: [],
 };
 
 // ============================================================================
@@ -373,6 +383,8 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
       agentImageAgent: agent,
       agentImageProvider: providerType,
       agentBuildLayers: [],
+      agentBuildMessage: null,
+      agentBuildDetail: null,
     });
 
     // Fire-and-forget async build
@@ -383,7 +395,11 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
         );
         const provider = getSandboxProvider(providerType);
 
-        set({ sandboxAgentImage: 'building' });
+        set({
+          sandboxAgentImage: 'building',
+          agentBuildMessage: null,
+          agentBuildDetail: null,
+        });
 
         await provider.ensureImage({
           agent,
@@ -403,6 +419,14 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
             ) {
               set({ agentBuildLayers: progress.layers ?? [] });
             }
+            if (progress.type === 'building') {
+              set({
+                agentBuildMessage: progress.message,
+                ...(progress.detail != null
+                  ? { agentBuildDetail: progress.detail }
+                  : {}),
+              });
+            }
           },
         });
 
@@ -412,7 +436,12 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
           current.agentImageAgent === agent &&
           current.agentImageProvider === providerType
         ) {
-          set({ sandboxAgentImage: 'ready', agentBuildLayers: [] });
+          set({
+            sandboxAgentImage: 'ready',
+            agentBuildLayers: [],
+            agentBuildMessage: null,
+            agentBuildDetail: null,
+          });
         }
       } catch (err) {
         // Only set error if this is still the active build
@@ -428,7 +457,10 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
           set({
             sandboxAgentImage: 'error',
             agentBuildLayers: [],
+            agentBuildMessage: null,
+            agentBuildDetail: null,
             error: err instanceof Error ? err.message : String(err),
+            errorOutputLines: err instanceof BuildError ? err.outputLines : [],
           });
         }
       }

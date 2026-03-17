@@ -32,6 +32,7 @@ import { CloudConnectionPool } from './cloudConnectionPool.ts';
 import {
   ensureAgentCloudSnapshot,
   ensureCloudSnapshot,
+  ensureProjectSetupCloudSnapshot,
 } from './cloudSnapshot.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import { sandboxExec } from './sandboxExec.ts';
@@ -213,6 +214,19 @@ async function provisionSandbox(
       );
     } else {
       await sandboxExec(sandbox, 'mkdir -p /work/app');
+    }
+
+    // Run root init script if configured (before initScript, as root).
+    // Read from config directly (same pattern as Docker provider) since
+    // callers may not thread it through CreateSandboxOptions.
+    const config = await readConfig();
+    const rootInitScript = options.rootInitScript ?? config.rootInitScript;
+    if (rootInitScript) {
+      onProgress?.('Running root init script');
+      await logToSandbox(sandbox, 'Running root init script...');
+      await sandboxExec(sandbox, `cd /work/app && ${rootInitScript}`, {
+        sudo: true,
+      });
     }
 
     // Run init script if configured
@@ -532,6 +546,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
   async ensureImage(options?: {
     agent?: AgentType;
+    force?: boolean;
     onProgress?: (progress: SandboxBuildProgress) => void;
   }): Promise<string> {
     const token = await getDenoToken();
@@ -542,10 +557,12 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
 
     const region = await this.resolveRegion();
+    const config = await readConfig();
 
     const mapProgress = (p: {
       type: string;
       message?: string;
+      detail?: string;
       snapshotSlug?: string;
     }) => {
       switch (p.type) {
@@ -563,6 +580,7 @@ export class CloudSandboxProvider implements SandboxProvider {
           options?.onProgress?.({
             type: 'building',
             message: p.message ?? '',
+            detail: p.detail,
           });
           break;
         case 'done':
@@ -578,22 +596,41 @@ export class CloudSandboxProvider implements SandboxProvider {
     const baseSlug = await ensureCloudSnapshot({
       token,
       region,
+      force: options?.force,
       onProgress: mapProgress,
     });
 
-    // 2. If agent specified, ensure agent overlay snapshot exists
+    // 2. If projectSetupLayer is configured, ensure setup layer snapshot
+    let effectiveBaseSlug = baseSlug;
+    let setupHash: string | undefined;
+    if (config.projectSetupLayer) {
+      effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
+        token,
+        region,
+        baseSnapshotSlug: baseSlug,
+        script: config.projectSetupLayer,
+        force: options?.force,
+        onProgress: mapProgress,
+      });
+      // Extract the setup hash for use in agent slug computation
+      setupHash = effectiveBaseSlug.replace('oxl-', '');
+    }
+
+    // 3. If agent specified, ensure agent overlay snapshot exists
     if (options?.agent) {
       const agentSlug = await ensureAgentCloudSnapshot({
         token,
         region,
         agent: options.agent,
-        baseSnapshotSlug: baseSlug,
+        baseSnapshotSlug: effectiveBaseSlug,
+        setupHash,
+        force: options?.force,
         onProgress: mapProgress,
       });
       return agentSlug;
     }
 
-    return baseSlug;
+    return effectiveBaseSlug;
   }
 
   // --------------------------------------------------------------------------

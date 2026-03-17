@@ -42,18 +42,22 @@ function withAnalytics(inner: SandboxProvider): SandboxProvider {
   const originalCreate = inner.create.bind(inner);
   inner.create = async (options: CreateSandboxOptions) => {
     const start = Date.now();
+    const properties = {
+      provider: inner.type,
+      agent: options.agent,
+      model: options.model,
+      has_db_fork: !!options.envVars,
+      has_root_init_script: !!options.rootInitScript,
+      has_init_script: !!options.initScript,
+      is_mount_mode: !!options.mountDir,
+      interactive: options.interactive,
+    };
     let session: OxSession;
     try {
       session = await originalCreate(options);
     } catch (err) {
       track('session_created', {
-        provider: inner.type,
-        agent: options.agent,
-        model: options.model,
-        has_db_fork: !!options.envVars,
-        has_init_script: !!options.initScript,
-        is_mount_mode: !!options.mountDir,
-        interactive: options.interactive,
+        ...properties,
         elapsed_seconds: (Date.now() - start) / 1000,
         success: false,
         error_type: err instanceof Error ? err.constructor.name : 'Unknown',
@@ -67,13 +71,7 @@ function withAnalytics(inner: SandboxProvider): SandboxProvider {
       log.debug({ err }, 'Failed to register session with credential watcher');
     }
     track('session_created', {
-      provider: inner.type,
-      agent: options.agent,
-      model: options.model,
-      has_db_fork: !!options.envVars,
-      has_init_script: !!options.initScript,
-      is_mount_mode: !!options.mountDir,
-      interactive: options.interactive,
+      ...properties,
       elapsed_seconds: (Date.now() - start) / 1000,
       success: true,
     });

@@ -7,6 +7,7 @@ import { YAML } from 'bun';
 import { Command } from 'commander';
 import { useEffect } from 'react';
 import { BackgroundTaskIndicator } from '../components/BackgroundTaskIndicator.tsx';
+import { BuildErrorScreen } from '../components/BuildErrorScreen.tsx';
 import { CloudSetup } from '../components/CloudSetup.tsx';
 import { CopyOnSelect } from '../components/CopyOnSelect.tsx';
 import { DockerSetup } from '../components/DockerSetup.tsx';
@@ -388,16 +389,26 @@ function SessionsApp({
           ? 'Hint: press ctrl+\\ to detach an interactive session'
           : undefined;
       const layers = view.type === 'starting' ? view.layers : undefined;
+      const detail = view.type === 'starting' ? view.detail : undefined;
       content =
         layers && layers.length > 0 ? (
           <PullProgress message={view.step} layers={layers} />
         ) : (
-          <StartingScreen step={view.step} hint={hint} />
+          <StartingScreen step={view.step} subDetail={detail} hint={hint} />
         );
       break;
     }
     case 'starting-shell':
-      content = <StartingScreen step={view.step} />;
+      content = <StartingScreen step={view.step} subDetail={view.detail} />;
+      break;
+    case 'build-error':
+      content = (
+        <BuildErrorScreen
+          title={view.title}
+          message={view.message}
+          outputLines={view.outputLines}
+        />
+      );
       break;
     case 'detail':
       content = <SessionDetail />;

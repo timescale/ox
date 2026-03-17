@@ -10,6 +10,10 @@ import { log } from '../logger.ts';
 export interface SandboxExecOptions {
   sudo?: boolean;
   capture?: boolean;
+  /** Stream stdout/stderr to the terminal in real-time */
+  stream?: boolean;
+  /** Called for each non-empty line of stdout/stderr output */
+  onLine?: (line: string) => void;
   label?: string;
   cwd?: string;
 }
@@ -35,7 +39,7 @@ export async function sandboxExec(
   command: string,
   options?: SandboxExecOptions,
 ): Promise<string> {
-  const { sudo, capture, label, cwd } = options ?? {};
+  const { sudo, capture, stream, onLine, label, cwd } = options ?? {};
 
   // Optionally prefix with cd
   let effectiveCommand = cwd ? `cd ${shellEscape(cwd)} && ${command}` : command;
@@ -59,6 +63,76 @@ export async function sandboxExec(
     stderr: 'piped',
     env: { BASH_ENV: '$HOME/.bashrc' },
   });
+
+  // When streaming or onLine is set, consume streams manually.
+  // This is a separate path because proc.output() cannot be called
+  // after streams are consumed.
+  if ((stream || onLine) && proc.stdout && proc.stderr) {
+    const chunks: { out: Uint8Array[]; err: Uint8Array[] } = {
+      out: [],
+      err: [],
+    };
+    const processStream = async (
+      reader: ReadableStream<Uint8Array>,
+      buf: Uint8Array[],
+    ) => {
+      let partial = '';
+      for await (const chunk of reader) {
+        if (stream) {
+          process.stderr.write(chunk);
+        }
+        buf.push(chunk);
+        if (onLine) {
+          partial += new TextDecoder().decode(chunk);
+          const lines = partial.split('\n');
+          partial = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) {
+              onLine(trimmed);
+            }
+          }
+        }
+      }
+      // Flush any remaining partial line
+      if (onLine) {
+        const trimmed = partial.trim();
+        if (trimmed) {
+          onLine(trimmed);
+        }
+      }
+    };
+    const [, , status] = await Promise.all([
+      processStream(proc.stdout, chunks.out),
+      processStream(proc.stderr, chunks.err),
+      proc.status,
+    ]);
+
+    if (!status.success) {
+      const decoder = new TextDecoder();
+      const stderr = decoder.decode(Buffer.concat(chunks.err)).trim();
+      const stdout = decoder.decode(Buffer.concat(chunks.out)).trim();
+      const logFields: Record<string, unknown> = {
+        command: effectiveCommand.slice(0, 200),
+        exitCode: status.code,
+        stderr,
+      };
+      if (label) {
+        logFields.step = label;
+        logFields.stdout = stdout;
+        log.error(logFields, 'Snapshot build step failed');
+        throw new Error(
+          `Sandbox command failed at "${label}" (exit ${status.code}): ${stderr.slice(0, 500)}`,
+        );
+      }
+      log.warn(logFields, 'Sandbox command failed');
+      throw new Error(
+        `Sandbox command failed (exit ${status.code}): ${stderr || effectiveCommand}`,
+      );
+    }
+    return '';
+  }
+
   const result = await proc.output();
 
   if (!result.status.success) {

@@ -270,6 +270,38 @@ agent: claude
       expect(readBack?.initScript).toBe('./bun i');
     });
 
+    test('config with rootInitScript can be written and read back', async () => {
+      const original: OxConfig = {
+        agent: 'claude',
+        rootInitScript: 'apt-get update && apt-get install -y curl',
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack).toEqual(original);
+      expect(readBack?.rootInitScript).toBe(
+        'apt-get update && apt-get install -y curl',
+      );
+    });
+
+    test('config with rootInitScript and initScript together', async () => {
+      const original: OxConfig = {
+        agent: 'claude',
+        rootInitScript: 'apt-get install -y build-essential',
+        initScript: './bun i',
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack).toEqual(original);
+      expect(readBack?.rootInitScript).toBe(
+        'apt-get install -y build-essential',
+      );
+      expect(readBack?.initScript).toBe('./bun i');
+    });
+
     test('config with overlayMounts and initScript together', async () => {
       const original: OxConfig = {
         agent: 'opencode',
@@ -281,6 +313,19 @@ agent: claude
       const readBack = await projectConfig.read();
 
       expect(readBack).toEqual(original);
+    });
+
+    test('config with privileged boolean can be written and read back', async () => {
+      const original: OxConfig = {
+        agent: 'claude',
+        privileged: true,
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack).toEqual(original);
+      expect(readBack?.privileged).toBe(true);
     });
 
     test('config with empty overlayMounts array', async () => {
@@ -552,6 +597,36 @@ describe('readConfig (merged config)', () => {
     expect(config.agent).toBe('opencode'); // project override
     expect(config.overlayMounts).toEqual(['node_modules']); // from user
     expect(config.initScript).toBe('npm install'); // from user
+  });
+
+  test('project rootInitScript overrides user config', async () => {
+    await userConfig.write({
+      agent: 'claude',
+      rootInitScript: 'apt-get install -y git',
+    });
+
+    await projectConfig.write({
+      rootInitScript: 'apt-get install -y build-essential',
+    });
+
+    const config = await readConfig();
+    expect(config.agent).toBe('claude'); // from user
+    expect(config.rootInitScript).toBe('apt-get install -y build-essential'); // project override
+  });
+
+  test('user rootInitScript used when project does not set it', async () => {
+    await userConfig.write({
+      agent: 'claude',
+      rootInitScript: 'apt-get install -y git',
+    });
+
+    await projectConfig.write({
+      agent: 'opencode',
+    });
+
+    const config = await readConfig();
+    expect(config.agent).toBe('opencode'); // project override
+    expect(config.rootInitScript).toBe('apt-get install -y git'); // from user
   });
 });
 

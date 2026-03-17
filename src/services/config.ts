@@ -57,11 +57,36 @@ export interface OxConfig {
   overlayMounts?: string[];
 
   /**
+   * Shell command to run as root inside the container before starting the agent.
+   * Runs just before initScript, after cd into the working directory, in all modes.
+   * Useful for installing system packages that require root access.
+   * Example: 'apt-get update && apt-get install -y build-essential'
+   */
+  rootInitScript?: string;
+
+  /**
    * Shell command to run inside the container before starting the agent.
    * Runs after cd into the working directory, in all modes.
    * Example: './bun i'
    */
   initScript?: string;
+
+  /**
+   * Bash script to run on top of the base sandbox image, then snapshot.
+   * Runs WITHOUT the project repo — use for system-level dependencies
+   * (apt packages, language runtimes, etc).
+   * The script content + base image hash are combined for cache keys;
+   * the image rebuilds automatically when either changes.
+   */
+  projectSetupLayer?: string;
+
+  /**
+   * Run Docker sandbox containers in privileged mode (--privileged).
+   * Required for Docker-in-Docker and other workloads that need full
+   * kernel access inside the container. Only applies to the Docker
+   * sandbox provider — cloud sandboxes already support nested containers.
+   */
+  privileged?: boolean;
 
   /** Sandbox provider: 'docker' (default) or 'cloud' (Deno Cloud) */
   sandboxProvider?: 'docker' | 'cloud';
@@ -116,7 +141,10 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   sandboxBaseImage: 'string',
   buildSandboxFromDockerfile: 'boolean|string',
   overlayMounts: 'string[]',
+  rootInitScript: 'string',
   initScript: 'string',
+  projectSetupLayer: 'string',
+  privileged: 'boolean',
   sandboxProvider: 'string',
   cloudRegion: 'string',
   analytics: 'boolean',

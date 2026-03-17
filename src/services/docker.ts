@@ -34,6 +34,7 @@ import {
   shellEscape,
 } from '../utils/shell.ts';
 import { buildAgentCommand, wrapWithPrompt } from './agentCommand';
+import { BuildError } from './buildError.ts';
 import { getClaudeConfigFiles, hasValidClaudeFileCredentials } from './claude';
 import { getCodexConfigFiles, hasValidCodexFileCredentials } from './codex';
 import {
@@ -256,6 +257,36 @@ export function computeDockerfileHash(content: string): string {
   return hasher.digest('hex').slice(0, 12);
 }
 
+/**
+ * Compute a content hash for the project setup layer.
+ * Combines the base image hash and the setup script content so the
+ * layer rebuilds when either the base or the script changes.
+ */
+export function computeProjectSetupHash(
+  baseHash: string,
+  script: string,
+): string {
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(baseHash);
+  hasher.update(script);
+  return hasher.digest('hex').slice(0, 12);
+}
+
+/**
+ * Compute the project setup layer image tag.
+ * Always uses the local `ox-sandbox` name — project setup layers are built
+ * locally and never published to GHCR.
+ * Format: ox-sandbox:md5-<baseHash>-l-<setupHash>
+ */
+export function getProjectSetupTag(baseImage: string, script: string): string {
+  // Extract the base hash from the image tag, regardless of whether it's
+  // a local (ox-sandbox:md5-{hash}) or GHCR (ghcr.io/.../sandbox:{hash}) tag.
+  const tagPart = baseImage.split(':')[1] ?? baseImage;
+  const baseHash = tagPart.replace(/^md5-/, '');
+  const setupHash = computeProjectSetupHash(baseHash, script);
+  return `${DOCKER_IMAGE_NAME}:md5-${baseHash}-l-${setupHash}`;
+}
+
 // ============================================================================
 // Agent Install Scripts & Overlay Images
 // ============================================================================
@@ -302,6 +333,156 @@ export function getAgentOverlayTag(
 }
 
 /**
+ * Ensure a project-specific setup layer image exists on top of the base image.
+ *
+ * Resolution:
+ * 1. Check if setup layer image exists locally → return if yes
+ * 2. Build locally via docker run + exec + commit
+ *
+ * The setup layer tag encodes the base hash and script content hash
+ * so that any change to either triggers a rebuild.
+ *
+ * @returns The setup layer image tag (to be used as base for agent overlay)
+ */
+export async function ensureProjectSetupLayer(
+  baseImage: string,
+  script: string,
+  options?: {
+    onProgress?: (progress: ImageBuildProgress) => void;
+    force?: boolean;
+    /** Stream the setup script's stdout/stderr to the terminal */
+    stream?: boolean;
+  },
+): Promise<string> {
+  const setupTag = getProjectSetupTag(baseImage, script);
+
+  // Check if setup layer already exists locally
+  if (!options?.force && (await imageExists(setupTag))) {
+    log.debug('Project setup layer image already exists');
+    return setupTag;
+  }
+
+  // Build locally
+  log.info({ setupTag, baseImage }, 'Building project setup layer image');
+  options?.onProgress?.({
+    type: 'building',
+    message: 'Running project setup layer',
+  });
+
+  const containerName = `ox-setup-${nanoid(6).toLowerCase()}`;
+
+  try {
+    // 1. Start a temporary container from the base image
+    await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+
+    // 2. Write setup script into the container
+    await writeFileToContainer(containerName, '/tmp/project-setup.sh', script);
+
+    // 3. Execute setup script as root (so it can apt-get install, etc.)
+    //    Pipe stdout/stderr so we can surface output lines via onProgress
+    //    and optionally stream to the terminal.
+    //    Always accumulate output lines so they can be included in errors.
+    {
+      const outputLines: string[] = [];
+      const proc = Bun.spawn(
+        [
+          'docker',
+          'exec',
+          '--user',
+          'root',
+          containerName,
+          'bash',
+          '/tmp/project-setup.sh',
+        ],
+        { stdout: 'pipe', stderr: 'pipe' },
+      );
+
+      const processStream = async (
+        readable: ReadableStream<Uint8Array> | null,
+      ) => {
+        if (!readable) return;
+        const shouldStream = options?.stream;
+        const shouldReport = !shouldStream && options?.onProgress;
+        let partial = '';
+        for await (const chunk of readable) {
+          if (shouldStream) {
+            process.stderr.write(chunk);
+          }
+          partial += new TextDecoder().decode(chunk);
+          const lines = partial.split('\n');
+          partial = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) {
+              outputLines.push(trimmed);
+              if (shouldReport) {
+                options?.onProgress?.({
+                  type: 'building',
+                  message: 'Running project setup layer',
+                  detail: trimmed,
+                });
+              }
+            }
+          }
+        }
+        const trimmed = partial.trim();
+        if (trimmed) {
+          outputLines.push(trimmed);
+          if (shouldReport) {
+            options?.onProgress?.({
+              type: 'building',
+              message: 'Running project setup layer',
+              detail: trimmed,
+            });
+          }
+        }
+      };
+
+      await Promise.all([
+        processStream(proc.stdout),
+        processStream(proc.stderr),
+        proc.exited,
+      ]);
+
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) {
+        throw Object.assign(new Error(`Failed with exit code ${exitCode}`), {
+          exitCode,
+          stderr: '',
+          stdout: '',
+          outputLines,
+        });
+      }
+    }
+
+    // 4. Clean up temp files and commit
+    await $`docker exec --user root ${containerName} rm -f /tmp/project-setup.sh`.quiet();
+    await $`docker commit ${containerName} ${setupTag}`.quiet();
+    invalidateImageExistsCache(setupTag);
+
+    log.info({ setupTag }, 'Project setup layer image built successfully');
+    return setupTag;
+  } catch (err) {
+    log.error({ err, setupTag }, 'Failed to build project setup layer');
+    const detail =
+      err != null && typeof err === 'object' && 'stderr' in err && err.stderr
+        ? String(err.stderr).trim()
+        : '';
+    const lines: string[] =
+      err != null &&
+      typeof err === 'object' &&
+      'outputLines' in err &&
+      Array.isArray(err.outputLines)
+        ? (err.outputLines as string[])
+        : [];
+    const base = `Failed to build project setup layer (exit code ${(err as { exitCode?: number }).exitCode ?? '?'})`;
+    throw new BuildError(detail ? `${base}\n${detail}` : base, lines);
+  } finally {
+    await $`docker rm -f ${containerName}`.quiet().nothrow();
+  }
+}
+
+/**
  * Ensure an agent-specific overlay image exists on top of the base image.
  *
  * Resolution order:
@@ -315,31 +496,44 @@ export function getAgentOverlayTag(
 export async function ensureAgentOverlay(
   baseImage: string,
   agent: AgentType,
-  options?: { onProgress?: (progress: ImageBuildProgress) => void },
+  options?: {
+    onProgress?: (progress: ImageBuildProgress) => void;
+    force?: boolean;
+  },
 ): Promise<string> {
   const overlayTag = getAgentOverlayTag(baseImage, agent);
 
   // Check if overlay already exists locally
-  if (await imageExists(overlayTag)) {
+  if (!options?.force && (await imageExists(overlayTag))) {
     log.debug(`${agent} overlay image already exists`);
     return overlayTag;
   }
 
-  // Try to pull pre-built agent image from GHCR
+  // Try to pull pre-built agent image from GHCR.
+  // Skip when the base image is a project setup layer (contains '-l-')
+  // since GHCR won't have project-specific agent overlays.
   const ghcrAgentTag = getGhcrAgentTag(agent);
-  log.debug({ ghcrAgentTag, agent }, 'Trying to pull agent image from GHCR');
-  options?.onProgress?.({
-    type: 'pulling',
-    message: `Pulling ${agent} agent image`,
-  });
-  if (await tryPullImage(ghcrAgentTag)) {
-    // Tag the GHCR image with the local overlay tag for consistency
-    if (ghcrAgentTag !== overlayTag) {
-      await $`docker tag ${ghcrAgentTag} ${overlayTag}`.quiet().nothrow();
-      invalidateImageExistsCache(overlayTag);
+  const isProjectSetupBase = baseImage.includes('-l-');
+  if (!isProjectSetupBase) {
+    log.debug({ ghcrAgentTag, agent }, 'Trying to pull agent image from GHCR');
+    options?.onProgress?.({
+      type: 'pulling',
+      message: `Pulling ${agent} agent image`,
+    });
+    if (await tryPullImage(ghcrAgentTag)) {
+      // Tag the GHCR image with the local overlay tag for consistency
+      if (ghcrAgentTag !== overlayTag) {
+        await $`docker tag ${ghcrAgentTag} ${overlayTag}`.quiet().nothrow();
+        invalidateImageExistsCache(overlayTag);
+      }
+      log.info({ overlayTag, agent }, 'Agent overlay image pulled from GHCR');
+      return overlayTag;
     }
-    log.info({ overlayTag, agent }, 'Agent overlay image pulled from GHCR');
-    return overlayTag;
+  } else {
+    log.debug(
+      { overlayTag, ghcrAgentTag, agent },
+      'Skipping GHCR pull — base image includes project setup layer',
+    );
   }
 
   // Fall back to building locally
@@ -801,11 +995,13 @@ export type ImageBuildProgress =
   | { type: 'exists' }
   | { type: 'pulling'; message: string; layers?: PullLayer[] }
   | { type: 'pulling-cache'; message: string; layers?: PullLayer[] }
-  | { type: 'building'; message: string }
+  | { type: 'building'; message: string; detail?: string }
   | { type: 'done' };
 
 export interface EnsureDockerImageOptions {
   onProgress?: (progress: ImageBuildProgress) => void;
+  /** Skip existence checks and force a rebuild */
+  force?: boolean;
 }
 
 /**
@@ -829,7 +1025,7 @@ export async function ensureDockerImage(
   // Flow 1: Build from Dockerfile
   if (imageConfig.needsBuild) {
     // Check if image already exists locally
-    if (await imageExists(imageConfig.image)) {
+    if (!options.force && (await imageExists(imageConfig.image))) {
       onProgress?.({ type: 'exists' });
       return imageConfig.image;
     }
@@ -864,7 +1060,7 @@ export async function ensureDockerImage(
   // Flow 2: sandboxBaseImage configured - must pull, fail if unavailable
   if (config.sandboxBaseImage) {
     // Check if already exists locally
-    if (await imageExists(imageConfig.image)) {
+    if (!options.force && (await imageExists(imageConfig.image))) {
       onProgress?.({ type: 'exists' });
       return imageConfig.image;
     }
@@ -893,7 +1089,7 @@ export async function ensureDockerImage(
   // Hash-based tags are immutable: once pulled, never needs refreshing.
 
   // Check if image exists locally (no pull needed)
-  if (await imageExists(imageConfig.image)) {
+  if (!options.force && (await imageExists(imageConfig.image))) {
     onProgress?.({ type: 'exists' });
     return imageConfig.image;
   }
@@ -932,30 +1128,78 @@ export async function ensureDockerImage(
   return info.image;
 }
 
-// In-flight promise map to deduplicate concurrent ensureDockerImageForAgent
+// In-flight state for deduplicating concurrent ensureDockerImageForAgent
 // calls for the same agent (e.g. prebuildAgentImage and credential check
 // both firing when imageReady becomes true).
-const agentImageInFlight = new Map<AgentType, Promise<string>>();
+// Stores both the promise and a list of progress subscribers so that late
+// callers still receive ongoing build progress.
+interface InFlightAgentBuild {
+  promise: Promise<string>;
+  subscribers: Set<(progress: ImageBuildProgress) => void>;
+  force: boolean;
+}
+const agentImageInFlight = new Map<AgentType, InFlightAgentBuild>();
 
 /**
  * Ensure the base Docker image + agent overlay image are both available.
  * Returns the agent-specific overlay image tag, ready to use for containers.
  *
  * Concurrent calls for the same agent coalesce into a single resolution.
+ * All callers' onProgress callbacks receive build progress updates.
  */
 export async function ensureDockerImageForAgent(
   agent: AgentType,
   options: EnsureDockerImageOptions = {},
 ): Promise<string> {
   const existing = agentImageInFlight.get(agent);
-  if (existing) return existing;
+  if (existing) {
+    // Subscribe the new caller's progress callback to the in-flight build
+    if (options.onProgress) {
+      existing.subscribers.add(options.onProgress);
+    }
+    return existing.promise;
+  }
+
+  const subscribers = new Set<(progress: ImageBuildProgress) => void>();
+  if (options.onProgress) {
+    subscribers.add(options.onProgress);
+  }
+
+  // Fan-out progress to all subscribers
+  const fanOutProgress = (progress: ImageBuildProgress) => {
+    for (const cb of subscribers) {
+      cb(progress);
+    }
+  };
+
+  const coalesced: EnsureDockerImageOptions = {
+    ...options,
+    onProgress: fanOutProgress,
+  };
 
   const promise = (async () => {
-    const baseImage = await ensureDockerImage(options);
-    return ensureAgentOverlay(baseImage, agent, options);
+    const baseImage = await ensureDockerImage(coalesced);
+
+    // If projectSetupLayer is configured, apply it on top of the base
+    const config = await readConfig();
+    let effectiveBase = baseImage;
+    if (config.projectSetupLayer) {
+      effectiveBase = await ensureProjectSetupLayer(
+        baseImage,
+        config.projectSetupLayer,
+        coalesced,
+      );
+    }
+
+    return ensureAgentOverlay(effectiveBase, agent, coalesced);
   })();
 
-  agentImageInFlight.set(agent, promise);
+  const entry: InFlightAgentBuild = {
+    promise,
+    subscribers,
+    force: options.force ?? false,
+  };
+  agentImageInFlight.set(agent, entry);
   try {
     return await promise;
   } finally {
@@ -1630,6 +1874,8 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
       allocateTty: mode !== 'detached',
       files,
       labels: oxLabels,
+      privileged: config.privileged,
+      rootExecBeforeStart: config.rootInitScript,
     });
     await result.exited;
     return containerName;
@@ -1916,6 +2162,8 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
       allocateTty: interactive,
       files,
       labels: oxLabels,
+      privileged: config.privileged,
+      rootExecBeforeStart: config.rootInitScript,
     });
     await result.exited;
     return containerName;
@@ -2051,5 +2299,7 @@ exec bash
     cmdArgs: ['-c', startupScript],
     files,
     labels: oxLabels,
+    privileged: config.privileged,
+    rootExecBeforeStart: config.rootInitScript,
   });
 }

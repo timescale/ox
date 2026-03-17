@@ -45,6 +45,18 @@ export interface RunInDockerOptionsBase {
    * flood the log file.
    */
   quiet?: boolean;
+  /**
+   * Run the container in privileged mode (--privileged).
+   * Required for Docker-in-Docker and workloads needing full kernel access.
+   */
+  privileged?: boolean;
+  /**
+   * Shell command to run as root inside the container before signalling the
+   * main process to start.  Executed via `docker exec --user root` after
+   * virtual files are written but before the entrypoint is unblocked.
+   * Useful for installing system-level dependencies that require root.
+   */
+  rootExecBeforeStart?: string;
 }
 
 interface RunInDockerOptions extends RunInDockerOptionsBase {
@@ -97,6 +109,8 @@ export const runInDocker = async ({
   files = [],
   mountCwd = false,
   labels = {},
+  privileged = false,
+  rootExecBeforeStart,
   signal,
   quiet = false,
 }: RunInDockerOptions): Promise<RunInDockerResult> => {
@@ -125,6 +139,8 @@ export const runInDocker = async ({
     containerName,
     // Allocate a TTY when interactive or when explicitly requested for later attachment
     ...(interactive || allocateTty ? ['-it'] : []),
+    // Privileged mode for Docker-in-Docker and similar workloads
+    ...(privileged ? ['--privileged'] : []),
     ...dockerArgs,
     ...labelArgs,
     ...(mountCwd
@@ -196,6 +212,32 @@ export const runInDocker = async ({
   );
 
   // Check after file writes.
+  if (signal?.aborted) {
+    return abortAndRemoveContainer(containerId);
+  }
+
+  // Run rootExecBeforeStart as root before unblocking the main entrypoint.
+  if (rootExecBeforeStart) {
+    log.debug({ containerId }, 'Running rootExecBeforeStart');
+    const rootProc =
+      await $`docker exec --user root ${containerId} bash -c ${rootExecBeforeStart}`
+        .quiet()
+        .nothrow();
+    if (rootProc.exitCode !== 0) {
+      const stderr = rootProc.stderr.toString().trim();
+      log.error(
+        { containerId, exitCode: rootProc.exitCode, stderr },
+        'rootExecBeforeStart failed',
+      );
+      // Clean up the container and throw
+      $`docker rm -f ${containerId}`.quiet().catch(() => {});
+      throw new Error(
+        `rootInitScript failed (exit code ${rootProc.exitCode})${stderr ? `\n${stderr}` : ''}`,
+      );
+    }
+  }
+
+  // Check after rootExecBeforeStart.
   if (signal?.aborted) {
     return abortAndRemoveContainer(containerId);
   }

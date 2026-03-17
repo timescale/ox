@@ -14,6 +14,7 @@ import type { ConfigWizardResult } from '../commands/config.tsx';
 import type { CloudSetupResult } from '../components/CloudSetup.tsx';
 import type { DockerSetupResult } from '../components/DockerSetup.tsx';
 import type { SetupDbResult } from '../components/SetupDb.tsx';
+import { BuildError } from '../services/buildError.ts';
 import type { AgentType, OxConfig } from '../services/config.ts';
 import { projectConfig, readConfig } from '../services/config.ts';
 import type { ForkResult } from '../services/db.ts';
@@ -276,7 +277,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             } else if (progress.type === 'building') {
               updateView((v) =>
                 v.type === 'starting'
-                  ? { ...v, step: progress.message, layers: undefined }
+                  ? {
+                      ...v,
+                      step: progress.message,
+                      detail: progress.detail,
+                      layers: undefined,
+                    }
                   : v,
               );
             }
@@ -300,7 +306,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
               } else if (progress.type === 'building') {
                 updateView((v) =>
                   v.type === 'starting'
-                    ? { ...v, step: progress.message, layers: undefined }
+                    ? {
+                        ...v,
+                        step: progress.message,
+                        detail: progress.detail,
+                        layers: undefined,
+                      }
                     : v,
                 );
               }
@@ -501,13 +512,19 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         }
       } catch (err) {
         log.error({ err }, 'Failed to start session');
-        useToastStore
-          .getState()
-          .show(
-            `Failed to start: ${err instanceof Error ? err.message : String(err)}`,
-            'error',
-          );
-        useRouterStore.getState().goToPrompt();
+        if (err instanceof BuildError && err.outputLines.length > 0) {
+          useRouterStore
+            .getState()
+            .goToBuildError('Build Failed', err.message, err.outputLines);
+        } else {
+          useToastStore
+            .getState()
+            .show(
+              `Failed to start: ${err instanceof Error ? err.message : String(err)}`,
+              'error',
+            );
+          useRouterStore.getState().goToPrompt();
+        }
       }
     },
 
@@ -640,13 +657,16 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
 
         await activeProvider.ensureImage({
           onProgress: (progress) => {
-            if (
-              progress.type === 'pulling-cache' ||
-              progress.type === 'building'
-            ) {
+            if (progress.type === 'pulling-cache') {
               updateView((v) =>
                 v.type === 'starting-shell'
                   ? { ...v, step: progress.message }
+                  : v,
+              );
+            } else if (progress.type === 'building') {
+              updateView((v) =>
+                v.type === 'starting-shell'
+                  ? { ...v, step: progress.message, detail: progress.detail }
                   : v,
               );
             }
@@ -672,13 +692,19 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         connectShell(shell);
       } catch (err) {
         log.error({ err }, 'Failed to start shell');
-        useToastStore
-          .getState()
-          .show(
-            `Failed to start shell: ${err instanceof Error ? err.message : String(err)}`,
-            'error',
-          );
-        goToPrompt();
+        if (err instanceof BuildError && err.outputLines.length > 0) {
+          useRouterStore
+            .getState()
+            .goToBuildError('Build Failed', err.message, err.outputLines);
+        } else {
+          useToastStore
+            .getState()
+            .show(
+              `Failed to start shell: ${err instanceof Error ? err.message : String(err)}`,
+              'error',
+            );
+          goToPrompt();
+        }
       }
     },
 

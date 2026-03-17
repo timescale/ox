@@ -6,6 +6,8 @@ export interface LoadingProps {
   title?: string;
   message?: string;
   detail?: string;
+  /** Secondary detail line (e.g. latest build output), shown dimmer */
+  subDetail?: string;
   hint?: string;
   onCancel?: () => void;
 }
@@ -14,6 +16,7 @@ export function Loading({
   title,
   message = 'Please wait',
   detail,
+  subDetail,
   hint,
   onCancel,
 }: LoadingProps) {
@@ -42,6 +45,11 @@ export function Loading({
       {detail ? (
         <text fg={theme.secondary} marginTop={1}>
           {detail}
+        </text>
+      ) : null}
+      {subDetail ? (
+        <text fg={theme.textMuted} overflow="hidden" wrapMode="none" height={1}>
+          {subDetail}
         </text>
       ) : null}
       {hint ? (
