@@ -57,6 +57,14 @@ export interface OxConfig {
   overlayMounts?: string[];
 
   /**
+   * Shell command to run as root inside the container before starting the agent.
+   * Runs just before initScript, after cd into the working directory, in all modes.
+   * Useful for installing system packages that require root access.
+   * Example: 'apt-get update && apt-get install -y build-essential'
+   */
+  rootInitScript?: string;
+
+  /**
    * Shell command to run inside the container before starting the agent.
    * Runs after cd into the working directory, in all modes.
    * Example: './bun i'
@@ -125,6 +133,7 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   sandboxBaseImage: 'string',
   buildSandboxFromDockerfile: 'boolean|string',
   overlayMounts: 'string[]',
+  rootInitScript: 'string',
   initScript: 'string',
   projectSetupLayer: 'string',
   sandboxProvider: 'string',

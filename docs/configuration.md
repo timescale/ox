@@ -43,6 +43,7 @@ The wizard walks through sandbox provider, agent, model, and authentication setu
 | `sandboxBaseImage` | `string` | -- | Override Docker image for sandbox containers |
 | `buildSandboxFromDockerfile` | `boolean\|string` | `false` | Build sandbox image from Dockerfile. `true` uses the built-in Dockerfile; a string value specifies a path to a custom Dockerfile. Takes precedence over `sandboxBaseImage`. |
 | `overlayMounts` | `string[]` | -- | Paths to isolate with Docker volume mounts in [mount mode](sandbox-providers.md#mount-mode). E.g., `["node_modules"]` |
+| `rootInitScript` | `string` | -- | Shell command to run as **root** inside the sandbox before `initScript`. Useful for installing system packages. E.g., `"apt-get update && apt-get install -y build-essential"` |
 | `initScript` | `string` | -- | Shell command to run inside the sandbox before starting the agent. Runs in all modes. E.g., `"npm install"` |
 
 ### Port Forwarding
@@ -153,6 +154,7 @@ tigerServiceId: null
 themeName: tokyonight
 overlayMounts:
   - node_modules
+rootInitScript: "apt-get update && apt-get install -y build-essential"
 initScript: "npm install"
 appPort: 3000
 additionalPorts:

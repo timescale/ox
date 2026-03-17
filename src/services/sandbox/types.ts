@@ -64,6 +64,7 @@ export interface CreateSandboxOptions {
   isGitRepo?: boolean;
   agentArgs?: string[];
   agentMode?: AgentMode;
+  rootInitScript?: string;
   initScript?: string;
   overlayMounts?: string[];
   onProgress?: (step: string) => void;

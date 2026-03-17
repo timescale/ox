@@ -47,6 +47,7 @@ function withAnalytics(inner: SandboxProvider): SandboxProvider {
       agent: options.agent,
       model: options.model,
       has_db_fork: !!options.envVars,
+      has_root_init_script: !!options.rootInitScript,
       has_init_script: !!options.initScript,
       is_mount_mode: !!options.mountDir,
       interactive: options.interactive,

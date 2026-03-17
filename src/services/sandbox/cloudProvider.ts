@@ -216,6 +216,19 @@ async function provisionSandbox(
       await sandboxExec(sandbox, 'mkdir -p /work/app');
     }
 
+    // Run root init script if configured (before initScript, as root).
+    // Read from config directly (same pattern as Docker provider) since
+    // callers may not thread it through CreateSandboxOptions.
+    const config = await readConfig();
+    const rootInitScript = options.rootInitScript ?? config.rootInitScript;
+    if (rootInitScript) {
+      onProgress?.('Running root init script');
+      await logToSandbox(sandbox, 'Running root init script...');
+      await sandboxExec(sandbox, `cd /work/app && ${rootInitScript}`, {
+        sudo: true,
+      });
+    }
+
     // Run init script if configured
     if (options.initScript) {
       onProgress?.('Running init script');
