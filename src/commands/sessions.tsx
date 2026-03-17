@@ -398,7 +398,7 @@ function SessionsApp({
       break;
     }
     case 'starting-shell':
-      content = <StartingScreen step={view.step} />;
+      content = <StartingScreen step={view.step} subDetail={view.detail} />;
       break;
     case 'detail':
       content = <SessionDetail />;

@@ -1116,26 +1116,57 @@ export async function ensureDockerImage(
   return info.image;
 }
 
-// In-flight promise map to deduplicate concurrent ensureDockerImageForAgent
+// In-flight state for deduplicating concurrent ensureDockerImageForAgent
 // calls for the same agent (e.g. prebuildAgentImage and credential check
 // both firing when imageReady becomes true).
-const agentImageInFlight = new Map<AgentType, Promise<string>>();
+// Stores both the promise and a list of progress subscribers so that late
+// callers still receive ongoing build progress.
+interface InFlightAgentBuild {
+  promise: Promise<string>;
+  subscribers: Set<(progress: ImageBuildProgress) => void>;
+  force: boolean;
+}
+const agentImageInFlight = new Map<AgentType, InFlightAgentBuild>();
 
 /**
  * Ensure the base Docker image + agent overlay image are both available.
  * Returns the agent-specific overlay image tag, ready to use for containers.
  *
  * Concurrent calls for the same agent coalesce into a single resolution.
+ * All callers' onProgress callbacks receive build progress updates.
  */
 export async function ensureDockerImageForAgent(
   agent: AgentType,
   options: EnsureDockerImageOptions = {},
 ): Promise<string> {
   const existing = agentImageInFlight.get(agent);
-  if (existing) return existing;
+  if (existing) {
+    // Subscribe the new caller's progress callback to the in-flight build
+    if (options.onProgress) {
+      existing.subscribers.add(options.onProgress);
+    }
+    return existing.promise;
+  }
+
+  const subscribers = new Set<(progress: ImageBuildProgress) => void>();
+  if (options.onProgress) {
+    subscribers.add(options.onProgress);
+  }
+
+  // Fan-out progress to all subscribers
+  const fanOutProgress = (progress: ImageBuildProgress) => {
+    for (const cb of subscribers) {
+      cb(progress);
+    }
+  };
+
+  const coalesced: EnsureDockerImageOptions = {
+    ...options,
+    onProgress: fanOutProgress,
+  };
 
   const promise = (async () => {
-    const baseImage = await ensureDockerImage(options);
+    const baseImage = await ensureDockerImage(coalesced);
 
     // If projectSetupLayer is configured, apply it on top of the base
     const config = await readConfig();
@@ -1144,14 +1175,19 @@ export async function ensureDockerImageForAgent(
       effectiveBase = await ensureProjectSetupLayer(
         baseImage,
         config.projectSetupLayer,
-        options,
+        coalesced,
       );
     }
 
-    return ensureAgentOverlay(effectiveBase, agent, options);
+    return ensureAgentOverlay(effectiveBase, agent, coalesced);
   })();
 
-  agentImageInFlight.set(agent, promise);
+  const entry: InFlightAgentBuild = {
+    promise,
+    subscribers,
+    force: options.force ?? false,
+  };
+  agentImageInFlight.set(agent, entry);
   try {
     return await promise;
   } finally {

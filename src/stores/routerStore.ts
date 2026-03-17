@@ -53,7 +53,7 @@ export type SessionsView =
       step: string;
       mode: AgentMode;
     }
-  | { type: 'starting-shell'; step: string }
+  | { type: 'starting-shell'; step: string; detail?: string }
   | { type: 'detail'; session: OxSession }
   | { type: 'list' }
   | { type: 'resources' }

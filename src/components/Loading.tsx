@@ -47,7 +47,11 @@ export function Loading({
           {detail}
         </text>
       ) : null}
-      {subDetail ? <text fg={theme.textMuted}>{subDetail}</text> : null}
+      {subDetail ? (
+        <text fg={theme.textMuted} overflow="hidden" wrapMode="none" height={1}>
+          {subDetail}
+        </text>
+      ) : null}
       {hint ? (
         <text fg={theme.textMuted} marginTop={1}>
           {hint}

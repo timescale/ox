@@ -305,7 +305,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
               } else if (progress.type === 'building') {
                 updateView((v) =>
                   v.type === 'starting'
-                    ? { ...v, step: progress.message, layers: undefined }
+                    ? {
+                        ...v,
+                        step: progress.message,
+                        detail: progress.detail,
+                        layers: undefined,
+                      }
                     : v,
                 );
               }
@@ -645,13 +650,16 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
 
         await activeProvider.ensureImage({
           onProgress: (progress) => {
-            if (
-              progress.type === 'pulling-cache' ||
-              progress.type === 'building'
-            ) {
+            if (progress.type === 'pulling-cache') {
               updateView((v) =>
                 v.type === 'starting-shell'
                   ? { ...v, step: progress.message }
+                  : v,
+              );
+            } else if (progress.type === 'building') {
+              updateView((v) =>
+                v.type === 'starting-shell'
+                  ? { ...v, step: progress.message, detail: progress.detail }
                   : v,
               );
             }
