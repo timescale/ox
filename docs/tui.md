@@ -18,7 +18,7 @@ The TUI has several views. Navigate between them with keyboard shortcuts or the 
 
 The main input area where you write task descriptions for the agent.
 
-<!-- screenshot: docs/assets/prompt-screen.gif -->
+![Prompt screen showing the main TUI input view](images/prompt-screen.gif)
 
 **Elements:**
 - **Text area** -- Multi-line input with the placeholder "Ask anything... Type '/' for commands"
@@ -53,7 +53,7 @@ The main input area where you write task descriptions for the agent.
 
 Browse and manage all sessions across providers.
 
-<!-- screenshot: docs/assets/sessions-list.gif -->
+![Sessions list showing filters and session entries](images/sessions-list.gif)
 
 **Keyboard shortcuts:**
 
@@ -131,7 +131,7 @@ Manage sandbox images, volumes, and snapshots.
 
 Press `ctrl+p` from any view to open the command palette -- a fuzzy-searchable list of all available actions.
 
-<!-- screenshot: docs/assets/command-palette.gif -->
+<!-- screenshot: docs/images/command-palette.gif -->
 
 The palette shows each command's name, description, keyboard shortcut, and category. Type to filter, use arrow keys to navigate, and press `Enter` to execute.
 
@@ -159,7 +159,7 @@ Type `/` in an empty prompt to open the slash command popover. Slash commands ar
 | `/plan` | Switch to plan mode |
 | `/feedback` | Send feedback to the ox team |
 
-<!-- screenshot: docs/assets/slash-commands.gif -->
+![Slash command popover filtered from the prompt screen](images/slash-commands.gif)
 
 Type a partial name to fuzzy-filter the list. Press `Enter` to execute or `Escape` to dismiss.
 
@@ -167,7 +167,7 @@ Type a partial name to fuzzy-filter the list. Press `Enter` to execute or `Escap
 
 Ox ships with 33 built-in color themes. Change the theme with `/theme` or `ctrl+t` from the prompt screen.
 
-<!-- screenshot: docs/assets/theme-picker.gif -->
+![Theme picker with live preview while browsing themes](images/theme-picker.gif)
 
 Available themes:
 

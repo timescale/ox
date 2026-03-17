@@ -21,7 +21,7 @@ ox config
 
 The wizard walks through sandbox provider, agent, model, and authentication setup. It writes to the project config file (`.ox/config.yml`).
 
-<!-- screenshot: docs/assets/config-wizard.gif -->
+<!-- screenshot: docs/images/config-wizard.gif -->
 
 ## Config Keys
 
