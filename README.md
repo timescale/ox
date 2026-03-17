@@ -4,6 +4,8 @@ Run AI coding agents in isolated sandboxes, one task at a time.
 
 Ox automates the entire workflow of starting a coding task: it creates a feature branch, optionally forks your database, and launches an AI agent inside an isolated sandbox -- all from a single command or an interactive terminal UI.
 
+![Three interactive ox sessions, one each for Claude Code, OpenCode, and Codex, switching between them with detach and attach](docs/images/multi-agent-sessions.gif)
+
 ### Features
 
 - **Sandboxed execution** -- Agents run in isolated Docker containers or cloud sandboxes, never on your host machine

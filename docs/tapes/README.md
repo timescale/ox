@@ -47,6 +47,7 @@ Generated GIFs are written to `docs/images/`.
 | `slash-commands.tape` | `slash-commands.gif` | The slash command popover on the prompt screen |
 | `start-task.tape` | `start-task.gif` | Starting a task from the CLI in follow mode |
 | `theme-picker.tape` | `theme-picker.gif` | The theme picker with live preview |
+| `multi-agent-sessions.tape` | `multi-agent-sessions.gif` | Three interactive sessions, one per agent, with detach and reattach flow |
 
 ## Notes
 
