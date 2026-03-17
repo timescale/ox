@@ -37,9 +37,10 @@ describe('buildCloudDockerStartCommand', () => {
     expect(buildCloudDockerStartCommand({})).toBeUndefined();
   });
 
-  test('returns start-docker command when dockerInSandbox is enabled', () => {
-    expect(buildCloudDockerStartCommand({ dockerInSandbox: true })).toBe(
-      '/usr/local/bin/start-docker.sh',
-    );
+  test('returns guarded start-docker command when dockerInSandbox is enabled', () => {
+    const cmd = buildCloudDockerStartCommand({ dockerInSandbox: true });
+    expect(cmd).toContain('/usr/local/bin/start-docker.sh');
+    // Should guard with command -v so resume works on older snapshots
+    expect(cmd).toContain('command -v');
   });
 });

@@ -97,7 +97,10 @@ export function isSandboxTerminatedError(err: unknown): boolean {
 export function buildCloudDockerStartCommand(config: {
   dockerInSandbox?: boolean;
 }): string | undefined {
-  return config.dockerInSandbox ? '/usr/local/bin/start-docker.sh' : undefined;
+  if (!config.dockerInSandbox) return undefined;
+  // Guard with `command -v` so resume works even when the session was built
+  // from a snapshot that predates dockerInSandbox (script may not exist).
+  return 'command -v /usr/local/bin/start-docker.sh >/dev/null 2>&1 && /usr/local/bin/start-docker.sh';
 }
 
 // ============================================================================

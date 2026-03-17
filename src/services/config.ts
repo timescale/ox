@@ -91,7 +91,12 @@ export interface OxConfig {
   /** Sandbox provider: 'docker' (default) or 'cloud' (Deno Cloud) */
   sandboxProvider?: 'docker' | 'cloud';
 
-  /** Enable a built-in Docker-in-Docker setup inside supported sandboxes. */
+  /**
+   * Enable a built-in Docker-in-Docker setup inside supported sandboxes.
+   * Designed for the default ox base images (Ubuntu 24.04 for Docker,
+   * Debian 13 for Cloud). Custom `sandboxBaseImage` overrides on
+   * non-apt distros should use `projectSetupLayer` instead.
+   */
   dockerInSandbox?: boolean;
 
   /** Default region for cloud sandboxes */

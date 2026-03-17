@@ -249,6 +249,12 @@ const GHCR_BASE = 'ghcr.io/timescale/ox';
 
 const GHCR_IMAGE_NAME = `${GHCR_BASE}/sandbox`;
 
+/**
+ * Docker CE install script for the Docker sandbox provider.
+ * Assumes the default ox base image (Ubuntu 24.04 / noble, user `ox`).
+ * Custom `sandboxBaseImage` overrides may need their own Docker setup
+ * via `projectSetupLayer` instead of `dockerInSandbox`.
+ */
 const DOCKER_SANDBOX_SETUP_SCRIPT = `set -exo pipefail
 apt-get update
 apt-get install -y ca-certificates curl fuse-overlayfs
