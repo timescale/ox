@@ -94,6 +94,12 @@ export function isSandboxTerminatedError(err: unknown): boolean {
   );
 }
 
+export function buildCloudDockerStartCommand(config: {
+  dockerInSandbox?: boolean;
+}): string | undefined {
+  return config.dockerInSandbox ? '/usr/local/bin/start-docker.sh' : undefined;
+}
+
 // ============================================================================
 // Credential Injection
 // ============================================================================
@@ -220,6 +226,14 @@ async function provisionSandbox(
     // Read from config directly (same pattern as Docker provider) since
     // callers may not thread it through CreateSandboxOptions.
     const config = await readConfig();
+    const cloudDockerStart = buildCloudDockerStartCommand(config);
+    if (cloudDockerStart) {
+      onProgress?.('Starting Docker');
+      await logToSandbox(sandbox, 'Starting Docker...');
+      await sandboxExec(sandbox, cloudDockerStart, {
+        sudo: true,
+      });
+    }
     const rootInitScript = options.rootInitScript ?? config.rootInitScript;
     if (rootInitScript) {
       onProgress?.('Running root init script');
@@ -299,6 +313,16 @@ async function provisionResume(
     await injectCredentials(sandbox);
 
     // Start agent with continue flag
+    const config = await readConfig();
+    const cloudDockerStart = buildCloudDockerStartCommand(config);
+    if (cloudDockerStart) {
+      onProgress?.('Starting Docker');
+      await logToSandbox(sandbox, 'Starting Docker...');
+      await sandboxExec(sandbox, cloudDockerStart, {
+        sudo: true,
+      });
+    }
+
     const model = options.model ?? options.existingModel;
     const isInteractive =
       options.mode === 'interactive' || options.mode === 'shell';
@@ -596,6 +620,7 @@ export class CloudSandboxProvider implements SandboxProvider {
     const baseSlug = await ensureCloudSnapshot({
       token,
       region,
+      config,
       force: options?.force,
       onProgress: mapProgress,
     });
@@ -624,6 +649,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         agent: options.agent,
         baseSnapshotSlug: effectiveBaseSlug,
         setupHash,
+        config,
         force: options?.force,
         onProgress: mapProgress,
       });

@@ -30,6 +30,11 @@ export interface CloudBuildStep {
   detail?: string;
   command: string;
   sudo?: boolean;
+  group?: 'docker';
+}
+
+export interface CloudBaseStepOptions {
+  dockerInSandbox?: boolean;
 }
 
 /**
@@ -43,6 +48,14 @@ export interface CloudBuildStep {
 export const CLOUD_BASE_STEPS: readonly CloudBuildStep[] = YAML.parse(
   CLOUD_BASE_STEPS_YAML,
 ) as CloudBuildStep[];
+
+export function getCloudBaseSteps(
+  options: CloudBaseStepOptions = {},
+): readonly CloudBuildStep[] {
+  return CLOUD_BASE_STEPS.filter(
+    (step) => step.group !== 'docker' || options.dockerInSandbox,
+  );
+}
 
 /**
  * Compute a content hash of the base cloud snapshot build steps.
@@ -63,9 +76,11 @@ export const CLOUD_BASE_STEPS: readonly CloudBuildStep[] = YAML.parse(
  *
  * @returns A 12-character hex string (MD5 prefix).
  */
-export function computeCloudBaseHash(): string {
+export function computeCloudBaseHash(
+  options: CloudBaseStepOptions = {},
+): string {
   const hasher = new Bun.CryptoHasher('md5');
-  for (const step of CLOUD_BASE_STEPS) {
+  for (const step of getCloudBaseSteps(options)) {
     hasher.update(step.command);
     if (step.sudo) hasher.update('sudo');
   }

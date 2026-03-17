@@ -249,6 +249,37 @@ const GHCR_BASE = 'ghcr.io/timescale/ox';
 
 const GHCR_IMAGE_NAME = `${GHCR_BASE}/sandbox`;
 
+const DOCKER_SANDBOX_SETUP_SCRIPT = `set -exo pipefail
+apt-get update
+apt-get install -y ca-certificates curl fuse-overlayfs
+
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+cat >/etc/apt/sources.list.d/docker.sources <<'EOF'
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: noble
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+rm -rf /var/lib/apt/lists/*
+usermod -aG docker ox
+mkdir -p /var/run
+`;
+
+const DOCKER_SANDBOX_ROOT_INIT_SCRIPT = `dockerd --host=unix:///var/run/docker.sock --storage-driver=fuse-overlayfs >/tmp/dockerd.log 2>&1 &
+DOCKERD_PID=$!
+for i in $(seq 1 30); do
+  docker info >/dev/null 2>&1 && break
+  kill -0 $DOCKERD_PID 2>/dev/null || { cat /tmp/dockerd.log; exit 1; }
+  sleep 1
+done`;
+
 export function computeDockerfileHash(content: string): string {
   const hasher = new Bun.CryptoHasher('md5');
   hasher.update(content);
@@ -285,6 +316,172 @@ export function getProjectSetupTag(baseImage: string, script: string): string {
   const baseHash = tagPart.replace(/^md5-/, '');
   const setupHash = computeProjectSetupHash(baseHash, script);
   return `${DOCKER_IMAGE_NAME}:md5-${baseHash}-l-${setupHash}`;
+}
+
+export function computeDockerSandboxSetupHash(baseHash: string): string {
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(baseHash);
+  hasher.update(DOCKER_SANDBOX_SETUP_SCRIPT);
+  return hasher.digest('hex').slice(0, 12);
+}
+
+export function getDockerSandboxSetupTag(baseImage: string): string {
+  const tagPart = baseImage.split(':')[1] ?? baseImage;
+  const baseHash = tagPart.replace(/^md5-/, '');
+  const setupHash = computeDockerSandboxSetupHash(baseHash);
+  return `${DOCKER_IMAGE_NAME}:md5-${baseHash}-dkr-${setupHash}`;
+}
+
+export function buildDockerSandboxRootInitScript(
+  config: Pick<OxConfig, 'dockerInSandbox' | 'rootInitScript'>,
+): string | undefined {
+  if (!config.dockerInSandbox) {
+    return config.rootInitScript;
+  }
+  return config.rootInitScript
+    ? `${DOCKER_SANDBOX_ROOT_INIT_SCRIPT}\n${config.rootInitScript}`
+    : DOCKER_SANDBOX_ROOT_INIT_SCRIPT;
+}
+
+export function resolveDockerSandboxPrivilege(
+  config: Pick<OxConfig, 'dockerInSandbox' | 'privileged'>,
+): { privileged: boolean; warning?: string } {
+  if (!config.dockerInSandbox) {
+    return { privileged: config.privileged ?? false };
+  }
+  if (config.privileged === false) {
+    return {
+      privileged: false,
+      warning:
+        'dockerInSandbox is enabled, but config also sets privileged: false. Docker may fail to start in Docker sandboxes.',
+    };
+  }
+  return { privileged: true };
+}
+
+async function ensureRootScriptLayer(
+  baseImage: string,
+  setupTag: string,
+  script: string,
+  progressMessage: string,
+  options?: {
+    onProgress?: (progress: ImageBuildProgress) => void;
+    force?: boolean;
+    stream?: boolean;
+  },
+): Promise<string> {
+  if (!options?.force && (await imageExists(setupTag))) {
+    log.debug({ setupTag }, `${progressMessage} image already exists`);
+    return setupTag;
+  }
+
+  log.info({ setupTag, baseImage }, `Building ${progressMessage} image`);
+  options?.onProgress?.({
+    type: 'building',
+    message: progressMessage,
+  });
+
+  const containerName = `ox-setup-${nanoid(6).toLowerCase()}`;
+
+  try {
+    await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+    await writeFileToContainer(containerName, '/tmp/project-setup.sh', script);
+
+    const outputLines: string[] = [];
+    const proc = Bun.spawn(
+      [
+        'docker',
+        'exec',
+        '--user',
+        'root',
+        containerName,
+        'bash',
+        '/tmp/project-setup.sh',
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+
+    const processStream = async (
+      readable: ReadableStream<Uint8Array> | null,
+    ) => {
+      if (!readable) return;
+      const shouldStream = options?.stream;
+      const shouldReport = !shouldStream && options?.onProgress;
+      let partial = '';
+      for await (const chunk of readable) {
+        if (shouldStream) {
+          process.stderr.write(chunk);
+        }
+        partial += new TextDecoder().decode(chunk);
+        const lines = partial.split('\n');
+        partial = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed) {
+            outputLines.push(trimmed);
+            if (shouldReport) {
+              options?.onProgress?.({
+                type: 'building',
+                message: progressMessage,
+                detail: trimmed,
+              });
+            }
+          }
+        }
+      }
+      const trimmed = partial.trim();
+      if (trimmed) {
+        outputLines.push(trimmed);
+        if (shouldReport) {
+          options?.onProgress?.({
+            type: 'building',
+            message: progressMessage,
+            detail: trimmed,
+          });
+        }
+      }
+    };
+
+    await Promise.all([
+      processStream(proc.stdout),
+      processStream(proc.stderr),
+      proc.exited,
+    ]);
+
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      throw Object.assign(new Error(`Failed with exit code ${exitCode}`), {
+        exitCode,
+        stderr: '',
+        stdout: '',
+        outputLines,
+      });
+    }
+
+    await $`docker exec --user root ${containerName} rm -f /tmp/project-setup.sh`.quiet();
+    await $`docker commit ${containerName} ${setupTag}`.quiet();
+    invalidateImageExistsCache(setupTag);
+
+    log.info({ setupTag }, `${progressMessage} image built successfully`);
+    return setupTag;
+  } catch (err) {
+    log.error({ err, setupTag }, `Failed to build ${progressMessage} image`);
+    const detail =
+      err != null && typeof err === 'object' && 'stderr' in err && err.stderr
+        ? String(err.stderr).trim()
+        : '';
+    const lines: string[] =
+      err != null &&
+      typeof err === 'object' &&
+      'outputLines' in err &&
+      Array.isArray(err.outputLines)
+        ? (err.outputLines as string[])
+        : [];
+    const base = `Failed to build ${progressMessage} (exit code ${(err as { exitCode?: number }).exitCode ?? '?'})`;
+    throw new BuildError(detail ? `${base}\n${detail}` : base, lines);
+  } finally {
+    await $`docker rm -f ${containerName}`.quiet().nothrow();
+  }
 }
 
 // ============================================================================
@@ -356,130 +553,27 @@ export async function ensureProjectSetupLayer(
 ): Promise<string> {
   const setupTag = getProjectSetupTag(baseImage, script);
 
-  // Check if setup layer already exists locally
-  if (!options?.force && (await imageExists(setupTag))) {
-    log.debug('Project setup layer image already exists');
-    return setupTag;
-  }
+  return ensureRootScriptLayer(
+    baseImage,
+    setupTag,
+    script,
+    'Running project setup layer',
+    options,
+  );
+}
 
-  // Build locally
-  log.info({ setupTag, baseImage }, 'Building project setup layer image');
-  options?.onProgress?.({
-    type: 'building',
-    message: 'Running project setup layer',
-  });
-
-  const containerName = `ox-setup-${nanoid(6).toLowerCase()}`;
-
-  try {
-    // 1. Start a temporary container from the base image
-    await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
-
-    // 2. Write setup script into the container
-    await writeFileToContainer(containerName, '/tmp/project-setup.sh', script);
-
-    // 3. Execute setup script as root (so it can apt-get install, etc.)
-    //    Pipe stdout/stderr so we can surface output lines via onProgress
-    //    and optionally stream to the terminal.
-    //    Always accumulate output lines so they can be included in errors.
-    {
-      const outputLines: string[] = [];
-      const proc = Bun.spawn(
-        [
-          'docker',
-          'exec',
-          '--user',
-          'root',
-          containerName,
-          'bash',
-          '/tmp/project-setup.sh',
-        ],
-        { stdout: 'pipe', stderr: 'pipe' },
-      );
-
-      const processStream = async (
-        readable: ReadableStream<Uint8Array> | null,
-      ) => {
-        if (!readable) return;
-        const shouldStream = options?.stream;
-        const shouldReport = !shouldStream && options?.onProgress;
-        let partial = '';
-        for await (const chunk of readable) {
-          if (shouldStream) {
-            process.stderr.write(chunk);
-          }
-          partial += new TextDecoder().decode(chunk);
-          const lines = partial.split('\n');
-          partial = lines.pop() ?? '';
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed) {
-              outputLines.push(trimmed);
-              if (shouldReport) {
-                options?.onProgress?.({
-                  type: 'building',
-                  message: 'Running project setup layer',
-                  detail: trimmed,
-                });
-              }
-            }
-          }
-        }
-        const trimmed = partial.trim();
-        if (trimmed) {
-          outputLines.push(trimmed);
-          if (shouldReport) {
-            options?.onProgress?.({
-              type: 'building',
-              message: 'Running project setup layer',
-              detail: trimmed,
-            });
-          }
-        }
-      };
-
-      await Promise.all([
-        processStream(proc.stdout),
-        processStream(proc.stderr),
-        proc.exited,
-      ]);
-
-      const exitCode = await proc.exited;
-      if (exitCode !== 0) {
-        throw Object.assign(new Error(`Failed with exit code ${exitCode}`), {
-          exitCode,
-          stderr: '',
-          stdout: '',
-          outputLines,
-        });
-      }
-    }
-
-    // 4. Clean up temp files and commit
-    await $`docker exec --user root ${containerName} rm -f /tmp/project-setup.sh`.quiet();
-    await $`docker commit ${containerName} ${setupTag}`.quiet();
-    invalidateImageExistsCache(setupTag);
-
-    log.info({ setupTag }, 'Project setup layer image built successfully');
-    return setupTag;
-  } catch (err) {
-    log.error({ err, setupTag }, 'Failed to build project setup layer');
-    const detail =
-      err != null && typeof err === 'object' && 'stderr' in err && err.stderr
-        ? String(err.stderr).trim()
-        : '';
-    const lines: string[] =
-      err != null &&
-      typeof err === 'object' &&
-      'outputLines' in err &&
-      Array.isArray(err.outputLines)
-        ? (err.outputLines as string[])
-        : [];
-    const base = `Failed to build project setup layer (exit code ${(err as { exitCode?: number }).exitCode ?? '?'})`;
-    throw new BuildError(detail ? `${base}\n${detail}` : base, lines);
-  } finally {
-    await $`docker rm -f ${containerName}`.quiet().nothrow();
-  }
+export async function ensureDockerSandboxSetupLayer(
+  baseImage: string,
+  options?: EnsureDockerImageOptions & { stream?: boolean },
+): Promise<string> {
+  const setupTag = getDockerSandboxSetupTag(baseImage);
+  return ensureRootScriptLayer(
+    baseImage,
+    setupTag,
+    DOCKER_SANDBOX_SETUP_SCRIPT,
+    'Installing Docker in sandbox layer',
+    options,
+  );
 }
 
 /**
@@ -1180,12 +1274,19 @@ export async function ensureDockerImageForAgent(
   const promise = (async () => {
     const baseImage = await ensureDockerImage(coalesced);
 
-    // If projectSetupLayer is configured, apply it on top of the base
     const config = await readConfig();
     let effectiveBase = baseImage;
+    if (config.dockerInSandbox) {
+      effectiveBase = await ensureDockerSandboxSetupLayer(
+        effectiveBase,
+        coalesced,
+      );
+    }
+
+    // If projectSetupLayer is configured, apply it on top of the base
     if (config.projectSetupLayer) {
       effectiveBase = await ensureProjectSetupLayer(
-        baseImage,
+        effectiveBase,
         config.projectSetupLayer,
         coalesced,
       );
@@ -1792,9 +1893,13 @@ export async function resumeSession(
 
   // Read config for overlay mounts and init script
   const config = await readConfig();
-
   const baseName = container.Name.replace(/\//g, '').trim();
   const containerName = `${baseName}-resumed-${resumeSuffix}`;
+  const rootExecBeforeStart = buildDockerSandboxRootInitScript(config);
+  const privilege = resolveDockerSandboxPrivilege(config);
+  if (privilege.warning) {
+    log.warn({ containerName }, privilege.warning);
+  }
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
@@ -1874,8 +1979,8 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
       allocateTty: mode !== 'detached',
       files,
       labels: oxLabels,
-      privileged: config.privileged,
-      rootExecBeforeStart: config.rootInitScript,
+      privileged: privilege.privileged,
+      rootExecBeforeStart,
     });
     await result.exited;
     return containerName;
@@ -2041,6 +2146,11 @@ export async function startContainer(
 
   // Read config for overlay mounts and init script
   const config = await readConfig();
+  const rootExecBeforeStart = buildDockerSandboxRootInitScript(config);
+  const privilege = resolveDockerSandboxPrivilege(config);
+  if (privilege.warning) {
+    log.warn({ containerName }, privilege.warning);
+  }
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
@@ -2162,8 +2272,8 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
       allocateTty: interactive,
       files,
       labels: oxLabels,
-      privileged: config.privileged,
-      rootExecBeforeStart: config.rootInitScript,
+      privileged: privilege.privileged,
+      rootExecBeforeStart,
     });
     await result.exited;
     return containerName;
@@ -2222,6 +2332,11 @@ export async function startShellContainer(
   }
   // Read config for overlay mounts and init script
   const config = await readConfig();
+  const rootExecBeforeStart = buildDockerSandboxRootInitScript(config);
+  const privilege = resolveDockerSandboxPrivilege(config);
+  if (privilege.warning) {
+    log.warn({ containerName }, privilege.warning);
+  }
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
@@ -2299,7 +2414,7 @@ exec bash
     cmdArgs: ['-c', startupScript],
     files,
     labels: oxLabels,
-    privileged: config.privileged,
-    rootExecBeforeStart: config.rootInitScript,
+    privileged: privilege.privileged,
+    rootExecBeforeStart,
   });
 }

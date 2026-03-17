@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { isSandboxTerminatedError } from './cloudProvider.ts';
+import {
+  buildCloudDockerStartCommand,
+  isSandboxTerminatedError,
+} from './cloudProvider.ts';
 
 describe('isSandboxTerminatedError', () => {
   test('detects SANDBOX_ALREADY_TERMINATED code', () => {
@@ -26,5 +29,17 @@ describe('isSandboxTerminatedError', () => {
   test('returns false for numeric code (not string)', () => {
     const err = { code: 404, message: 'not found' };
     expect(isSandboxTerminatedError(err)).toBe(false);
+  });
+});
+
+describe('buildCloudDockerStartCommand', () => {
+  test('returns undefined when dockerInSandbox is disabled', () => {
+    expect(buildCloudDockerStartCommand({})).toBeUndefined();
+  });
+
+  test('returns start-docker command when dockerInSandbox is enabled', () => {
+    expect(buildCloudDockerStartCommand({ dockerInSandbox: true })).toBe(
+      '/usr/local/bin/start-docker.sh',
+    );
   });
 });

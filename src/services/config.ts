@@ -91,6 +91,9 @@ export interface OxConfig {
   /** Sandbox provider: 'docker' (default) or 'cloud' (Deno Cloud) */
   sandboxProvider?: 'docker' | 'cloud';
 
+  /** Enable a built-in Docker-in-Docker setup inside supported sandboxes. */
+  dockerInSandbox?: boolean;
+
   /** Default region for cloud sandboxes */
   cloudRegion?: 'ams' | 'ord';
 
@@ -146,6 +149,7 @@ export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
   projectSetupLayer: 'string',
   privileged: 'boolean',
   sandboxProvider: 'string',
+  dockerInSandbox: 'boolean',
   cloudRegion: 'string',
   analytics: 'boolean',
   agentModels: 'object',

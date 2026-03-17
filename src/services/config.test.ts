@@ -328,6 +328,19 @@ agent: claude
       expect(readBack?.privileged).toBe(true);
     });
 
+    test('config with dockerInSandbox boolean can be written and read back', async () => {
+      const original: OxConfig = {
+        agent: 'claude',
+        dockerInSandbox: true,
+      };
+
+      await projectConfig.write(original);
+      const readBack = await projectConfig.read();
+
+      expect(readBack).toEqual(original);
+      expect(readBack?.dockerInSandbox).toBe(true);
+    });
+
     test('config with empty overlayMounts array', async () => {
       const original: OxConfig = {
         agent: 'claude',

@@ -3,7 +3,11 @@
 // ============================================================================
 
 import { describe, expect, test } from 'bun:test';
-import { CLOUD_BASE_STEPS, computeCloudBaseHash } from './cloudBaseSteps.ts';
+import {
+  CLOUD_BASE_STEPS,
+  computeCloudBaseHash,
+  getCloudBaseSteps,
+} from './cloudBaseSteps.ts';
 import {
   getAgentSnapshotSlug,
   getBaseSnapshotSlug,
@@ -25,6 +29,12 @@ describe('computeCloudBaseHash', () => {
     const hash1 = computeCloudBaseHash();
     const hash2 = computeCloudBaseHash();
     expect(hash1).toBe(hash2);
+  });
+
+  test('changes when dockerInSandbox changes', () => {
+    const withoutDocker = computeCloudBaseHash({ dockerInSandbox: false });
+    const withDocker = computeCloudBaseHash({ dockerInSandbox: true });
+    expect(withoutDocker).not.toBe(withDocker);
   });
 });
 
@@ -54,6 +64,16 @@ describe('CLOUD_BASE_STEPS', () => {
         true,
       );
     }
+  });
+
+  test('excludes docker-grouped steps when dockerInSandbox is false', () => {
+    const steps = getCloudBaseSteps({ dockerInSandbox: false });
+    expect(steps.some((step) => step.group === 'docker')).toBe(false);
+  });
+
+  test('includes docker-grouped steps when dockerInSandbox is true', () => {
+    const steps = getCloudBaseSteps({ dockerInSandbox: true });
+    expect(steps.some((step) => step.group === 'docker')).toBe(true);
   });
 });
 
@@ -90,6 +110,12 @@ describe('getBaseSnapshotSlug', () => {
     const slug1 = getBaseSnapshotSlug();
     const slug2 = getBaseSnapshotSlug();
     expect(slug1).toBe(slug2);
+  });
+
+  test('changes when dockerInSandbox changes', () => {
+    const withoutDocker = getBaseSnapshotSlug({ dockerInSandbox: false });
+    const withDocker = getBaseSnapshotSlug({ dockerInSandbox: true });
+    expect(withoutDocker).not.toBe(withDocker);
   });
 });
 

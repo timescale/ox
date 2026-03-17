@@ -3,12 +3,16 @@ import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import {
+  buildDockerSandboxRootInitScript,
   buildOxLabels,
   computeDockerfileHash,
+  computeDockerSandboxSetupHash,
   computeProjectSetupHash,
   formatCpuPercent,
   formatMemUsage,
+  getDockerSandboxSetupTag,
   getProjectSetupTag,
+  resolveDockerSandboxPrivilege,
   resolveSandboxImage,
   toVolumeArgs,
 } from './docker';
@@ -203,6 +207,84 @@ describe('getProjectSetupTag', () => {
       'my-script',
     );
     expect(local).toBe(ghcr);
+  });
+});
+
+describe('computeDockerSandboxSetupHash', () => {
+  test('produces 12-char hex string', () => {
+    const hash = computeDockerSandboxSetupHash('basehash1234');
+    expect(hash).toMatch(/^[a-f0-9]{12}$/);
+  });
+
+  test('changes when base hash changes', () => {
+    const h1 = computeDockerSandboxSetupHash('base-a');
+    const h2 = computeDockerSandboxSetupHash('base-b');
+    expect(h1).not.toBe(h2);
+  });
+});
+
+describe('getDockerSandboxSetupTag', () => {
+  test('returns local ox-sandbox tag with -dkr- infix', () => {
+    const tag = getDockerSandboxSetupTag('ox-sandbox:md5-abc123def456');
+    expect(tag).toMatch(/^ox-sandbox:md5-abc123def456-dkr-[a-f0-9]{12}$/);
+  });
+
+  test('normalizes GHCR base image to local ox-sandbox prefix', () => {
+    const tag = getDockerSandboxSetupTag(
+      'ghcr.io/timescale/ox/sandbox:abc123def456',
+    );
+    expect(tag).toMatch(/^ox-sandbox:md5-abc123def456-dkr-[a-f0-9]{12}$/);
+  });
+});
+
+describe('buildDockerSandboxRootInitScript', () => {
+  test('returns undefined when dockerInSandbox is disabled and no rootInitScript exists', () => {
+    expect(buildDockerSandboxRootInitScript({})).toBeUndefined();
+  });
+
+  test('returns dockerd startup script when dockerInSandbox is enabled', () => {
+    const script = buildDockerSandboxRootInitScript({ dockerInSandbox: true });
+    expect(script).toContain('dockerd --host=unix:///var/run/docker.sock');
+    expect(script).toContain('--storage-driver=fuse-overlayfs');
+  });
+
+  test('prepends dockerd startup before user rootInitScript', () => {
+    const script = buildDockerSandboxRootInitScript({
+      dockerInSandbox: true,
+      rootInitScript: 'apt-get update',
+    });
+    expect(script).toContain('apt-get update');
+    expect(script?.indexOf('dockerd')).toBeLessThan(
+      script?.indexOf('apt-get update') ?? 0,
+    );
+  });
+});
+
+describe('resolveDockerSandboxPrivilege', () => {
+  test('defaults to false when dockerInSandbox is disabled', () => {
+    expect(resolveDockerSandboxPrivilege({})).toEqual({
+      privileged: false,
+      warning: undefined,
+    });
+  });
+
+  test('enables privileged when dockerInSandbox is enabled and privileged is unset', () => {
+    expect(resolveDockerSandboxPrivilege({ dockerInSandbox: true })).toEqual({
+      privileged: true,
+      warning: undefined,
+    });
+  });
+
+  test('warns and respects explicit privileged false', () => {
+    expect(
+      resolveDockerSandboxPrivilege({
+        dockerInSandbox: true,
+        privileged: false,
+      }),
+    ).toEqual({
+      privileged: false,
+      warning: expect.stringContaining('privileged: false'),
+    });
   });
 });
 

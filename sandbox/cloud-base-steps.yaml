@@ -80,6 +80,7 @@
 - label: Add Docker apt repository
   message: Installing Docker
   detail: docker-ce, containerd.io, docker-compose-plugin
+  group: docker
   sudo: true
   command: |
     install -m 0755 -d /etc/apt/keyrings \
@@ -96,6 +97,7 @@
 - label: Install Docker CE packages
   message: Installing Docker
   detail: docker-ce, containerd.io, docker-compose-plugin
+  group: docker
   sudo: true
   command: >-
     DEBIAN_FRONTEND=noninteractive apt-get update
@@ -105,16 +107,19 @@
 
 - label: Fix broken packages after Docker install
   message: Installing Docker
+  group: docker
   sudo: true
   command: "dpkg --purge --force-depends libpam-systemd dbus-user-session docker-ce-rootless-extras 2>/dev/null; dpkg --configure -a"
 
 - label: Switch to iptables-legacy
   message: Installing Docker
+  group: docker
   sudo: true
   command: "update-alternatives --set iptables /usr/sbin/iptables-legacy && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy"
 
 - label: Write Docker startup script
   message: Installing Docker
+  group: docker
   sudo: true
   command: |
     cat > /usr/local/bin/start-docker.sh << 'STARTDKR'
@@ -163,6 +168,7 @@
 
 - label: Add Docker auto-start hook
   message: Installing Docker
+  group: docker
   sudo: true
   command: |
     cat > /etc/profile.d/docker-start.sh << 'PROFILED'
@@ -180,4 +186,5 @@
 
 - label: Start Docker in build sandbox
   message: Starting Docker and caching base image
+  group: docker
   command: /usr/local/bin/start-docker.sh

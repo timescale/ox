@@ -467,12 +467,14 @@ async function discoverCloudResources(
 
   log.debug('Discovering cloud resources...');
   const client = new DenoApiClient(token);
-  const currentBaseSlug = getBaseSnapshotSlug();
+  const config = await readConfig();
+  const currentBaseSlug = getBaseSnapshotSlug(config);
   const AGENTS: AgentType[] = ['claude', 'opencode', 'codex'];
-  const currentAgentSlugs = new Set(AGENTS.map((a) => getAgentSnapshotSlug(a)));
+  const currentAgentSlugs = new Set(
+    AGENTS.map((a) => getAgentSnapshotSlug(a, undefined, config)),
+  );
 
   // Compute current setup slug (if projectSetupLayer is configured)
-  const config = await readConfig();
   let currentSetupSlug: string | null = null;
   if (config.projectSetupLayer) {
     const baseHash = currentBaseSlug.replace('ox-base-', '');
