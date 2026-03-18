@@ -8,6 +8,7 @@ import {
   computeAgentOverlayHash,
   computeDockerfileHash,
   computeProjectSetupHash,
+  extractLayerHash,
   extractTagHash,
   formatCpuPercent,
   formatMemUsage,
@@ -200,6 +201,38 @@ describe('extractTagHash', () => {
   });
 });
 
+describe('extractLayerHash', () => {
+  test('extracts layer hash from md5- base tag', () => {
+    expect(extractLayerHash('ox-sandbox:md5-abc123def456')).toBe(
+      'abc123def456',
+    );
+  });
+
+  test('extracts layer hash from dkr- tag (last segment)', () => {
+    expect(extractLayerHash('ox-sandbox:dkr-aaaaaa-bbbbbbbbbbbb')).toBe(
+      'bbbbbbbbbbbb',
+    );
+  });
+
+  test('extracts layer hash from psl- tag', () => {
+    expect(extractLayerHash('ox-sandbox:psl-aaaaaa-bbbbbbbbbbbb')).toBe(
+      'bbbbbbbbbbbb',
+    );
+  });
+
+  test('extracts layer hash from a- agent tag', () => {
+    expect(extractLayerHash('ox-sandbox:a-claude-aaaaaa-bbbbbbbbbbbb')).toBe(
+      'bbbbbbbbbbbb',
+    );
+  });
+
+  test('extracts layer hash from GHCR image', () => {
+    expect(extractLayerHash('ghcr.io/timescale/ox/sandbox:abc123def456')).toBe(
+      'abc123def456',
+    );
+  });
+});
+
 describe('computeProjectSetupHash', () => {
   test('produces 12-char hex string', () => {
     const hash = computeProjectSetupHash('basehash1234', 'apt install python3');
@@ -245,7 +278,7 @@ describe('getProjectSetupTag', () => {
     expect(local).toBe(ghcr);
   });
 
-  test('parent6 changes when built on dkr layer vs base', () => {
+  test('parent6 reflects immediate parent layer hash, not grandparent', () => {
     const onBase = getProjectSetupTag(
       'ox-sandbox:md5-abc123def456',
       'my-script',
@@ -254,6 +287,10 @@ describe('getProjectSetupTag', () => {
       'ox-sandbox:dkr-abc123-999999999999',
       'my-script',
     );
+    // onBase parent6 = abc123 (from base hash abc123def456)
+    expect(onBase).toMatch(/^ox-sandbox:psl-abc123-/);
+    // onDkr parent6 = 999999 (from dkr layer hash 999999999999, not abc123)
+    expect(onDkr).toMatch(/^ox-sandbox:psl-999999-/);
     // Different parent → different parent6 prefix and different hash
     expect(onBase).not.toBe(onDkr);
   });
@@ -298,13 +335,13 @@ describe('getAgentOverlayTag', () => {
     expect(tag).toMatch(/^ox-sandbox:a-claude-abc123-[a-f0-9]{12}$/);
   });
 
-  test('parent6 reflects dkr layer when built on dkr base', () => {
+  test('parent6 reflects dkr layer hash when built on dkr base', () => {
     const tag = getAgentOverlayTag(
       'ox-sandbox:dkr-abc123-def456789012',
       'claude',
     );
-    // parent hash is 'abc123-def456789012', first 6 chars = 'abc123'
-    expect(tag).toMatch(/^ox-sandbox:a-claude-abc123-[a-f0-9]{12}$/);
+    // parent layer hash is 'def456789012', first 6 chars = 'def456'
+    expect(tag).toMatch(/^ox-sandbox:a-claude-def456-[a-f0-9]{12}$/);
   });
 });
 

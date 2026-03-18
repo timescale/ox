@@ -295,7 +295,9 @@ export function computeDockerfileHash(content: string): string {
 }
 
 /**
- * Extract the identity hash from any ox-sandbox tag or image reference.
+ * Extract the full identity hash from any ox-sandbox tag or image reference.
+ * This is the portion used as input when computing child layer hashes —
+ * it encodes the complete ancestry of the image.
  *
  * Examples:
  *   'ox-sandbox:md5-aaa'             → 'aaa'
@@ -316,6 +318,26 @@ export function extractTagHash(imageRef: string): string {
   if (tagPart.startsWith('psl-')) return tagPart.slice(4);
   if (tagPart.startsWith('a-')) return tagPart.slice(2);
   return tagPart;
+}
+
+/**
+ * Extract just the 12-char layer hash from an image tag — this is the
+ * hash that uniquely identifies THIS layer's content (the last segment).
+ * Used as the parent6 prefix when a child layer references this image.
+ *
+ * Examples:
+ *   'ox-sandbox:md5-abcdef123456'              → 'abcdef123456'
+ *   'ox-sandbox:dkr-aaaaaa-bbbbbbbbbbbb'       → 'bbbbbbbbbbbb'
+ *   'ox-sandbox:psl-aaaaaa-bbbbbbbbbbbb'       → 'bbbbbbbbbbbb'
+ *   'ox-sandbox:a-claude-aaaaaa-bbbbbbbbbbbb'  → 'bbbbbbbbbbbb'
+ */
+export function extractLayerHash(imageRef: string): string {
+  const tagPart = imageRef.includes(':')
+    ? (imageRef.split(':').pop() ?? imageRef)
+    : imageRef;
+  // For all formats, the layer hash is the last 12-char hex segment
+  const parts = tagPart.split('-');
+  return parts[parts.length - 1] ?? tagPart;
 }
 
 /**
@@ -341,8 +363,9 @@ export function computeProjectSetupHash(
  */
 export function getProjectSetupTag(baseImage: string, script: string): string {
   const parentHash = extractTagHash(baseImage);
+  const parentLayerHash = extractLayerHash(baseImage);
   const setupHash = computeProjectSetupHash(parentHash, script);
-  return `${DOCKER_IMAGE_NAME}:psl-${parentHash.slice(0, 6)}-${setupHash}`;
+  return `${DOCKER_IMAGE_NAME}:psl-${parentLayerHash.slice(0, 6)}-${setupHash}`;
 }
 
 /**
@@ -351,11 +374,12 @@ export function getProjectSetupTag(baseImage: string, script: string): string {
  */
 export function getDockerSandboxSetupTag(baseImage: string): string {
   const parentHash = extractTagHash(baseImage);
+  const parentLayerHash = extractLayerHash(baseImage);
   const hasher = new Bun.CryptoHasher('md5');
   hasher.update(parentHash);
   hasher.update(DOCKER_SANDBOX_SETUP_SCRIPT);
   const layerHash = hasher.digest('hex').slice(0, 12);
-  return `${DOCKER_IMAGE_NAME}:dkr-${parentHash.slice(0, 6)}-${layerHash}`;
+  return `${DOCKER_IMAGE_NAME}:dkr-${parentLayerHash.slice(0, 6)}-${layerHash}`;
 }
 
 export function buildDockerSandboxRootInitScript(
@@ -570,8 +594,9 @@ export function getAgentOverlayTag(
   agent: AgentType,
 ): string {
   const parentHash = extractTagHash(baseImage);
+  const parentLayerHash = extractLayerHash(baseImage);
   const layerHash = computeAgentOverlayHash(parentHash, agent);
-  return `${DOCKER_IMAGE_NAME}:a-${agent}-${parentHash.slice(0, 6)}-${layerHash}`;
+  return `${DOCKER_IMAGE_NAME}:a-${agent}-${parentLayerHash.slice(0, 6)}-${layerHash}`;
 }
 
 /**

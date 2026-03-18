@@ -14,7 +14,7 @@ import { getDenoToken } from '../deno.ts';
 import {
   computeDockerfileHash,
   type DockerImageInfo,
-  extractTagHash,
+  extractLayerHash,
   getAgentOverlayTag,
   getDockerSandboxSetupTag,
   getGhcrAgentTag,
@@ -654,9 +654,10 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
   const currentSetupLayerTags = new Set<string>();
   const currentAncestorPrefixes = new Set<string>();
 
-  // The base image's hash prefix is always a current ancestor
-  const baseHash = extractTagHash(currentBaseImage);
-  currentAncestorPrefixes.add(baseHash.slice(0, 6));
+  // The base image's layer hash prefix is always a current ancestor.
+  // We use extractLayerHash (not extractTagHash) because child tags
+  // reference their parent by the first 6 chars of the parent's layer hash.
+  currentAncestorPrefixes.add(extractLayerHash(currentBaseImage).slice(0, 6));
 
   // Compute effective parent chain (mirrors ensureDockerImageForAgent)
   let effectiveBase = currentBaseImage;
@@ -664,8 +665,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     const dkrTag = getDockerSandboxSetupTag(currentBaseImage);
     const dkrTagPart = dkrTag.split(':')[1] ?? dkrTag;
     currentSetupLayerTags.add(dkrTagPart);
-    const dkrHash = extractTagHash(dkrTag);
-    currentAncestorPrefixes.add(dkrHash.slice(0, 6));
+    currentAncestorPrefixes.add(extractLayerHash(dkrTag).slice(0, 6));
     effectiveBase = dkrTag;
   }
 
@@ -676,8 +676,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     );
     const tagPart = setupTag.split(':')[1] ?? setupTag;
     currentSetupLayerTags.add(tagPart);
-    const setupHash = extractTagHash(setupTag);
-    currentAncestorPrefixes.add(setupHash.slice(0, 6));
+    currentAncestorPrefixes.add(extractLayerHash(setupTag).slice(0, 6));
     effectiveBase = setupTag;
   }
 
