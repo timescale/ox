@@ -49,10 +49,12 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
       sandboxBaseImage === 'error' ||
       sandboxAgentImage === 'error')
   ) {
+    // Truncate to first line — full details available via "Press Enter"
+    const firstLine = error.split('\n')[0] ?? error;
     return (
       <box flexDirection="column">
         <text fg={theme.error}>
-          {'\u2717 '} {error}
+          {'\u2717 '} {firstLine}
         </text>
         {hasErrorDetails ? (
           <text fg={theme.textMuted}>
