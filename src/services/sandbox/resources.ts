@@ -221,6 +221,7 @@ export function classifyCloudSnapshot(
 /**
  * Derive a volume's status from its child snapshots.
  * - If any child is `current` or `active` → `current`
+ * - Else if any child is `unknown` → `unknown`
  * - If children exist but all are `old` → `old`
  * - If no children → `orphaned`
  */
@@ -475,6 +476,60 @@ function extractParentPrefix(tag: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Promote Docker images from `old` to `unknown` when their ancestry is still
+ * valid through a chain of `current` / `unknown` images.
+ *
+ * Starting from the current ancestor prefixes, repeatedly add layer-hash
+ * prefixes from `current`/`unknown` Docker images and promote any `old` image
+ * whose parent prefix matches. Repeats until stable to support arbitrary depth.
+ */
+export function propagateUnknownAncestry(
+  resources: SandboxResource[],
+  currentAncestorPrefixes: Set<string>,
+): void {
+  const knownAncestorPrefixes = new Set(currentAncestorPrefixes);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const resource of resources) {
+      if (
+        resource.provider !== 'docker' ||
+        resource.kind !== 'image' ||
+        (resource.status !== 'current' && resource.status !== 'unknown')
+      ) {
+        continue;
+      }
+
+      const tag = resource.name.split(':')[1] ?? '';
+      const layerHash = tag.split('-').pop() ?? '';
+      const prefix = layerHash.slice(0, 6);
+      if (prefix && !knownAncestorPrefixes.has(prefix)) {
+        knownAncestorPrefixes.add(prefix);
+        changed = true;
+      }
+    }
+
+    if (!changed) break;
+
+    changed = false;
+    for (const resource of resources) {
+      if (resource.provider !== 'docker' || resource.status !== 'old') {
+        continue;
+      }
+
+      const tag = resource.name.split(':')[1] ?? '';
+      const parentPrefix = extractParentPrefix(tag);
+      if (parentPrefix && knownAncestorPrefixes.has(parentPrefix)) {
+        resource.status = 'unknown';
+        changed = true;
+      }
+    }
+  }
+}
+
 // ============================================================================
 // Discovery Functions
 // ============================================================================
@@ -715,44 +770,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     resources.push(classifyDockerImage(image, ctx));
   }
 
-  // Second pass: propagate 'unknown' ancestry.
-  // Images classified as 'unknown' (valid parent, different content) may
-  // themselves be parents of other images. Promote any 'old' image to
-  // 'unknown' if its parent prefix matches an 'unknown' or 'current' image.
-  // Repeat until stable (handles arbitrary chain depth).
-  const unknownAncestorPrefixes = new Set(currentAncestorPrefixes);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const r of resources) {
-      if (
-        r.provider === 'docker' &&
-        r.kind === 'image' &&
-        (r.status === 'current' || r.status === 'unknown')
-      ) {
-        const tag = r.name.split(':')[1] ?? '';
-        const layerHash = tag.split('-').pop() ?? '';
-        const prefix = layerHash.slice(0, 6);
-        if (prefix && !unknownAncestorPrefixes.has(prefix)) {
-          unknownAncestorPrefixes.add(prefix);
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      changed = false;
-      for (const r of resources) {
-        if (r.provider === 'docker' && r.status === 'old') {
-          const tag = r.name.split(':')[1] ?? '';
-          const parentPrefix = extractParentPrefix(tag);
-          if (parentPrefix && unknownAncestorPrefixes.has(parentPrefix)) {
-            r.status = 'unknown';
-            changed = true;
-          }
-        }
-      }
-    }
-  }
+  propagateUnknownAncestry(resources, currentAncestorPrefixes);
 
   return resources;
 }

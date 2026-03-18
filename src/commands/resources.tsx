@@ -73,7 +73,7 @@ const cleanCommand = new Command('clean')
     console.log(`Found ${targets.length} resource(s) to remove:`);
     for (const t of targets) {
       console.log(
-        `  ${t.status === 'old' || t.status === 'unknown' ? '\u25CB' : '\u25CC'} [${t.provider}] ${t.name} (${t.category})`,
+        `  ${t.status === 'old' ? '\u25CB' : '\u25CC'} [${t.provider}] ${t.name} (${t.category})`,
       );
     }
 

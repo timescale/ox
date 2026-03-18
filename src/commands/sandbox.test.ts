@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { ShellError } from '../utils/shell.ts';
 
@@ -29,10 +30,10 @@ async function runOxInDir(
 }
 
 describe('sandbox command', () => {
-  const tempRoot = join(PROJECT_ROOT, '.tmp-sandbox-command-test');
+  let tempRoot = '';
 
   beforeEach(async () => {
-    await rm(tempRoot, { recursive: true, force: true });
+    tempRoot = await mkdtemp(join(tmpdir(), 'ox-sandbox-command-test-'));
     await mkdir(join(tempRoot, '.ox'), { recursive: true });
   });
 
