@@ -295,16 +295,40 @@ export function computeDockerfileHash(content: string): string {
 }
 
 /**
+ * Extract the identity hash from any ox-sandbox tag or image reference.
+ *
+ * Examples:
+ *   'ox-sandbox:md5-aaa'             → 'aaa'
+ *   'ghcr.io/.../sandbox:aaa'        → 'aaa'
+ *   'ox-sandbox:dkr-aaa-bbb'         → 'aaa-bbb'
+ *   'ox-sandbox:psl-aaa-bbb'         → 'aaa-bbb'
+ *   'ox-sandbox:a-claude-aaa-bbb'    → 'claude-aaa-bbb'
+ *   'md5-aaa'                        → 'aaa'         (tag-only input)
+ */
+export function extractTagHash(imageRef: string): string {
+  // Get the tag portion (after last ':')
+  const tagPart = imageRef.includes(':')
+    ? (imageRef.split(':').pop() ?? imageRef)
+    : imageRef;
+  // Strip known prefixes to get the identity portion
+  if (tagPart.startsWith('md5-')) return tagPart.slice(4);
+  if (tagPart.startsWith('dkr-')) return tagPart.slice(4);
+  if (tagPart.startsWith('psl-')) return tagPart.slice(4);
+  if (tagPart.startsWith('a-')) return tagPart.slice(2);
+  return tagPart;
+}
+
+/**
  * Compute a content hash for the project setup layer.
- * Combines the base image hash and the setup script content so the
- * layer rebuilds when either the base or the script changes.
+ * Combines the parent hash and the setup script content so the
+ * layer rebuilds when either the parent or the script changes.
  */
 export function computeProjectSetupHash(
-  baseHash: string,
+  parentHash: string,
   script: string,
 ): string {
   const hasher = new Bun.CryptoHasher('md5');
-  hasher.update(baseHash);
+  hasher.update(parentHash);
   hasher.update(script);
   return hasher.digest('hex').slice(0, 12);
 }
@@ -313,29 +337,25 @@ export function computeProjectSetupHash(
  * Compute the project setup layer image tag.
  * Always uses the local `ox-sandbox` name — project setup layers are built
  * locally and never published to GHCR.
- * Format: ox-sandbox:md5-<baseHash>-l-<setupHash>
+ * Format: ox-sandbox:psl-<parent6>-<setupHash12>
  */
 export function getProjectSetupTag(baseImage: string, script: string): string {
-  // Extract the base hash from the image tag, regardless of whether it's
-  // a local (ox-sandbox:md5-{hash}) or GHCR (ghcr.io/.../sandbox:{hash}) tag.
-  const tagPart = baseImage.split(':')[1] ?? baseImage;
-  const baseHash = tagPart.replace(/^md5-/, '');
-  const setupHash = computeProjectSetupHash(baseHash, script);
-  return `${DOCKER_IMAGE_NAME}:md5-${baseHash}-l-${setupHash}`;
+  const parentHash = extractTagHash(baseImage);
+  const setupHash = computeProjectSetupHash(parentHash, script);
+  return `${DOCKER_IMAGE_NAME}:psl-${parentHash.slice(0, 6)}-${setupHash}`;
 }
 
-export function computeDockerSandboxSetupHash(baseHash: string): string {
-  const hasher = new Bun.CryptoHasher('md5');
-  hasher.update(baseHash);
-  hasher.update(DOCKER_SANDBOX_SETUP_SCRIPT);
-  return hasher.digest('hex').slice(0, 12);
-}
-
+/**
+ * Compute the Docker-in-sandbox setup layer image tag.
+ * Format: ox-sandbox:dkr-<parent6>-<hash12>
+ */
 export function getDockerSandboxSetupTag(baseImage: string): string {
-  const tagPart = baseImage.split(':')[1] ?? baseImage;
-  const baseHash = tagPart.replace(/^md5-/, '');
-  const setupHash = computeDockerSandboxSetupHash(baseHash);
-  return `${DOCKER_IMAGE_NAME}:md5-${baseHash}-dkr-${setupHash}`;
+  const parentHash = extractTagHash(baseImage);
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(parentHash);
+  hasher.update(DOCKER_SANDBOX_SETUP_SCRIPT);
+  const layerHash = hasher.digest('hex').slice(0, 12);
+  return `${DOCKER_IMAGE_NAME}:dkr-${parentHash.slice(0, 6)}-${layerHash}`;
 }
 
 export function buildDockerSandboxRootInitScript(
@@ -524,15 +544,34 @@ export function getAgentInstallScript(agent: AgentType | 'tiger'): string {
 }
 
 /**
+ * Compute a content hash for the agent overlay layer.
+ * Combines the parent hash, agent name, version, and install scripts
+ * so the layer rebuilds when any of these change.
+ */
+export function computeAgentOverlayHash(
+  parentHash: string,
+  agent: AgentType,
+): string {
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(parentHash);
+  hasher.update(agent);
+  hasher.update(getAgentVersion(agent));
+  hasher.update(getAgentInstallScript(agent));
+  hasher.update(getAgentInstallScript('tiger'));
+  return hasher.digest('hex').slice(0, 12);
+}
+
+/**
  * Compute the overlay image tag for a given base image and agent.
- * Format: <baseImage>-<agent>-<agentVersion>
+ * Format: ox-sandbox:a-<agent>-<parent6>-<hash12>
  */
 export function getAgentOverlayTag(
   baseImage: string,
   agent: AgentType,
 ): string {
-  const version = getAgentVersion(agent);
-  return `${baseImage}-${agent}-${version}`;
+  const parentHash = extractTagHash(baseImage);
+  const layerHash = computeAgentOverlayHash(parentHash, agent);
+  return `${DOCKER_IMAGE_NAME}:a-${agent}-${parentHash.slice(0, 6)}-${layerHash}`;
 }
 
 /**
@@ -610,11 +649,12 @@ export async function ensureAgentOverlay(
   }
 
   // Try to pull pre-built agent image from GHCR.
-  // Skip when the base image is a project setup layer (contains '-l-')
-  // since GHCR won't have project-specific agent overlays.
+  // Skip when the base image has locally-built intermediate layers (dkr, psl)
+  // since GHCR won't have those variants.
   const ghcrAgentTag = getGhcrAgentTag(agent);
-  const isProjectSetupBase = baseImage.includes('-l-');
-  if (!isProjectSetupBase) {
+  const baseTagPart = baseImage.split(':')[1] ?? '';
+  const isRawBase = /^(md5-)?[a-f0-9]{12}$/.test(baseTagPart);
+  if (isRawBase) {
     log.debug({ ghcrAgentTag, agent }, 'Trying to pull agent image from GHCR');
     options?.onProgress?.({
       type: 'pulling',
@@ -632,7 +672,7 @@ export async function ensureAgentOverlay(
   } else {
     log.debug(
       { overlayTag, ghcrAgentTag, agent },
-      'Skipping GHCR pull — base image includes project setup layer',
+      'Skipping GHCR pull — base image has locally-built layers',
     );
   }
 

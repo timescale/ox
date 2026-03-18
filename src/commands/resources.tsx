@@ -23,9 +23,11 @@ function printResourceTable(resources: SandboxResource[]): void {
     const icon =
       r.status === 'current' || r.status === 'active'
         ? '\u25CF'
-        : r.status === 'old'
-          ? '\u25CB'
-          : '\u25CC';
+        : r.status === 'unknown'
+          ? '\u25CE'
+          : r.status === 'old'
+            ? '\u25CB'
+            : '\u25CC';
     console.log(
       `${`${icon} ${r.status}`.padEnd(8)} ${r.provider.padEnd(8)} ${r.category.padEnd(16)} ${r.name.padEnd(34)} ${formatSize(r.size).padEnd(7)}`,
     );
@@ -71,7 +73,7 @@ const cleanCommand = new Command('clean')
     console.log(`Found ${targets.length} resource(s) to remove:`);
     for (const t of targets) {
       console.log(
-        `  ${t.status === 'old' ? '\u25CB' : '\u25CC'} [${t.provider}] ${t.name} (${t.category})`,
+        `  ${t.status === 'old' || t.status === 'unknown' ? '\u25CB' : '\u25CC'} [${t.provider}] ${t.name} (${t.category})`,
       );
     }
 

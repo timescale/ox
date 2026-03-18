@@ -14,7 +14,9 @@ import { getDenoToken } from '../deno.ts';
 import {
   computeDockerfileHash,
   type DockerImageInfo,
+  extractTagHash,
   getAgentOverlayTag,
+  getDockerSandboxSetupTag,
   getGhcrAgentTag,
   getGhcrBaseTag,
   getProjectSetupTag,
@@ -46,7 +48,12 @@ import type { OxSession } from './types.ts';
 
 export type ResourceProvider = 'cloud' | 'docker';
 export type ResourceKind = 'container' | 'snapshot' | 'volume' | 'image';
-export type ResourceStatus = 'current' | 'active' | 'old' | 'orphaned';
+export type ResourceStatus =
+  | 'current'
+  | 'active'
+  | 'unknown'
+  | 'old'
+  | 'orphaned';
 
 export interface SandboxResource {
   id: string;
@@ -98,10 +105,12 @@ interface ImageClassificationContext {
   /** The tag of the current resolved base image (e.g. 'md5-{hash}' or a custom tag) */
   currentBaseTag: string;
   currentGhcrTags: Set<string>;
-  /** Full local overlay tags that are current (e.g. 'md5-{hash}-claude-2.1.71') */
+  /** Full local overlay tags that are current (e.g. 'a-claude-{parent6}-{hash12}') */
   currentLocalOverlayTags: Set<string>;
-  /** Full local setup layer tags that are current (e.g. 'md5-{hash}-l-{setupHash}') */
+  /** Full local setup layer tags that are current (e.g. 'dkr-{parent6}-{hash12}', 'psl-{parent6}-{hash12}') */
   currentSetupLayerTags: Set<string>;
+  /** 6-char hash prefixes of all current ancestors (base, dkr, psl) for ancestry checks */
+  currentAncestorPrefixes: Set<string>;
   /** Container ID prefixes (12-char) for active containers */
   activeContainerIdPrefixes: Set<string>;
 }
@@ -217,6 +226,9 @@ function volumeStatusFromChildSnapshots(
   if (!children || children.length === 0) return 'orphaned';
   if (children.some((s) => s.status === 'current' || s.status === 'active')) {
     return 'current';
+  }
+  if (children.some((s) => s.status === 'unknown')) {
+    return 'unknown';
   }
   return 'old';
 }
@@ -337,7 +349,10 @@ export function classifyCloudVolume(
  * Classify a Docker image as current/active/old/orphaned.
  *
  * Rules:
- * - `ox-sandbox:md5-*` → "Local Build": `current` if hash matches, else `old`
+ * - `ox-sandbox:md5-*` → "Local Build" (base): `current` if hash matches, else `old`
+ * - `ox-sandbox:dkr-*` → "Local Build" (docker setup): `current` if tag matches, `unknown` if parent current, else `old`
+ * - `ox-sandbox:psl-*` → "Local Build" (project setup): `current` if tag matches, `unknown` if parent current, else `old`
+ * - `ox-sandbox:a-*`   → "Local Build" (agent overlay): `current` if tag matches, `unknown` if parent current, else `old`
  * - `ghcr.io/timescale/ox/sandbox-*` → "GHCR Image": `current` if tag is current, else `old`
  * - `ox-resume:*` → "Resume Image": `active` if container exists with matching image, else `orphaned`
  */
@@ -357,22 +372,51 @@ export function classifyDockerImage(
     createdAt: image.created,
   };
 
-  // Local builds (ox-sandbox:md5-*)
-  if (image.repository === 'ox-sandbox' && image.tag.startsWith('md5-')) {
-    // Base images have tags like 'md5-{hash}' — current if hash matches.
-    // Agent overlays have tags like 'md5-{hash}-{agent}-{version}' — current
-    // only if both the base hash AND agent version match.
-    const isCurrentBase =
-      image.tag === ctx.currentBaseTag ||
-      image.tag === `md5-${ctx.currentDockerfileHash}`;
-    const isCurrentOverlay = ctx.currentLocalOverlayTags.has(image.tag);
-    const isCurrentSetup = ctx.currentSetupLayerTags.has(image.tag);
-    return {
-      ...base,
-      category: 'Local Build',
-      status:
-        isCurrentBase || isCurrentOverlay || isCurrentSetup ? 'current' : 'old',
-    };
+  // Local builds (ox-sandbox:*)
+  if (image.repository === 'ox-sandbox') {
+    const tag = image.tag;
+
+    // Base images: md5-{hash12}
+    if (tag.startsWith('md5-')) {
+      const isCurrentBase =
+        tag === ctx.currentBaseTag ||
+        tag === `md5-${ctx.currentDockerfileHash}`;
+      return {
+        ...base,
+        category: 'Local Build',
+        status: isCurrentBase ? 'current' : 'old',
+      };
+    }
+
+    // Docker setup, project setup, and agent overlay layers use the
+    // new prefix-based format. Check exact match first, then ancestry.
+    if (
+      tag.startsWith('dkr-') ||
+      tag.startsWith('psl-') ||
+      tag.startsWith('a-')
+    ) {
+      // Exact match → current
+      if (
+        ctx.currentLocalOverlayTags.has(tag) ||
+        ctx.currentSetupLayerTags.has(tag)
+      ) {
+        return { ...base, category: 'Local Build', status: 'current' };
+      }
+
+      // Ancestry check: extract the 6-char parent prefix and see if
+      // any current ancestor matches. The parent prefix is the segment
+      // right after the layer prefix (dkr-, psl-, a-{agent}-).
+      const parentPrefix = extractParentPrefix(tag);
+      if (parentPrefix && ctx.currentAncestorPrefixes.has(parentPrefix)) {
+        return { ...base, category: 'Local Build', status: 'unknown' };
+      }
+
+      return { ...base, category: 'Local Build', status: 'old' };
+    }
+
+    // Old-format tags (pre-refactor): md5-{base}-dkr-..., md5-{base}-l-...,
+    // md5-{base}-{agent}-{version}. Treat as old (stale after format change).
+    return { ...base, category: 'Local Build', status: 'old' };
   }
 
   // GHCR images (ghcr.io/timescale/ox/sandbox or legacy sandbox-slim/sandbox-full)
@@ -405,6 +449,26 @@ export function classifyDockerImage(
     category: 'Unknown',
     status: 'current',
   };
+}
+
+/**
+ * Extract the 6-character parent prefix from a layer tag.
+ *
+ * Tag formats:
+ *   dkr-{parent6}-{hash12}          → parent6
+ *   psl-{parent6}-{hash12}          → parent6
+ *   a-{agent}-{parent6}-{hash12}    → parent6
+ */
+function extractParentPrefix(tag: string): string | undefined {
+  // dkr-PPPPPP-HHHHHHHHHHHH or psl-PPPPPP-HHHHHHHHHHHH
+  if (tag.startsWith('dkr-') || tag.startsWith('psl-')) {
+    return tag.split('-')[1];
+  }
+  // a-{agent}-PPPPPP-HHHHHHHHHHHH
+  if (tag.startsWith('a-')) {
+    return tag.split('-')[2];
+  }
+  return undefined;
 }
 
 // ============================================================================
@@ -585,36 +649,45 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     ...agents.map((agent) => getGhcrAgentTag(agent)),
   ]);
 
-  // Build the set of current local overlay tags (md5-{hash}-{agent}-{version})
-  // so that overlays with old agent versions are classified as 'old'.
-  const currentLocalOverlayTags = new Set(
-    agents.map((agent) => {
-      const fullTag = getAgentOverlayTag(currentBaseImage, agent);
-      // getAgentOverlayTag returns 'ox-sandbox:md5-{hash}-{agent}-{ver}',
-      // but the tag portion (after ':') is what we match against image.tag.
-      return fullTag.split(':')[1] ?? fullTag;
-    }),
-  );
-
-  // Build the set of current setup layer tags (if configured).
-  // getProjectSetupTag always returns an ox-sandbox:md5-... local tag,
-  // so we only need to compute for the local prefix.
+  // Track current setup layer and agent overlay tags, plus ancestor
+  // prefixes for ancestry-based classification of unknown images.
   const currentSetupLayerTags = new Set<string>();
+  const currentAncestorPrefixes = new Set<string>();
+
+  // The base image's hash prefix is always a current ancestor
+  const baseHash = extractTagHash(currentBaseImage);
+  currentAncestorPrefixes.add(baseHash.slice(0, 6));
+
+  // Compute effective parent chain (mirrors ensureDockerImageForAgent)
+  let effectiveBase = currentBaseImage;
+  if (config.dockerInSandbox) {
+    const dkrTag = getDockerSandboxSetupTag(currentBaseImage);
+    const dkrTagPart = dkrTag.split(':')[1] ?? dkrTag;
+    currentSetupLayerTags.add(dkrTagPart);
+    const dkrHash = extractTagHash(dkrTag);
+    currentAncestorPrefixes.add(dkrHash.slice(0, 6));
+    effectiveBase = dkrTag;
+  }
+
   if (config.projectSetupLayer) {
     const setupTag = getProjectSetupTag(
-      currentBaseImage,
+      effectiveBase,
       config.projectSetupLayer,
     );
     const tagPart = setupTag.split(':')[1] ?? setupTag;
     currentSetupLayerTags.add(tagPart);
-
-    // Agent overlays built on top of the setup layer are also current
-    for (const agent of agents) {
-      const fullTag = getAgentOverlayTag(setupTag, agent);
-      const overlayTagPart = fullTag.split(':')[1] ?? fullTag;
-      currentLocalOverlayTags.add(overlayTagPart);
-    }
+    const setupHash = extractTagHash(setupTag);
+    currentAncestorPrefixes.add(setupHash.slice(0, 6));
+    effectiveBase = setupTag;
   }
+
+  // Agent overlays on the effective base are current
+  const currentLocalOverlayTags = new Set(
+    agents.map((agent) => {
+      const fullTag = getAgentOverlayTag(effectiveBase, agent);
+      return fullTag.split(':')[1] ?? fullTag;
+    }),
+  );
 
   // Build set of container ID prefixes for matching resume images.
   // Resume image tags use the format: <containerId-12>-<nanoid-6>,
@@ -633,6 +706,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
         currentGhcrTags,
         currentLocalOverlayTags,
         currentSetupLayerTags,
+        currentAncestorPrefixes,
         activeContainerIdPrefixes,
       }),
     );

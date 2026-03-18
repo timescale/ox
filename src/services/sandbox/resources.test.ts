@@ -597,6 +597,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -618,6 +619,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -625,18 +627,19 @@ describe('classifyDockerImage', () => {
     expect(result.category).toBe('Local Build');
   });
 
-  test('current agent overlay image matches base hash and agent version', () => {
+  test('current agent overlay image matches tag in currentLocalOverlayTags', () => {
     const image = makeImage({
       repository: 'ox-sandbox',
-      tag: 'md5-abcdef123456-claude-2.1.71',
+      tag: 'a-claude-abcdef-aaa111bbb222',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
-      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentLocalOverlayTags: new Set(['a-claude-abcdef-aaa111bbb222']),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(['abcdef']),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -644,37 +647,39 @@ describe('classifyDockerImage', () => {
     expect(result.category).toBe('Local Build');
   });
 
-  test('old agent overlay image has different base hash', () => {
+  test('agent overlay with current ancestor but different hash is unknown', () => {
     const image = makeImage({
       repository: 'ox-sandbox',
-      tag: 'md5-oldoldhash999-claude-2.1.71',
+      tag: 'a-claude-abcdef-999888777666',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
-      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentLocalOverlayTags: new Set(['a-claude-abcdef-aaa111bbb222']),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(['abcdef']),
       activeContainerIdPrefixes: new Set(),
     });
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Local Build');
   });
 
-  test('old agent overlay has current base hash but old agent version', () => {
+  test('agent overlay with old ancestor is old', () => {
     const image = makeImage({
       repository: 'ox-sandbox',
-      tag: 'md5-abcdef123456-claude-2.1.70',
+      tag: 'a-claude-999999-aaa111bbb222',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
-      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentLocalOverlayTags: new Set(['a-claude-abcdef-aaa111bbb222']),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(['abcdef']),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -694,6 +699,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -716,6 +722,7 @@ describe('classifyDockerImage', () => {
       ]),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -735,6 +742,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -754,6 +762,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -774,6 +783,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(['abc123def456']),
     });
 
@@ -794,6 +804,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -815,6 +826,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -841,6 +853,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set<string>(),
       currentSetupLayerTags: new Set<string>(),
+      currentAncestorPrefixes: new Set<string>(),
       activeContainerIdPrefixes: new Set<string>(),
     };
 
@@ -1383,7 +1396,8 @@ describe('classifyDockerImage — project setup layer', () => {
     currentBaseTag: 'md5-abc123def456',
     currentGhcrTags: new Set<string>(),
     currentLocalOverlayTags: new Set<string>(),
-    currentSetupLayerTags: new Set(['md5-abc123def456-l-setup789012']),
+    currentSetupLayerTags: new Set(['psl-abc123-setup789012ab']),
+    currentAncestorPrefixes: new Set(['abc123']),
     activeContainerIdPrefixes: new Set<string>(),
   };
 
@@ -1391,7 +1405,7 @@ describe('classifyDockerImage — project setup layer', () => {
     const result = classifyDockerImage(
       makeImage({
         repository: 'ox-sandbox',
-        tag: 'md5-abc123def456-l-setup789012',
+        tag: 'psl-abc123-setup789012ab',
       }),
       baseCtx,
     );
@@ -1399,11 +1413,35 @@ describe('classifyDockerImage — project setup layer', () => {
     expect(result.status).toBe('current');
   });
 
-  test('classifies old setup layer image as old', () => {
+  test('classifies setup layer with current ancestor but different hash as unknown', () => {
     const result = classifyDockerImage(
       makeImage({
         repository: 'ox-sandbox',
-        tag: 'md5-abc123def456-l-oldsetup123',
+        tag: 'psl-abc123-differenthash',
+      }),
+      baseCtx,
+    );
+    expect(result.category).toBe('Local Build');
+    expect(result.status).toBe('unknown');
+  });
+
+  test('classifies setup layer with old ancestor as old', () => {
+    const result = classifyDockerImage(
+      makeImage({
+        repository: 'ox-sandbox',
+        tag: 'psl-999999-oldsetup12345',
+      }),
+      baseCtx,
+    );
+    expect(result.category).toBe('Local Build');
+    expect(result.status).toBe('old');
+  });
+
+  test('classifies old-format setup layer tags as old', () => {
+    const result = classifyDockerImage(
+      makeImage({
+        repository: 'ox-sandbox',
+        tag: 'md5-abc123def456-l-setup789012',
       }),
       baseCtx,
     );

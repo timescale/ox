@@ -59,6 +59,8 @@ function statusIcon(status: SandboxResource['status']): string {
     case 'current':
     case 'active':
       return '\u25CF'; // ●
+    case 'unknown':
+      return '\u25CE'; // ◎
     case 'old':
       return '\u25CB'; // ○
     case 'orphaned':
@@ -72,6 +74,8 @@ function statusLabel(status: SandboxResource['status']): string {
       return 'cur';
     case 'active':
       return 'act';
+    case 'unknown':
+      return 'unk';
     case 'old':
       return 'old';
     case 'orphaned':
@@ -493,6 +497,8 @@ export function ResourcesList() {
         return theme.success;
       case 'active':
         return theme.accent;
+      case 'unknown':
+        return theme.textMuted;
       case 'old':
         return theme.warning;
       case 'orphaned':

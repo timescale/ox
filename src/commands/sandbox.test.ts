@@ -77,7 +77,9 @@ describe('sandbox command', () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toContain('-dkr-');
-    expect(result.stdout.trim()).toContain('-claude-');
+    // New tag format: ox-sandbox:a-claude-{parent6}-{hash12}
+    expect(result.stdout.trim()).toMatch(
+      /^ox-sandbox:a-claude-[a-f0-9]{6}-[a-f0-9]{12}$/,
+    );
   });
 });

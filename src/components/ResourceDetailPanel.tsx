@@ -21,6 +21,8 @@ function statusLabel(status: SandboxResource['status']): string {
       return 'current';
     case 'active':
       return 'active';
+    case 'unknown':
+      return 'unknown';
     case 'old':
       return 'old';
     case 'orphaned':
@@ -45,6 +47,8 @@ export function ResourceDetailPanel({
         return theme.success;
       case 'active':
         return theme.accent;
+      case 'unknown':
+        return theme.textMuted;
       case 'old':
         return theme.warning;
       case 'orphaned':
