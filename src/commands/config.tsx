@@ -45,7 +45,6 @@ import {
   type TigerService,
 } from '../services/tiger';
 import { createTui } from '../services/tui';
-import { ensureGitignore } from '../utils/shell.ts';
 
 // ============================================================================
 // Types
@@ -738,9 +737,6 @@ export async function configAction(): Promise<void> {
 
     // result.type === 'completed'
     const config = result.config;
-
-    // Ensure .gitignore has .ox/ entry
-    await ensureGitignore();
 
     await projectConfig.write(config);
 

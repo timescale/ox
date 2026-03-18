@@ -2,8 +2,6 @@
 // Shared CLI Utilities
 // ============================================================================
 
-import { log } from '../services/logger';
-
 // ============================================================================
 // Console Output Utilities
 // ============================================================================
@@ -212,33 +210,4 @@ export function formatShellError(error: ShellError): Error {
 /** Escape a value for safe interpolation in a shell command string. */
 export function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-export async function ensureGitignore(): Promise<void> {
-  const gitignorePath = '.gitignore';
-  const entry = '.ox/';
-
-  const file = Bun.file(gitignorePath);
-  let content = '';
-
-  if (await file.exists()) {
-    content = await file.text();
-  }
-
-  // Check if .ox/ is already in gitignore
-  const lines = content.split('\n');
-  const hasEntry = lines.some(
-    (line) => line.trim() === '.ox/' || line.trim() === '.ox',
-  );
-
-  if (!hasEntry) {
-    // Append entry, ensuring there's a newline before it if file doesn't end with one
-    const newContent =
-      content.endsWith('\n') || content === ''
-        ? `${content}${entry}\n`
-        : `${content}\n${entry}\n`;
-
-    await Bun.write(gitignorePath, newContent);
-    log.info('Added .ox/ to .gitignore');
-  }
 }
