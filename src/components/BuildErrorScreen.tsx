@@ -1,8 +1,10 @@
 import type { ScrollBoxRenderable } from '@opentui/core';
 import { useKeyboard } from '@opentui/react';
 import { useRef } from 'react';
+import { copyToClipboard } from '../services/clipboard.ts';
 import { useRouterStore } from '../stores/routerStore.ts';
 import { useTheme } from '../stores/themeStore.ts';
+import { useToastStore } from '../stores/toastStore.ts';
 import { AnsiText } from './AnsiText.tsx';
 
 export interface BuildErrorScreenProps {
@@ -19,10 +21,23 @@ export function BuildErrorScreen({
   const { theme } = useTheme();
   const scrollboxRef = useRef<ScrollBoxRenderable | null>(null);
   const titleLine = `\u2717 ${title}`;
+  const copyText = [titleLine, message, '', ...outputLines].join('\n');
 
   useKeyboard((key) => {
     if (key.name === 'escape' || key.name === 'return') {
       useRouterStore.getState().goToPrompt();
+    } else if (key.raw === 'c') {
+      copyToClipboard(copyText)
+        .then(() => {
+          useToastStore
+            .getState()
+            .show('Build output copied to clipboard', 'info', 1500);
+        })
+        .catch(() => {
+          useToastStore
+            .getState()
+            .show('Failed to copy build output', 'error', 1500);
+        });
     } else if (key.name === 'up' || key.raw === 'k') {
       scrollboxRef.current?.scrollBy({ x: 0, y: -1 });
     } else if (key.name === 'down' || key.raw === 'j') {
@@ -87,7 +102,7 @@ export function BuildErrorScreen({
         <text fg={theme.textMuted}>
           Press Escape to go back{' '}
           {outputLines.length > 0
-            ? ' \u2022 j/k to scroll \u2022 g/G to jump'
+            ? ' \u2022 c to copy \u2022 j/k to scroll \u2022 g/G to jump'
             : ''}
         </text>
       </box>
