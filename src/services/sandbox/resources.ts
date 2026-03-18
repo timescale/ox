@@ -161,7 +161,9 @@ export function classifyCloudSnapshot(
     return {
       ...base,
       category: 'Base Snapshot',
-      status: snapshot.slug === ctx.currentBaseSlug ? 'current' : 'old',
+      // Non-matching base snapshots may belong to a different project/config
+      // (e.g., different dockerInSandbox setting), so classify as unknown.
+      status: snapshot.slug === ctx.currentBaseSlug ? 'current' : 'unknown',
     };
   }
 
@@ -170,7 +172,8 @@ export function classifyCloudSnapshot(
     return {
       ...base,
       category: 'Project Setup Snapshot',
-      status: snapshot.slug === ctx.currentSetupSlug ? 'current' : 'old',
+      // Non-matching setup snapshots may belong to a different project config.
+      status: snapshot.slug === ctx.currentSetupSlug ? 'current' : 'unknown',
     };
   }
 
@@ -182,7 +185,8 @@ export function classifyCloudSnapshot(
     return {
       ...base,
       category: 'Agent Snapshot',
-      status: ctx.currentAgentSlugs.has(snapshot.slug) ? 'current' : 'old',
+      // Non-matching agent snapshots may belong to a different project/config.
+      status: ctx.currentAgentSlugs.has(snapshot.slug) ? 'current' : 'unknown',
     };
   }
 

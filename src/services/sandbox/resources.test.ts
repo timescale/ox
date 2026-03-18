@@ -124,7 +124,7 @@ describe('classifyCloudSnapshot', () => {
       }),
     );
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Base Snapshot');
   });
 
@@ -254,7 +254,7 @@ describe('classifyCloudSnapshot', () => {
       }),
     );
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Agent Snapshot');
   });
 
@@ -360,13 +360,13 @@ describe('classifyCloudVolume', () => {
         snapshotsByVolumeSlug: new Map([
           [
             'oxb-old-build-xyz789',
-            [{ slug: 'ox-base-0-11-0-oldold', status: 'old' }],
+            [{ slug: 'ox-base-0-11-0-oldold', status: 'unknown' }],
           ],
         ]),
       }),
     );
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Build Volume');
     expect(result.childSnapshotSlugs).toEqual(['ox-base-0-11-0-oldold']);
   });
@@ -415,13 +415,13 @@ describe('classifyCloudVolume', () => {
         snapshotsByVolumeSlug: new Map([
           [
             'oxa-build-abc123',
-            [{ slug: 'ox-0-16-0-claude-2-0-0', status: 'old' }],
+            [{ slug: 'ox-0-16-0-claude-2-0-0', status: 'unknown' }],
           ],
         ]),
       }),
     );
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Agent Build Volume');
     expect(result.childSnapshotSlugs).toEqual(['ox-0-16-0-claude-2-0-0']);
   });
@@ -1307,7 +1307,7 @@ describe('classifyCloudSnapshot — project setup layer', () => {
     expect(result.status).toBe('current');
   });
 
-  test('classifies old oxl- snapshot as old', () => {
+  test('classifies non-matching oxl- snapshot as unknown', () => {
     const result = assertResource(
       classifyCloudSnapshot(
         makeSnapshot({
@@ -1318,10 +1318,10 @@ describe('classifyCloudSnapshot — project setup layer', () => {
       ),
     );
     expect(result.category).toBe('Project Setup Snapshot');
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
   });
 
-  test('classifies oxl- as old when no setup configured', () => {
+  test('classifies oxl- as unknown when no setup configured', () => {
     const result = assertResource(
       classifyCloudSnapshot(
         makeSnapshot({
@@ -1332,7 +1332,7 @@ describe('classifyCloudSnapshot — project setup layer', () => {
       ),
     );
     expect(result.category).toBe('Project Setup Snapshot');
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
   });
 });
 
@@ -1372,17 +1372,17 @@ describe('classifyCloudVolume — project setup build volume', () => {
     expect(result.status).toBe('orphaned');
   });
 
-  test('classifies oxlb- volume with only old children as old', () => {
+  test('classifies oxlb- volume with only unknown children as unknown', () => {
     const result = assertResource(
       classifyCloudVolume(makeVolume({ slug: 'oxlb-old' }), {
         ...emptyCtx,
         snapshotsByVolumeSlug: new Map([
-          ['oxlb-old', [{ slug: 'oxl-oldsetup', status: 'old' as const }]],
+          ['oxlb-old', [{ slug: 'oxl-oldsetup', status: 'unknown' as const }]],
         ]),
       }),
     );
     expect(result.category).toBe('Project Setup Build Volume');
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
   });
 });
 
