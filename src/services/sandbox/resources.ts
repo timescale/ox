@@ -700,19 +700,58 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     containers.map((c) => c.containerId),
   );
 
+  const ctx = {
+    currentDockerfileHash,
+    currentBaseTag,
+    currentGhcrTags,
+    currentLocalOverlayTags,
+    currentSetupLayerTags,
+    currentAncestorPrefixes,
+    activeContainerIdPrefixes,
+  };
+
   const resources: SandboxResource[] = [];
   for (const image of images) {
-    resources.push(
-      classifyDockerImage(image, {
-        currentDockerfileHash,
-        currentBaseTag,
-        currentGhcrTags,
-        currentLocalOverlayTags,
-        currentSetupLayerTags,
-        currentAncestorPrefixes,
-        activeContainerIdPrefixes,
-      }),
-    );
+    resources.push(classifyDockerImage(image, ctx));
+  }
+
+  // Second pass: propagate 'unknown' ancestry.
+  // Images classified as 'unknown' (valid parent, different content) may
+  // themselves be parents of other images. Promote any 'old' image to
+  // 'unknown' if its parent prefix matches an 'unknown' or 'current' image.
+  // Repeat until stable (handles arbitrary chain depth).
+  const unknownAncestorPrefixes = new Set(currentAncestorPrefixes);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const r of resources) {
+      if (
+        r.provider === 'docker' &&
+        r.kind === 'image' &&
+        (r.status === 'current' || r.status === 'unknown')
+      ) {
+        const tag = r.name.split(':')[1] ?? '';
+        const layerHash = tag.split('-').pop() ?? '';
+        const prefix = layerHash.slice(0, 6);
+        if (prefix && !unknownAncestorPrefixes.has(prefix)) {
+          unknownAncestorPrefixes.add(prefix);
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      changed = false;
+      for (const r of resources) {
+        if (r.provider === 'docker' && r.status === 'old') {
+          const tag = r.name.split(':')[1] ?? '';
+          const parentPrefix = extractParentPrefix(tag);
+          if (parentPrefix && unknownAncestorPrefixes.has(parentPrefix)) {
+            r.status = 'unknown';
+            changed = true;
+          }
+        }
+      }
+    }
   }
 
   return resources;
