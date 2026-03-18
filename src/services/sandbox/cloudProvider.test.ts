@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildCloudDockerStartCommand,
   isSandboxTerminatedError,
+  resolveCloudLifecycleScripts,
 } from './cloudProvider.ts';
 
 describe('isSandboxTerminatedError', () => {
@@ -42,5 +43,53 @@ describe('buildCloudDockerStartCommand', () => {
     expect(cmd).toContain('/usr/local/bin/start-docker.sh');
     // Should guard with command -v so resume works on older snapshots
     expect(cmd).toContain('command -v');
+  });
+});
+
+describe('resolveCloudLifecycleScripts', () => {
+  test('falls back to config initScript and rootInitScript', () => {
+    expect(
+      resolveCloudLifecycleScripts(
+        {},
+        {
+          dockerInSandbox: true,
+          rootInitScript: 'apt-get update',
+          initScript: './bun i',
+        },
+      ),
+    ).toEqual({
+      cloudDockerStart:
+        'command -v /usr/local/bin/start-docker.sh >/dev/null 2>&1 && /usr/local/bin/start-docker.sh',
+      rootInitScript: 'apt-get update',
+      initScript: './bun i',
+    });
+  });
+
+  test('prefers explicit option scripts over config values', () => {
+    expect(
+      resolveCloudLifecycleScripts(
+        {
+          rootInitScript: 'sudo something',
+          initScript: 'npm install',
+        },
+        {
+          dockerInSandbox: false,
+          rootInitScript: 'apt-get update',
+          initScript: './bun i',
+        },
+      ),
+    ).toEqual({
+      cloudDockerStart: undefined,
+      rootInitScript: 'sudo something',
+      initScript: 'npm install',
+    });
+  });
+
+  test('returns undefined scripts when neither options nor config set them', () => {
+    expect(resolveCloudLifecycleScripts({}, {})).toEqual({
+      cloudDockerStart: undefined,
+      rootInitScript: undefined,
+      initScript: undefined,
+    });
   });
 });

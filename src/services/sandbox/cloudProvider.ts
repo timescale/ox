@@ -17,7 +17,7 @@ import {
   buildContinueCommand,
   wrapWithPrompt,
 } from '../agentCommand.ts';
-import type { AgentType } from '../config.ts';
+import type { AgentType, OxConfig } from '../config.ts';
 import { readConfig } from '../config.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
@@ -101,6 +101,53 @@ export function buildCloudDockerStartCommand(config: {
   // Guard with `command -v` so resume works even when the session was built
   // from a snapshot that predates dockerInSandbox (script may not exist).
   return 'command -v /usr/local/bin/start-docker.sh >/dev/null 2>&1 && /usr/local/bin/start-docker.sh';
+}
+
+export function resolveCloudLifecycleScripts(
+  options: Pick<CreateSandboxOptions, 'rootInitScript' | 'initScript'>,
+  config: Pick<OxConfig, 'dockerInSandbox' | 'rootInitScript' | 'initScript'>,
+): {
+  cloudDockerStart?: string;
+  rootInitScript?: string;
+  initScript?: string;
+} {
+  return {
+    cloudDockerStart: buildCloudDockerStartCommand(config),
+    rootInitScript: options.rootInitScript ?? config.rootInitScript,
+    initScript: options.initScript ?? config.initScript,
+  };
+}
+
+async function runCloudLifecycleScripts(
+  sandbox: ResolvedSandbox,
+  scripts: {
+    cloudDockerStart?: string;
+    rootInitScript?: string;
+    initScript?: string;
+  },
+  onProgress?: (step: string) => void,
+): Promise<void> {
+  if (scripts.cloudDockerStart) {
+    onProgress?.('Starting Docker');
+    await logToSandbox(sandbox, 'Starting Docker...');
+    await sandboxExec(sandbox, scripts.cloudDockerStart, {
+      sudo: true,
+    });
+  }
+
+  if (scripts.rootInitScript) {
+    onProgress?.('Running root init script');
+    await logToSandbox(sandbox, 'Running root init script...');
+    await sandboxExec(sandbox, `cd /work/app && ${scripts.rootInitScript}`, {
+      sudo: true,
+    });
+  }
+
+  if (scripts.initScript) {
+    onProgress?.('Running init script');
+    await logToSandbox(sandbox, 'Running init script...');
+    await sandboxExec(sandbox, `cd /work/app && ${scripts.initScript}`);
+  }
 }
 
 // ============================================================================
@@ -225,33 +272,12 @@ async function provisionSandbox(
       await sandboxExec(sandbox, 'mkdir -p /work/app');
     }
 
-    // Run root init script if configured (before initScript, as root).
-    // Read from config directly (same pattern as Docker provider) since
-    // callers may not thread it through CreateSandboxOptions.
     const config = await readConfig();
-    const cloudDockerStart = buildCloudDockerStartCommand(config);
-    if (cloudDockerStart) {
-      onProgress?.('Starting Docker');
-      await logToSandbox(sandbox, 'Starting Docker...');
-      await sandboxExec(sandbox, cloudDockerStart, {
-        sudo: true,
-      });
-    }
-    const rootInitScript = options.rootInitScript ?? config.rootInitScript;
-    if (rootInitScript) {
-      onProgress?.('Running root init script');
-      await logToSandbox(sandbox, 'Running root init script...');
-      await sandboxExec(sandbox, `cd /work/app && ${rootInitScript}`, {
-        sudo: true,
-      });
-    }
-
-    // Run init script if configured
-    if (options.initScript) {
-      onProgress?.('Running init script');
-      await logToSandbox(sandbox, 'Running init script...');
-      await sandboxExec(sandbox, `cd /work/app && ${options.initScript}`);
-    }
+    await runCloudLifecycleScripts(
+      sandbox,
+      resolveCloudLifecycleScripts(options, config),
+      onProgress,
+    );
 
     // Start agent process
     onProgress?.('Starting agent');
@@ -315,17 +341,14 @@ async function provisionResume(
     await logToSandbox(sandbox, 'Setting up credentials...');
     await injectCredentials(sandbox);
 
-    // Start agent with continue flag
     const config = await readConfig();
-    const cloudDockerStart = buildCloudDockerStartCommand(config);
-    if (cloudDockerStart) {
-      onProgress?.('Starting Docker');
-      await logToSandbox(sandbox, 'Starting Docker...');
-      await sandboxExec(sandbox, cloudDockerStart, {
-        sudo: true,
-      });
-    }
+    await runCloudLifecycleScripts(
+      sandbox,
+      resolveCloudLifecycleScripts({}, config),
+      onProgress,
+    );
 
+    // Start agent with continue flag
     const model = options.model ?? options.existingModel;
     const isInteractive =
       options.mode === 'interactive' || options.mode === 'shell';
@@ -860,7 +883,16 @@ export class CloudSandboxProvider implements SandboxProvider {
         sandbox,
         `cd /work && gh auth setup-git && gh repo clone ${shellEscape(fullName)} app`,
       );
+    } else {
+      await sandboxExec(sandbox, 'mkdir -p /work/app');
     }
+
+    const config = await readConfig();
+    await runCloudLifecycleScripts(
+      sandbox,
+      resolveCloudLifecycleScripts({}, config),
+      onProgress,
+    );
 
     return {
       connect: async () => {
