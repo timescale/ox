@@ -15,9 +15,11 @@ initScript: |
   ./bun i
 projectSetupLayer: |
   set -exo pipefail
-  add-apt-repository ppa:longsleep/golang-backports -y
-  add-apt-repository ppa:xtradeb/apps -y
-  apt-get update 
+  if [ -f /etc/os-release ] && grep -q 'ID=ubuntu' /etc/os-release; then
+    add-apt-repository ppa:longsleep/golang-backports -y
+    add-apt-repository ppa:xtradeb/apps -y
+  fi
+  apt-get update
   apt-get install -y ffmpeg golang-go ttyd libnspr4 libnss3 chromium
   rm -rf /var/lib/apt/lists/*
   go install github.com/charmbracelet/vhs@latest
