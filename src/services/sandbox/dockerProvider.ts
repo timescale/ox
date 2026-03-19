@@ -26,6 +26,7 @@ import { readFileFromContainer, writeFileToContainer } from '../dockerFiles.ts';
 import { log } from '../logger.ts';
 import {
   getPortUrls,
+  normalizeAppPorts,
   setupPortForwarding,
   teardownPortForwarding,
 } from '../portForwarding/index.ts';
@@ -119,6 +120,20 @@ export function mapDockerStats(
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/** Check if the merged config has appPort / additionalPorts configured. */
+async function hasAppPortConfig(): Promise<boolean> {
+  try {
+    const config = await readConfig();
+    return normalizeAppPorts(config) != null;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================================================
 // Docker Provider Implementation
 // ============================================================================
 
@@ -201,14 +216,24 @@ export class DockerSandboxProvider implements SandboxProvider {
     const mapped = mapDockerSession(session);
 
     // Set up port forwarding (best-effort — won't block session creation)
-    onProgress?.('Configuring port forwarding');
-    const portUrls = await setupPortForwarding(
-      containerName,
-      containerName,
-      requestSudo,
-    );
-    if (portUrls) {
-      mapped.portUrls = portUrls;
+    if (await hasAppPortConfig()) {
+      onProgress?.('Configuring port forwarding');
+      const portUrls = await setupPortForwarding(
+        containerName,
+        containerName,
+        requestSudo,
+      );
+      if (portUrls) {
+        mapped.portUrls = portUrls;
+      } else {
+        log.warn(
+          { containerName },
+          'Port forwarding configured but setup failed — portUrls unavailable',
+        );
+        onProgress?.(
+          'Warning: port forwarding setup failed — URLs will not be available',
+        );
+      }
     }
 
     return mapped;
@@ -249,15 +274,25 @@ export class DockerSandboxProvider implements SandboxProvider {
     );
     const mapped = mapDockerSession(session);
 
-    // Set up port forwarding (best-effort — won't block session creation)
-    onProgress?.('Configuring port forwarding');
-    const portUrls = await setupPortForwarding(
-      containerName,
-      containerName,
-      requestSudo,
-    );
-    if (portUrls) {
-      mapped.portUrls = portUrls;
+    // Set up port forwarding (best-effort — won't block session resumption)
+    if (await hasAppPortConfig()) {
+      onProgress?.('Configuring port forwarding');
+      const portUrls = await setupPortForwarding(
+        containerName,
+        containerName,
+        requestSudo,
+      );
+      if (portUrls) {
+        mapped.portUrls = portUrls;
+      } else {
+        log.warn(
+          { containerName },
+          'Port forwarding configured but setup failed — portUrls unavailable',
+        );
+        onProgress?.(
+          'Warning: port forwarding setup failed — URLs will not be available',
+        );
+      }
     }
 
     return mapped;

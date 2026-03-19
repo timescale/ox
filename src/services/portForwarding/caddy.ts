@@ -159,6 +159,26 @@ export async function isCaddyRunning(): Promise<boolean> {
 }
 
 /**
+ * Check whether the Caddy admin API is ready to accept commands.
+ *
+ * Caddy exposes an admin API on localhost:2019 inside the container.
+ * We probe it via `docker exec` + `wget` (available in alpine) to confirm
+ * caddy has fully initialized — a running container doesn't guarantee the
+ * admin API is up yet.
+ */
+async function isCaddyAdminReady(): Promise<boolean> {
+  try {
+    const result =
+      await $`docker exec ${CADDY_CONTAINER} wget -qO /dev/null http://localhost:2019/config/`
+        .quiet()
+        .nothrow();
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Get the host-side HTTPS port that the running Caddy container is bound to.
  * Returns null if Caddy isn't running or the port can't be determined.
  *
@@ -213,16 +233,36 @@ export async function ensureCaddy(httpsPort: number): Promise<void> {
   // Wait for container to be running (poll with timeout)
   const maxAttempts = 14;
   const pollMs = 500;
+  let containerRunning = false;
   for (let i = 0; i < maxAttempts; i++) {
     if (await isCaddyRunning()) {
-      log.info('Caddy container is running');
+      containerRunning = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+
+  if (!containerRunning) {
+    throw new Error(
+      'Caddy container failed to start within the expected timeframe',
+    );
+  }
+
+  // Wait for caddy's admin API to be ready (it needs time to initialize
+  // after the container starts). Without this, a subsequent `caddy reload`
+  // will fail with "connection refused".
+  for (let i = 0; i < maxAttempts; i++) {
+    if (await isCaddyAdminReady()) {
+      log.info('Caddy container is running and admin API is ready');
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 
-  throw new Error(
-    'Caddy container failed to start within the expected timeframe',
+  // Container is running but admin API didn't become ready — log a warning
+  // but don't throw since Caddy may still be usable for subsequent requests.
+  log.warn(
+    'Caddy container is running but admin API did not become ready in time',
   );
 }
 
