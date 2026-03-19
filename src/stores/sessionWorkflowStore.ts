@@ -400,6 +400,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             agent,
             model,
             prompt,
+            mode,
             mountDir,
             isGitRepo: inGitRepo,
           });
@@ -455,6 +456,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             agent,
             model,
             prompt,
+            mode,
             mountDir,
             isGitRepo: inGitRepo,
           });

@@ -31,6 +31,7 @@ describe('handleNeedsGhAuth', () => {
         agent: 'opencode',
         model: 'anthropic/claude-3-5-sonnet',
         prompt: 'add metrics',
+        mode: 'interactive',
         mountDir: '/tmp/repo',
         isGitRepo: true,
       },
@@ -44,6 +45,7 @@ describe('handleNeedsGhAuth', () => {
       nextAgent: 'opencode',
       nextModel: 'anthropic/claude-3-5-sonnet',
       nextMountDir: '/tmp/repo',
+      nextAutoSubmitAgentMode: 'interactive',
     });
   });
 
