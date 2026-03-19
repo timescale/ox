@@ -101,6 +101,7 @@ export interface SessionsResult {
     agent: AgentType;
     model: string;
     prompt: string;
+    mode?: AgentMode;
     mountDir?: string;
     isGitRepo?: boolean;
   };
@@ -108,6 +109,7 @@ export interface SessionsResult {
     agent: AgentType;
     model: string;
     prompt: string;
+    mode?: AgentMode;
     mountDir?: string;
     isGitRepo?: boolean;
   };

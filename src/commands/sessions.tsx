@@ -37,6 +37,7 @@ import { tryGetRepoInfo } from '../services/git.ts';
 import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode.ts';
 import {
+  type AgentMode,
   getDefaultProvider,
   getProviderForSession,
   getSandboxProvider,
@@ -78,6 +79,7 @@ interface GhAuthRetryState {
   nextAgent: AgentType;
   nextModel: string;
   nextMountDir?: string;
+  nextAutoSubmitAgentMode?: AgentMode;
 }
 
 export async function handleNeedsGhAuth(
@@ -110,6 +112,7 @@ export async function handleNeedsGhAuth(
     nextAgent: agent,
     nextModel: model,
     nextMountDir: result.ghAuthInfo.mountDir,
+    nextAutoSubmitAgentMode: result.ghAuthInfo.mode,
   };
 }
 
@@ -478,6 +481,7 @@ export async function runSessionsTui({
   let nextModel = initialModel;
   let nextSession: OxSession | undefined;
   let nextMountDir = mountDir;
+  let nextAutoSubmitAgentMode = autoSubmitAgentMode;
 
   // Circuit breaker: prevent infinite auth retry loops.
   const MAX_AUTH_RETRIES = 3;
@@ -510,7 +514,7 @@ export async function runSessionsTui({
           serviceId={serviceId}
           dbFork={dbFork}
           initialMountDir={nextMountDir}
-          autoSubmitAgentMode={autoSubmitAgentMode}
+          autoSubmitAgentMode={nextAutoSubmitAgentMode}
         />
       </CopyOnSelect>,
     );
@@ -527,6 +531,7 @@ export async function runSessionsTui({
     nextModel = undefined;
     nextSession = undefined;
     nextMountDir = mountDir;
+    nextAutoSubmitAgentMode = undefined;
 
     // Reset auth retry counters when we get a non-auth result,
     // indicating the session progressed past the auth phase.
@@ -740,6 +745,7 @@ export async function runSessionsTui({
       nextAgent = agent;
       nextModel = model;
       nextMountDir = result.authInfo.mountDir;
+      nextAutoSubmitAgentMode = result.authInfo.mode;
     }
 
     // Handle needs-gh-auth action - run interactive GitHub login and retry
@@ -766,6 +772,7 @@ export async function runSessionsTui({
         nextAgent = agent;
         nextModel = model;
         nextMountDir = retry.nextMountDir;
+        nextAutoSubmitAgentMode = retry.nextAutoSubmitAgentMode;
 
         console.log('\nGitHub login successful. Resuming...\n');
 
