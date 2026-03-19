@@ -15,7 +15,7 @@ import { FeedbackModal } from '../components/FeedbackModal.tsx';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
 import { GlobalToast } from '../components/GlobalToast.tsx';
 import { PromptScreen } from '../components/PromptScreen.tsx';
-import { PullProgress } from '../components/PullProgress.tsx';
+
 import { ResourcesList } from '../components/ResourcesList.tsx';
 import { SessionDetail } from '../components/SessionDetail.tsx';
 import { SessionsList } from '../components/SessionsList.tsx';
@@ -391,14 +391,10 @@ function SessionsApp({
         view.mode === 'interactive' || view.mode === 'plan'
           ? 'Hint: press ctrl+\\ to detach an interactive session'
           : undefined;
-      const layers = view.type === 'starting' ? view.layers : undefined;
       const detail = view.type === 'starting' ? view.detail : undefined;
-      content =
-        layers && layers.length > 0 ? (
-          <PullProgress message={view.step} layers={layers} />
-        ) : (
-          <StartingScreen step={view.step} subDetail={detail} hint={hint} />
-        );
+      content = (
+        <StartingScreen step={view.step} subDetail={detail} hint={hint} />
+      );
       break;
     }
     case 'starting-shell':

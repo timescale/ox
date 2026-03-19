@@ -20,7 +20,6 @@ import { projectConfig, readConfig } from '../services/config.ts';
 import type { ForkResult } from '../services/db.ts';
 import { forkDatabase } from '../services/db.ts';
 import { getDenoToken } from '../services/deno.ts';
-import type { PullLayer } from '../services/docker.ts';
 import { ensureDockerImage } from '../services/docker.ts';
 import { checkGhCredentials } from '../services/gh.ts';
 import { generateBranchName } from '../services/git.ts';
@@ -262,61 +261,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           step: 'Preparing sandbox environment',
           mode,
         });
-        await activeProvider.ensureImage({
-          agent,
-          onProgress: (progress) => {
-            if (
-              progress.type === 'pulling' ||
-              progress.type === 'pulling-cache'
-            ) {
-              updateView((v) =>
-                v.type === 'starting'
-                  ? { ...v, step: progress.message, layers: progress.layers }
-                  : v,
-              );
-            } else if (progress.type === 'building') {
-              updateView((v) =>
-                v.type === 'starting'
-                  ? {
-                      ...v,
-                      step: progress.message,
-                      detail: progress.detail,
-                      layers: undefined,
-                    }
-                  : v,
-              );
-            }
-          },
-        });
+        await activeProvider.ensureImage({ agent });
 
         // Credential checks always run via Docker containers, so ensure the
         // Docker image is available even when using a non-Docker sandbox provider.
         if (activeProvider.type !== 'docker') {
-          await ensureDockerImage({
-            onProgress: (progress) => {
-              if (
-                progress.type === 'pulling' ||
-                progress.type === 'pulling-cache'
-              ) {
-                updateView((v) =>
-                  v.type === 'starting'
-                    ? { ...v, step: progress.message, layers: progress.layers }
-                    : v,
-                );
-              } else if (progress.type === 'building') {
-                updateView((v) =>
-                  v.type === 'starting'
-                    ? {
-                        ...v,
-                        step: progress.message,
-                        detail: progress.detail,
-                        layers: undefined,
-                      }
-                    : v,
-                );
-              }
-            },
-          });
+          await ensureDockerImage({});
         }
 
         // Check agent credentials before starting container
@@ -921,20 +871,9 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
                   s.sandboxBaseImage === 'pulling' ||
                   s.sandboxBaseImage === 'checking'
                 ) {
-                  const layers = s.basePullLayers;
-                  const done = layers.filter(
-                    (l: PullLayer) =>
-                      l.state === 'complete' || l.state === 'exists',
-                  ).length;
-                  const total = layers.length;
-                  const suffix = total > 0 ? ` (${done}/${total} layers)` : '';
                   updateView((v) =>
                     v.type === 'starting'
-                      ? {
-                          ...v,
-                          step: `Pulling sandbox image${suffix}`,
-                          layers: s.basePullLayers,
-                        }
+                      ? { ...v, step: 'Pulling sandbox image' }
                       : v,
                   );
                 } else if (s.sandboxBaseImage === 'ready') {
