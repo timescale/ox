@@ -258,6 +258,10 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
               ) {
                 set({ basePullLayers: progress.layers ?? [] });
               }
+              if (progress.type === 'building') {
+                // Clear stale pull layers when transitioning to build phase
+                set({ basePullLayers: [] });
+              }
             },
           });
           set({ sandboxBaseImage: 'ready', basePullLayers: [] });
@@ -421,6 +425,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
             }
             if (progress.type === 'building') {
               set({
+                agentBuildLayers: [],
                 agentBuildMessage: progress.message,
                 ...(progress.detail != null
                   ? { agentBuildDetail: progress.detail }

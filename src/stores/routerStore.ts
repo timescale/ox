@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { AgentType } from '../services/config';
-import type { PullLayer } from '../services/docker';
+
 import type {
   AgentMode,
   OxSession,
@@ -41,10 +41,9 @@ export type SessionsView =
       agent: AgentType;
       model: string;
       step: string;
-      /** Latest output line from the current build step */
+      /** Non-build step detail */
       detail?: string;
       mode: AgentMode;
-      layers?: PullLayer[];
     }
   | {
       type: 'resuming';
@@ -160,7 +159,6 @@ interface RouterState {
     model: string;
     step: string;
     mode: AgentMode;
-    layers?: PullLayer[];
   }) => void;
   goToResuming: (params: {
     session: OxSession;
