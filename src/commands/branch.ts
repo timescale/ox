@@ -212,12 +212,17 @@ export async function branchAction(
   // CLI requestSudo: spawn `sudo -v` with inherited stdio so the user can
   // type their password directly. No TUI to suspend/resume here.
   const requestSudo: RequestSudoFn = async (reason) => {
-    printErr(`\n${reason}`);
-    const proc = Bun.spawn(['sudo', '-v'], {
-      stdio: ['inherit', 'inherit', 'inherit'],
-    });
-    const exitCode = await proc.exited;
-    return exitCode === 0;
+    try {
+      printErr(`\n${reason}`);
+      const proc = Bun.spawn(['sudo', '-v'], {
+        stdio: ['inherit', 'inherit', 'inherit'],
+      });
+      const exitCode = await proc.exited;
+      return exitCode === 0;
+    } catch (err) {
+      log.warn({ err }, 'Failed to request sudo credentials');
+      return false;
+    }
   };
 
   const session = await provider.create({

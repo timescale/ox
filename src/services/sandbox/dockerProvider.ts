@@ -26,7 +26,6 @@ import { readFileFromContainer, writeFileToContainer } from '../dockerFiles.ts';
 import { log } from '../logger.ts';
 import {
   getPortUrls,
-  normalizeAppPorts,
   setupPortForwarding,
   teardownPortForwarding,
 } from '../portForwarding/index.ts';
@@ -123,14 +122,10 @@ export function mapDockerStats(
 // Helpers
 // ============================================================================
 
-/** Check if the merged config has appPort / additionalPorts configured. */
+/** Check if the merged config has any port forwarding keys set. */
 async function hasAppPortConfig(): Promise<boolean> {
-  try {
-    const config = await readConfig();
-    return normalizeAppPorts(config) != null;
-  } catch {
-    return false;
-  }
+  const config = await readConfig();
+  return config.appPort != null || config.additionalPorts != null;
 }
 
 // ============================================================================
