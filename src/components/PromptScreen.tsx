@@ -283,6 +283,11 @@ export function PromptScreen() {
     // Store handles saving old model + restoring new agent's model
     setAgent(newAgent);
 
+    // Codex CLI has no plan mode flag; reset to interactive when switching to Codex
+    if (newAgent === 'codex' && agentMode === 'plan') {
+      setAgentMode('interactive');
+    }
+
     // If the store didn't restore a model (i.e. null), try equivalent match
     const restoredModel = usePromptSettingsStore.getState().modelId;
     if (!restoredModel) {
@@ -295,7 +300,15 @@ export function PromptScreen() {
         setModelId(fallback);
       }
     }
-  }, [resumeSession, agent, modelId, setAgent, setModelId]);
+  }, [
+    resumeSession,
+    agent,
+    modelId,
+    agentMode,
+    setAgent,
+    setModelId,
+    setAgentMode,
+  ]);
 
   // Toggle sandbox provider (extracted so click handler can reuse it)
   const toggleProvider = useCallback(() => {
@@ -353,8 +366,10 @@ export function PromptScreen() {
         onSelect: () => {
           const m = agentMode;
           if (m === 'async') setAgentMode('interactive');
-          else if (m === 'interactive') setAgentMode('plan');
-          else setAgentMode('async');
+          else if (m === 'interactive') {
+            // Codex CLI has no plan mode flag; skip straight to async
+            setAgentMode(agent === 'codex' ? 'async' : 'plan');
+          } else setAgentMode('async');
         },
       },
       {
@@ -466,6 +481,7 @@ export function PromptScreen() {
       },
     ],
     [
+      agent,
       resumeSession,
       currentModels,
       switchAgent,
@@ -726,18 +742,23 @@ export function PromptScreen() {
           setAgentMode('interactive');
         },
       },
-      {
-        name: 'plan',
-        description: 'Switch to plan mode (interactive, read-only agent)',
-        onSelect: () => {
-          setShowSlashCommands(false);
-          setSlashQuery('');
-          if (textareaRef.current) {
-            textareaRef.current.clear();
-          }
-          setAgentMode('plan');
-        },
-      },
+      // Codex CLI has no plan mode flag; hide the command for Codex
+      ...(agent !== 'codex'
+        ? [
+            {
+              name: 'plan',
+              description: 'Switch to plan mode (interactive, read-only agent)',
+              onSelect: () => {
+                setShowSlashCommands(false);
+                setSlashQuery('');
+                if (textareaRef.current) {
+                  textareaRef.current.clear();
+                }
+                setAgentMode('plan');
+              },
+            },
+          ]
+        : []),
       {
         name: 'feedback',
         description: 'Send feedback to the ox team',
@@ -752,6 +773,7 @@ export function PromptScreen() {
       },
     ],
     [
+      agent,
       resumeSession,
       currentModels,
       switchAgent,
