@@ -33,7 +33,7 @@ import type {
   SandboxProvider,
   SandboxProviderType,
 } from '../services/sandbox/types.ts';
-import { ensureGitignore } from '../utils/shell.ts';
+
 import { usePromptSettingsStore } from './promptSettingsStore.ts';
 import { useReadinessStore, waitForAgentAuthCheck } from './readinessStore.ts';
 import { useRepoStore } from './repoStore.ts';
@@ -426,11 +426,6 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           branchName = `${mode}-${nanoid(6).toLowerCase()}`;
         }
 
-        // Only ensure gitignore if in a git repo
-        if (inGitRepo) {
-          await ensureGitignore();
-        }
-
         // Skip DB fork for plan mode
         const {
           serviceId: svcId,
@@ -773,7 +768,6 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
       }
 
       // Save config (project config)
-      await ensureGitignore();
       await projectConfig.write(result.config);
       // Re-read merged config for runtime values
       const mergedConfig = await readConfig();

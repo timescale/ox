@@ -11,6 +11,7 @@ import {
   classifyDockerImage,
   getCleanupTargets,
   groupResourcesByKind,
+  propagateUnknownAncestry,
   type SandboxResource,
 } from './resources.ts';
 import type { OxSession } from './types.ts';
@@ -124,7 +125,7 @@ describe('classifyCloudSnapshot', () => {
       }),
     );
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Base Snapshot');
   });
 
@@ -254,7 +255,7 @@ describe('classifyCloudSnapshot', () => {
       }),
     );
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Agent Snapshot');
   });
 
@@ -360,13 +361,13 @@ describe('classifyCloudVolume', () => {
         snapshotsByVolumeSlug: new Map([
           [
             'oxb-old-build-xyz789',
-            [{ slug: 'ox-base-0-11-0-oldold', status: 'old' }],
+            [{ slug: 'ox-base-0-11-0-oldold', status: 'unknown' }],
           ],
         ]),
       }),
     );
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Build Volume');
     expect(result.childSnapshotSlugs).toEqual(['ox-base-0-11-0-oldold']);
   });
@@ -415,13 +416,13 @@ describe('classifyCloudVolume', () => {
         snapshotsByVolumeSlug: new Map([
           [
             'oxa-build-abc123',
-            [{ slug: 'ox-0-16-0-claude-2-0-0', status: 'old' }],
+            [{ slug: 'ox-0-16-0-claude-2-0-0', status: 'unknown' }],
           ],
         ]),
       }),
     );
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Agent Build Volume');
     expect(result.childSnapshotSlugs).toEqual(['ox-0-16-0-claude-2-0-0']);
   });
@@ -597,6 +598,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -618,6 +620,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -625,18 +628,19 @@ describe('classifyDockerImage', () => {
     expect(result.category).toBe('Local Build');
   });
 
-  test('current agent overlay image matches base hash and agent version', () => {
+  test('current agent overlay image matches tag in currentLocalOverlayTags', () => {
     const image = makeImage({
       repository: 'ox-sandbox',
-      tag: 'md5-abcdef123456-claude-2.1.71',
+      tag: 'a-claude-abcdef-aaa111bbb222',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
-      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentLocalOverlayTags: new Set(['a-claude-abcdef-aaa111bbb222']),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(['abcdef']),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -644,37 +648,39 @@ describe('classifyDockerImage', () => {
     expect(result.category).toBe('Local Build');
   });
 
-  test('old agent overlay image has different base hash', () => {
+  test('agent overlay with current ancestor but different hash is unknown', () => {
     const image = makeImage({
       repository: 'ox-sandbox',
-      tag: 'md5-oldoldhash999-claude-2.1.71',
+      tag: 'a-claude-abcdef-999888777666',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
-      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentLocalOverlayTags: new Set(['a-claude-abcdef-aaa111bbb222']),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(['abcdef']),
       activeContainerIdPrefixes: new Set(),
     });
 
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
     expect(result.category).toBe('Local Build');
   });
 
-  test('old agent overlay has current base hash but old agent version', () => {
+  test('agent overlay with old ancestor is old', () => {
     const image = makeImage({
       repository: 'ox-sandbox',
-      tag: 'md5-abcdef123456-claude-2.1.70',
+      tag: 'a-claude-999999-aaa111bbb222',
     });
 
     const result = classifyDockerImage(image, {
       currentDockerfileHash: 'abcdef123456',
       currentBaseTag: 'md5-abcdef123456',
       currentGhcrTags: new Set(),
-      currentLocalOverlayTags: new Set(['md5-abcdef123456-claude-2.1.71']),
+      currentLocalOverlayTags: new Set(['a-claude-abcdef-aaa111bbb222']),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(['abcdef']),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -694,6 +700,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -716,6 +723,7 @@ describe('classifyDockerImage', () => {
       ]),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -735,6 +743,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -754,6 +763,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -774,6 +784,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(['abc123def456']),
     });
 
@@ -794,6 +805,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -815,6 +827,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(),
       currentLocalOverlayTags: new Set(),
       currentSetupLayerTags: new Set(),
+      currentAncestorPrefixes: new Set(),
       activeContainerIdPrefixes: new Set(),
     });
 
@@ -841,6 +854,7 @@ describe('classifyDockerImage', () => {
       currentGhcrTags: new Set(['ghcr.io/timescale/ox/sandbox:abcdef123456']),
       currentLocalOverlayTags: new Set<string>(),
       currentSetupLayerTags: new Set<string>(),
+      currentAncestorPrefixes: new Set<string>(),
       activeContainerIdPrefixes: new Set<string>(),
     };
 
@@ -1294,7 +1308,7 @@ describe('classifyCloudSnapshot — project setup layer', () => {
     expect(result.status).toBe('current');
   });
 
-  test('classifies old oxl- snapshot as old', () => {
+  test('classifies non-matching oxl- snapshot as unknown', () => {
     const result = assertResource(
       classifyCloudSnapshot(
         makeSnapshot({
@@ -1305,10 +1319,10 @@ describe('classifyCloudSnapshot — project setup layer', () => {
       ),
     );
     expect(result.category).toBe('Project Setup Snapshot');
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
   });
 
-  test('classifies oxl- as old when no setup configured', () => {
+  test('classifies oxl- as unknown when no setup configured', () => {
     const result = assertResource(
       classifyCloudSnapshot(
         makeSnapshot({
@@ -1319,7 +1333,7 @@ describe('classifyCloudSnapshot — project setup layer', () => {
       ),
     );
     expect(result.category).toBe('Project Setup Snapshot');
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
   });
 });
 
@@ -1359,17 +1373,17 @@ describe('classifyCloudVolume — project setup build volume', () => {
     expect(result.status).toBe('orphaned');
   });
 
-  test('classifies oxlb- volume with only old children as old', () => {
+  test('classifies oxlb- volume with only unknown children as unknown', () => {
     const result = assertResource(
       classifyCloudVolume(makeVolume({ slug: 'oxlb-old' }), {
         ...emptyCtx,
         snapshotsByVolumeSlug: new Map([
-          ['oxlb-old', [{ slug: 'oxl-oldsetup', status: 'old' as const }]],
+          ['oxlb-old', [{ slug: 'oxl-oldsetup', status: 'unknown' as const }]],
         ]),
       }),
     );
     expect(result.category).toBe('Project Setup Build Volume');
-    expect(result.status).toBe('old');
+    expect(result.status).toBe('unknown');
   });
 });
 
@@ -1383,11 +1397,48 @@ describe('classifyDockerImage — project setup layer', () => {
     currentBaseTag: 'md5-abc123def456',
     currentGhcrTags: new Set<string>(),
     currentLocalOverlayTags: new Set<string>(),
-    currentSetupLayerTags: new Set(['md5-abc123def456-l-setup789012']),
+    currentSetupLayerTags: new Set(['psl-abc123-setup789012ab']),
+    currentAncestorPrefixes: new Set(['abc123']),
     activeContainerIdPrefixes: new Set<string>(),
   };
 
   test('classifies current setup layer image as current', () => {
+    const result = classifyDockerImage(
+      makeImage({
+        repository: 'ox-sandbox',
+        tag: 'psl-abc123-setup789012ab',
+      }),
+      baseCtx,
+    );
+    expect(result.category).toBe('Local Build');
+    expect(result.status).toBe('current');
+  });
+
+  test('classifies setup layer with current ancestor but different hash as unknown', () => {
+    const result = classifyDockerImage(
+      makeImage({
+        repository: 'ox-sandbox',
+        tag: 'psl-abc123-differenthash',
+      }),
+      baseCtx,
+    );
+    expect(result.category).toBe('Local Build');
+    expect(result.status).toBe('unknown');
+  });
+
+  test('classifies setup layer with old ancestor as old', () => {
+    const result = classifyDockerImage(
+      makeImage({
+        repository: 'ox-sandbox',
+        tag: 'psl-999999-oldsetup12345',
+      }),
+      baseCtx,
+    );
+    expect(result.category).toBe('Local Build');
+    expect(result.status).toBe('old');
+  });
+
+  test('classifies old-format setup layer tags as old', () => {
     const result = classifyDockerImage(
       makeImage({
         repository: 'ox-sandbox',
@@ -1396,18 +1447,49 @@ describe('classifyDockerImage — project setup layer', () => {
       baseCtx,
     );
     expect(result.category).toBe('Local Build');
-    expect(result.status).toBe('current');
-  });
-
-  test('classifies old setup layer image as old', () => {
-    const result = classifyDockerImage(
-      makeImage({
-        repository: 'ox-sandbox',
-        tag: 'md5-abc123def456-l-oldsetup123',
-      }),
-      baseCtx,
-    );
-    expect(result.category).toBe('Local Build');
     expect(result.status).toBe('old');
+  });
+});
+
+// ============================================================================
+// propagateUnknownAncestry
+// ============================================================================
+
+describe('propagateUnknownAncestry', () => {
+  test('promotes descendants of unknown Docker layers to unknown', () => {
+    const resources: SandboxResource[] = [
+      {
+        id: '1',
+        provider: 'docker',
+        kind: 'image',
+        category: 'Local Build',
+        status: 'unknown',
+        name: 'ox-sandbox:dkr-abc123-dddddddddddd',
+        size: 1,
+      },
+      {
+        id: '2',
+        provider: 'docker',
+        kind: 'image',
+        category: 'Local Build',
+        status: 'old',
+        name: 'ox-sandbox:psl-dddddd-pppppppppppp',
+        size: 1,
+      },
+      {
+        id: '3',
+        provider: 'docker',
+        kind: 'image',
+        category: 'Local Build',
+        status: 'old',
+        name: 'ox-sandbox:a-codex-pppppp-aaaaaaaaaaaa',
+        size: 1,
+      },
+    ];
+
+    propagateUnknownAncestry(resources, new Set(['abc123']));
+
+    expect(resources[1]?.status).toBe('unknown');
+    expect(resources[2]?.status).toBe('unknown');
   });
 });

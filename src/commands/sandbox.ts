@@ -59,11 +59,15 @@ export const sandboxCommand = new Command('sandbox')
           // Resolve the actual base image (respects buildSandboxFromDockerfile / sandboxBaseImage)
           const {
             resolveSandboxImage,
+            getDockerSandboxSetupTag,
             getProjectSetupTag: getSetupTag,
             getAgentOverlayTag: getOverlayTag,
           } = await import('../services/docker.ts');
           const resolved = await resolveSandboxImage(config);
           const resolvedBase = resolved.image;
+          const effectiveDockerBase = config.dockerInSandbox
+            ? getDockerSandboxSetupTag(resolvedBase)
+            : resolvedBase;
 
           // Resolve the project setup hash if configured
           let dockerSetupTag: string | undefined;
@@ -73,14 +77,14 @@ export const sandboxCommand = new Command('sandbox')
               '../services/docker.ts'
             );
             dockerSetupTag = getSetupTag(
-              resolvedBase,
+              effectiveDockerBase,
               config.projectSetupLayer,
             );
 
             const { computeCloudBaseHash } = await import(
               '../services/sandbox/cloudBaseSteps.ts'
             );
-            const cloudBaseHash = computeCloudBaseHash();
+            const cloudBaseHash = computeCloudBaseHash(config);
             cloudSetupHash = computeSetupHash(
               cloudBaseHash,
               config.projectSetupLayer,
@@ -103,7 +107,7 @@ export const sandboxCommand = new Command('sandbox')
               );
               console.log(
                 getProjectSetupSnapshotSlug(
-                  computeCloudBaseHash(),
+                  computeCloudBaseHash(config),
                   config.projectSetupLayer,
                 ),
               );
@@ -119,9 +123,11 @@ export const sandboxCommand = new Command('sandbox')
             if (options.agent) {
               // When projectSetupLayer is configured, the agent slug
               // incorporates the setup hash (matching what's actually built)
-              console.log(getAgentSnapshotSlug(options.agent, cloudSetupHash));
+              console.log(
+                getAgentSnapshotSlug(options.agent, cloudSetupHash, config),
+              );
             } else {
-              console.log(getBaseSnapshotSlug());
+              console.log(getBaseSnapshotSlug(config));
             }
             return;
           }
@@ -137,7 +143,7 @@ export const sandboxCommand = new Command('sandbox')
             }
           } else {
             if (options.agent) {
-              const effectiveBase = dockerSetupTag ?? resolvedBase;
+              const effectiveBase = dockerSetupTag ?? effectiveDockerBase;
               const tag = getOverlayTag(effectiveBase, options.agent);
               console.log(tag);
             } else {
@@ -263,7 +269,13 @@ export const sandboxCommand = new Command('sandbox')
 
               // 1. Build base
               const baseSlug = await runStep('Base snapshot', (onProgress) =>
-                ensureCloudSnapshot({ token, region, force, onProgress }),
+                ensureCloudSnapshot({
+                  token,
+                  region,
+                  config,
+                  force,
+                  onProgress,
+                }),
               );
 
               // 2. Build project setup layer (if needed)
@@ -299,6 +311,7 @@ export const sandboxCommand = new Command('sandbox')
                       agent: options.agent as AgentType,
                       baseSnapshotSlug: effectiveBaseSlug,
                       setupHash,
+                      config,
                       force,
                       onProgress,
                     }),
@@ -308,6 +321,7 @@ export const sandboxCommand = new Command('sandbox')
               // --- Docker build path ---
               const {
                 ensureDockerImage,
+                ensureDockerSandboxSetupLayer,
                 ensureProjectSetupLayer,
                 ensureAgentOverlay,
               } = await import('../services/docker.ts');
@@ -319,12 +333,27 @@ export const sandboxCommand = new Command('sandbox')
 
               // 2. Build project setup layer (if needed)
               let effectiveBase = baseImage;
+              if (
+                config.dockerInSandbox &&
+                (options.project || options.agent)
+              ) {
+                effectiveBase = await runStep(
+                  'Docker in sandbox layer',
+                  (onProgress) =>
+                    ensureDockerSandboxSetupLayer(effectiveBase, {
+                      onProgress,
+                      force,
+                      stream: true,
+                    }),
+                );
+              }
+
               const dockerSetupScript = config.projectSetupLayer;
               if (dockerSetupScript && (options.project || options.agent)) {
                 effectiveBase = await runStep(
                   'Project setup layer',
                   (onProgress) =>
-                    ensureProjectSetupLayer(baseImage, dockerSetupScript, {
+                    ensureProjectSetupLayer(effectiveBase, dockerSetupScript, {
                       onProgress,
                       force,
                       stream: true,

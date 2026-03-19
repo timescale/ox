@@ -51,7 +51,7 @@ function ReadinessStatusInner({ agent }: ReadinessStatusProps) {
   ) {
     return (
       <box flexDirection="column">
-        <text fg={theme.error}>
+        <text fg={theme.error} height={1} overflow="hidden" wrapMode="none">
           {'\u2717 '} {error}
         </text>
         {hasErrorDetails ? (

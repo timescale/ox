@@ -3,12 +3,19 @@ import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import {
+  buildDockerSandboxRootInitScript,
   buildOxLabels,
+  computeAgentOverlayHash,
   computeDockerfileHash,
   computeProjectSetupHash,
+  extractLayerHash,
+  extractTagHash,
   formatCpuPercent,
   formatMemUsage,
+  getAgentOverlayTag,
+  getDockerSandboxSetupTag,
   getProjectSetupTag,
+  resolveDockerSandboxPrivilege,
   resolveSandboxImage,
   toVolumeArgs,
 } from './docker';
@@ -160,6 +167,72 @@ describe('buildOxLabels', () => {
   });
 });
 
+describe('extractTagHash', () => {
+  test('extracts hash from md5- prefix', () => {
+    expect(extractTagHash('ox-sandbox:md5-abc123def456')).toBe('abc123def456');
+  });
+
+  test('extracts hash from GHCR image', () => {
+    expect(extractTagHash('ghcr.io/timescale/ox/sandbox:abc123def456')).toBe(
+      'abc123def456',
+    );
+  });
+
+  test('extracts hash from dkr- tag', () => {
+    expect(extractTagHash('ox-sandbox:dkr-abc123-def456789012')).toBe(
+      'abc123-def456789012',
+    );
+  });
+
+  test('extracts hash from psl- tag', () => {
+    expect(extractTagHash('ox-sandbox:psl-abc123-def456789012')).toBe(
+      'abc123-def456789012',
+    );
+  });
+
+  test('extracts hash from a- agent tag', () => {
+    expect(extractTagHash('ox-sandbox:a-claude-abc123-def456789012')).toBe(
+      'claude-abc123-def456789012',
+    );
+  });
+
+  test('handles tag-only input', () => {
+    expect(extractTagHash('md5-abc123def456')).toBe('abc123def456');
+  });
+});
+
+describe('extractLayerHash', () => {
+  test('extracts layer hash from md5- base tag', () => {
+    expect(extractLayerHash('ox-sandbox:md5-abc123def456')).toBe(
+      'abc123def456',
+    );
+  });
+
+  test('extracts layer hash from dkr- tag (last segment)', () => {
+    expect(extractLayerHash('ox-sandbox:dkr-aaaaaa-bbbbbbbbbbbb')).toBe(
+      'bbbbbbbbbbbb',
+    );
+  });
+
+  test('extracts layer hash from psl- tag', () => {
+    expect(extractLayerHash('ox-sandbox:psl-aaaaaa-bbbbbbbbbbbb')).toBe(
+      'bbbbbbbbbbbb',
+    );
+  });
+
+  test('extracts layer hash from a- agent tag', () => {
+    expect(extractLayerHash('ox-sandbox:a-claude-aaaaaa-bbbbbbbbbbbb')).toBe(
+      'bbbbbbbbbbbb',
+    );
+  });
+
+  test('extracts layer hash from GHCR image', () => {
+    expect(extractLayerHash('ghcr.io/timescale/ox/sandbox:abc123def456')).toBe(
+      'abc123def456',
+    );
+  });
+});
+
 describe('computeProjectSetupHash', () => {
   test('produces 12-char hex string', () => {
     const hash = computeProjectSetupHash('basehash1234', 'apt install python3');
@@ -180,9 +253,9 @@ describe('computeProjectSetupHash', () => {
 });
 
 describe('getProjectSetupTag', () => {
-  test('returns local ox-sandbox tag with -l- infix', () => {
+  test('returns psl- prefixed tag with parent6 and hash12', () => {
     const tag = getProjectSetupTag('ox-sandbox:md5-abc123def456', 'my-script');
-    expect(tag).toMatch(/^ox-sandbox:md5-abc123def456-l-[a-f0-9]{12}$/);
+    expect(tag).toMatch(/^ox-sandbox:psl-abc123-[a-f0-9]{12}$/);
   });
 
   test('normalizes GHCR base image to local ox-sandbox prefix', () => {
@@ -190,7 +263,7 @@ describe('getProjectSetupTag', () => {
       'ghcr.io/timescale/ox/sandbox:abc123def456',
       'my-script',
     );
-    expect(tag).toMatch(/^ox-sandbox:md5-abc123def456-l-[a-f0-9]{12}$/);
+    expect(tag).toMatch(/^ox-sandbox:psl-abc123-[a-f0-9]{12}$/);
   });
 
   test('produces same hash regardless of base image prefix', () => {
@@ -203,6 +276,123 @@ describe('getProjectSetupTag', () => {
       'my-script',
     );
     expect(local).toBe(ghcr);
+  });
+
+  test('parent6 reflects immediate parent layer hash, not grandparent', () => {
+    const onBase = getProjectSetupTag(
+      'ox-sandbox:md5-abc123def456',
+      'my-script',
+    );
+    const onDkr = getProjectSetupTag(
+      'ox-sandbox:dkr-abc123-999999999999',
+      'my-script',
+    );
+    // onBase parent6 = abc123 (from base hash abc123def456)
+    expect(onBase).toMatch(/^ox-sandbox:psl-abc123-/);
+    // onDkr parent6 = 999999 (from dkr layer hash 999999999999, not abc123)
+    expect(onDkr).toMatch(/^ox-sandbox:psl-999999-/);
+    // Different parent → different parent6 prefix and different hash
+    expect(onBase).not.toBe(onDkr);
+  });
+});
+
+describe('getDockerSandboxSetupTag', () => {
+  test('returns dkr- prefixed tag with parent6 and hash12', () => {
+    const tag = getDockerSandboxSetupTag('ox-sandbox:md5-abc123def456');
+    expect(tag).toMatch(/^ox-sandbox:dkr-abc123-[a-f0-9]{12}$/);
+  });
+
+  test('normalizes GHCR base image to local ox-sandbox prefix', () => {
+    const tag = getDockerSandboxSetupTag(
+      'ghcr.io/timescale/ox/sandbox:abc123def456',
+    );
+    expect(tag).toMatch(/^ox-sandbox:dkr-abc123-[a-f0-9]{12}$/);
+  });
+});
+
+describe('computeAgentOverlayHash', () => {
+  test('produces 12-char hex string', () => {
+    const hash = computeAgentOverlayHash('basehash1234', 'claude');
+    expect(hash).toMatch(/^[a-f0-9]{12}$/);
+  });
+
+  test('changes when parent hash changes', () => {
+    const h1 = computeAgentOverlayHash('parent-a', 'claude');
+    const h2 = computeAgentOverlayHash('parent-b', 'claude');
+    expect(h1).not.toBe(h2);
+  });
+
+  test('changes when agent changes', () => {
+    const h1 = computeAgentOverlayHash('same-parent', 'claude');
+    const h2 = computeAgentOverlayHash('same-parent', 'opencode');
+    expect(h1).not.toBe(h2);
+  });
+});
+
+describe('getAgentOverlayTag', () => {
+  test('returns a- prefixed tag with agent, parent6, and hash12', () => {
+    const tag = getAgentOverlayTag('ox-sandbox:md5-abc123def456', 'claude');
+    expect(tag).toMatch(/^ox-sandbox:a-claude-abc123-[a-f0-9]{12}$/);
+  });
+
+  test('parent6 reflects dkr layer hash when built on dkr base', () => {
+    const tag = getAgentOverlayTag(
+      'ox-sandbox:dkr-abc123-def456789012',
+      'claude',
+    );
+    // parent layer hash is 'def456789012', first 6 chars = 'def456'
+    expect(tag).toMatch(/^ox-sandbox:a-claude-def456-[a-f0-9]{12}$/);
+  });
+});
+
+describe('buildDockerSandboxRootInitScript', () => {
+  test('returns undefined when dockerInSandbox is disabled and no rootInitScript exists', () => {
+    expect(buildDockerSandboxRootInitScript({})).toBeUndefined();
+  });
+
+  test('returns dockerd startup script when dockerInSandbox is enabled', () => {
+    const script = buildDockerSandboxRootInitScript({ dockerInSandbox: true });
+    expect(script).toContain('dockerd --host=unix:///var/run/docker.sock');
+    expect(script).toContain('--storage-driver=fuse-overlayfs');
+  });
+
+  test('prepends dockerd startup before user rootInitScript', () => {
+    const script = buildDockerSandboxRootInitScript({
+      dockerInSandbox: true,
+      rootInitScript: 'apt-get update',
+    });
+    expect(script).toContain('apt-get update');
+    expect(script?.indexOf('dockerd')).toBeLessThan(
+      script?.indexOf('apt-get update') ?? 0,
+    );
+  });
+});
+
+describe('resolveDockerSandboxPrivilege', () => {
+  test('defaults to false when dockerInSandbox is disabled', () => {
+    expect(resolveDockerSandboxPrivilege({})).toEqual({
+      privileged: false,
+      warning: undefined,
+    });
+  });
+
+  test('enables privileged when dockerInSandbox is enabled and privileged is unset', () => {
+    expect(resolveDockerSandboxPrivilege({ dockerInSandbox: true })).toEqual({
+      privileged: true,
+      warning: undefined,
+    });
+  });
+
+  test('warns and respects explicit privileged false', () => {
+    expect(
+      resolveDockerSandboxPrivilege({
+        dockerInSandbox: true,
+        privileged: false,
+      }),
+    ).toEqual({
+      privileged: false,
+      warning: expect.stringContaining('privileged: false'),
+    });
   });
 });
 

@@ -3,14 +3,14 @@
 // ============================================================================
 
 import { BuildError } from '../buildError.ts';
-import type { AgentType } from '../config.ts';
+import type { AgentType, OxConfig } from '../config.ts';
 import {
   computeProjectSetupHash,
   getAgentInstallScript,
   getAgentVersion,
 } from '../docker.ts';
 import { log } from '../logger.ts';
-import { CLOUD_BASE_STEPS, computeCloudBaseHash } from './cloudBaseSteps.ts';
+import { computeCloudBaseHash, getCloudBaseSteps } from './cloudBaseSteps.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
 import { sandboxExec } from './sandboxExec.ts';
 
@@ -25,10 +25,12 @@ export type SnapshotBuildProgress =
   | { type: 'done'; snapshotSlug: string }
   | { type: 'error'; message: string };
 
-export function getBaseSnapshotSlug(): string {
+export function getBaseSnapshotSlug(
+  config: Pick<OxConfig, 'dockerInSandbox'> = {},
+): string {
   // Content-hash based: slug only changes when base build steps change.
   // Format: ox-base-{12-char-hash}, truncated to 32 chars.
-  const hash = computeCloudBaseHash();
+  const hash = computeCloudBaseHash(config);
   return `ox-base-${hash}`.slice(0, 32).replace(/-+$/, '');
 }
 
@@ -58,8 +60,9 @@ export function getProjectSetupSnapshotSlug(
 export function getAgentSnapshotSlug(
   agent: AgentType,
   setupHash?: string,
+  config: Pick<OxConfig, 'dockerInSandbox'> = {},
 ): string {
-  const hash = (setupHash ?? computeCloudBaseHash()).slice(0, 6);
+  const hash = (setupHash ?? computeCloudBaseHash(config)).slice(0, 6);
   const agentVer = getAgentVersion(agent)
     .replace(/[^a-z0-9-]/g, '-')
     .slice(0, 6);
@@ -107,12 +110,13 @@ async function isSnapshotBootable(
 export async function ensureCloudSnapshot(options: {
   token: string;
   region: string;
+  config?: Pick<OxConfig, 'dockerInSandbox'>;
   force?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
 }): Promise<string> {
-  const { token, region, force, onProgress } = options;
+  const { token, region, config = {}, force, onProgress } = options;
   const client = new DenoApiClient(token);
-  const snapshotSlug = getBaseSnapshotSlug();
+  const snapshotSlug = getBaseSnapshotSlug(config);
 
   // 1. Check if snapshot already exists AND is bootable
   onProgress?.({ type: 'checking' });
@@ -192,7 +196,7 @@ export async function ensureCloudSnapshot(options: {
     log.debug({ sandboxId: buildSandboxId }, 'Build sandbox created');
 
     // 4. Execute all base build steps
-    for (const step of CLOUD_BASE_STEPS) {
+    for (const step of getCloudBaseSteps(config)) {
       onProgress?.({
         type: 'installing',
         message: step.message,
@@ -525,12 +529,21 @@ export async function ensureAgentCloudSnapshot(options: {
   /** If a project setup layer is active, its hash. Ensures the agent overlay
    *  slug changes when the setup layer changes, triggering a rebuild. */
   setupHash?: string;
+  config?: Pick<OxConfig, 'dockerInSandbox'>;
   force?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
 }): Promise<string> {
-  const { token, region, agent, baseSnapshotSlug, force, onProgress } = options;
+  const {
+    token,
+    region,
+    agent,
+    baseSnapshotSlug,
+    config = {},
+    force,
+    onProgress,
+  } = options;
   const client = new DenoApiClient(token);
-  const snapshotSlug = getAgentSnapshotSlug(agent, options.setupHash);
+  const snapshotSlug = getAgentSnapshotSlug(agent, options.setupHash, config);
 
   // 1. Check if agent overlay snapshot already exists AND is bootable
   onProgress?.({ type: 'checking' });

@@ -14,7 +14,7 @@ import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
 import type { SandboxProviderType } from '../services/sandbox';
 import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
-import { ensureGitignore, printErr } from '../utils/shell.ts';
+import { printErr } from '../utils/shell.ts';
 import { configAction } from './config';
 
 interface BranchOptions {
@@ -99,12 +99,7 @@ export async function branchAction(
     await ensureGhAuth();
   }
 
-  // Step 2: Ensure .gitignore has .ox/ entry (only if in a git repo)
-  if (isGitRepo) {
-    await ensureGitignore();
-  }
-
-  // Step 3: Read merged config for defaults, run config wizard if no project config exists
+  // Step 2: Read merged config for defaults, run config wizard if no project config exists
   if (!(await projectConfig.exists())) {
     log.info('No project config found. Running config wizard...');
     printErr('No project config found. Running config wizard...\n');

@@ -10,7 +10,7 @@ import {
   listServices,
   type TigerService,
 } from '../services/tiger.ts';
-import { ensureGitignore } from '../utils/shell.ts';
+
 import { Loading } from './Loading.tsx';
 import { Selector } from './Selector.tsx';
 
@@ -66,7 +66,6 @@ export function SetupDb({ onComplete }: SetupDbProps) {
     const tigerServiceId = value === '__null__' ? null : value;
 
     // Persist to project config (creates .ox/config.yml if needed)
-    await ensureGitignore();
     await projectConfig.writeValue('tigerServiceId', tigerServiceId);
 
     onComplete({ type: 'completed', tigerServiceId });
