@@ -161,15 +161,15 @@ export async function isCaddyRunning(): Promise<boolean> {
 /**
  * Check whether the Caddy admin API is ready to accept commands.
  *
- * Caddy exposes an admin API on localhost:2019 inside the container.
- * We probe it via `docker exec` + `wget` (available in alpine) to confirm
- * caddy has fully initialized — a running container doesn't guarantee the
- * admin API is up yet.
+ * Caddy's admin API listens on 127.0.0.1:2019 (IPv4 only) inside the
+ * container. We must use the IP address rather than `localhost` because
+ * Alpine's wget resolves `localhost` to ::1 (IPv6) first, and caddy
+ * doesn't bind to IPv6 on the admin endpoint.
  */
 async function isCaddyAdminReady(): Promise<boolean> {
   try {
     const result =
-      await $`docker exec ${CADDY_CONTAINER} wget -qO /dev/null http://localhost:2019/config/`
+      await $`docker exec ${CADDY_CONTAINER} wget -qO /dev/null http://127.0.0.1:2019/config/`
         .quiet()
         .nothrow();
     return result.exitCode === 0;
