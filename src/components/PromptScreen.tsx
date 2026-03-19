@@ -1161,7 +1161,7 @@ export function PromptScreen() {
           {agent === 'opencode' ? (
             <FilterableSelector
               title=""
-              description="Select a model for OpenCode"
+              description={`Select a model for ${agentInfo.name}`}
               options={modelOptions}
               initialIndex={modelIndex >= 0 ? modelIndex : 0}
               onSelect={handleModelSelect}
@@ -1170,7 +1170,7 @@ export function PromptScreen() {
           ) : (
             <Selector
               title=""
-              description="Select a model for Claude Code"
+              description={`Select a model for ${agentInfo.name}`}
               options={modelOptions}
               initialIndex={modelIndex >= 0 ? modelIndex : 0}
               onSelect={handleModelSelect}
