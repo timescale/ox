@@ -224,7 +224,9 @@ export async function branchAction(
       effectiveAgentMode === 'plan'
         ? effectiveAgent === 'claude'
           ? ['--permission-mode', 'plan']
-          : ['--agent', 'plan']
+          : effectiveAgent === 'opencode'
+            ? ['--agent', 'plan']
+            : undefined // codex: no plan mode CLI support
         : undefined,
   });
 

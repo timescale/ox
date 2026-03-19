@@ -203,6 +203,14 @@ export function PromptScreen() {
     usePromptHistoryStore.getState().initialize();
   }, []);
 
+  // Codex CLI has no plan mode flag; reset to interactive if persisted config
+  // or a store update leaves us in an unsupported agent+mode combination.
+  useEffect(() => {
+    if (agent === 'codex' && agentMode === 'plan') {
+      setAgentMode('interactive');
+    }
+  }, [agent, agentMode, setAgentMode]);
+
   // Auto-select a model when models load for the current agent and the current
   // modelId is null or doesn't match any loaded model.  This handles the
   // quick-switch case: user presses Tab before OpenCode models have loaded,
@@ -360,7 +368,10 @@ export function PromptScreen() {
       {
         id: 'mode.cycle',
         title: 'Switch interaction mode',
-        description: 'Cycle between interactive, plan, and async modes',
+        description:
+          agent === 'codex'
+            ? 'Cycle between interactive and async modes'
+            : 'Cycle between interactive, plan, and async modes',
         category: 'Prompt',
         keybind: { key: 'tab', shift: true, display: 'shift+tab' },
         onSelect: () => {
