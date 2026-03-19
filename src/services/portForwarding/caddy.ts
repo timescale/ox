@@ -159,6 +159,26 @@ export async function isCaddyRunning(): Promise<boolean> {
 }
 
 /**
+ * Check whether the Caddy admin API is ready to accept commands.
+ *
+ * Caddy's admin API listens on 127.0.0.1:2019 (IPv4 only) inside the
+ * container. We must use the IP address rather than `localhost` because
+ * Alpine's wget resolves `localhost` to ::1 (IPv6) first, and caddy
+ * doesn't bind to IPv6 on the admin endpoint.
+ */
+async function isCaddyAdminReady(): Promise<boolean> {
+  try {
+    const result =
+      await $`docker exec ${CADDY_CONTAINER} wget -qO /dev/null http://127.0.0.1:2019/config/`
+        .quiet()
+        .nothrow();
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Get the host-side HTTPS port that the running Caddy container is bound to.
  * Returns null if Caddy isn't running or the port can't be determined.
  *
@@ -176,53 +196,79 @@ export async function getCaddyHttpsPort(): Promise<number | null> {
 }
 
 /**
- * Start the Caddy container if it isn't already running.
+ * Ensure the Caddy container is running and its admin API is ready.
+ *
+ * Starts the container if it isn't already running, then waits for the
+ * admin API to accept commands. The admin readiness check runs in both
+ * paths — a container started by another ox process moments earlier may
+ * not have its admin API up yet.
  */
 export async function ensureCaddy(httpsPort: number): Promise<void> {
   if (await isCaddyRunning()) {
     log.debug('Caddy container already running');
-    return;
+  } else {
+    // Remove any stopped container
+    try {
+      await $`docker rm -f ${CADDY_CONTAINER}`.quiet().nothrow();
+    } catch {
+      // ignore
+    }
+
+    await ensureNetwork();
+
+    // Generate initial config and write to host.
+    writeCaddyConfigToDisk();
+
+    log.info(
+      { httpsPort, configPath: CADDY_CONFIG_PATH },
+      'Starting Caddy container',
+    );
+
+    await $`docker run -d \
+      --name ${CADDY_CONTAINER} \
+      --network ${OX_NETWORK} \
+      -p 127.0.0.1:${httpsPort}:443 \
+      -v ${CADDY_CONFIG_PATH}:/etc/caddy/config.json:ro \
+      -v ox-caddy-data:/data \
+      ${CADDY_IMAGE} \
+      caddy run --config /etc/caddy/config.json`.quiet();
+
+    // Wait for container to be running (poll with timeout)
+    const maxAttempts = 14;
+    const pollMs = 500;
+    let containerRunning = false;
+    for (let i = 0; i < maxAttempts; i++) {
+      if (await isCaddyRunning()) {
+        containerRunning = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+
+    if (!containerRunning) {
+      throw new Error(
+        'Caddy container failed to start within the expected timeframe',
+      );
+    }
   }
 
-  // Remove any stopped container
-  try {
-    await $`docker rm -f ${CADDY_CONTAINER}`.quiet().nothrow();
-  } catch {
-    // ignore
-  }
-
-  await ensureNetwork();
-
-  // Generate initial config and write to host.
-  writeCaddyConfigToDisk();
-
-  log.info(
-    { httpsPort, configPath: CADDY_CONFIG_PATH },
-    'Starting Caddy container',
-  );
-
-  await $`docker run -d \
-    --name ${CADDY_CONTAINER} \
-    --network ${OX_NETWORK} \
-    -p 127.0.0.1:${httpsPort}:443 \
-    -v ${CADDY_CONFIG_PATH}:/etc/caddy/config.json:ro \
-    -v ox-caddy-data:/data \
-    ${CADDY_IMAGE} \
-    caddy run --config /etc/caddy/config.json`.quiet();
-
-  // Wait for container to be running (poll with timeout)
-  const maxAttempts = 14;
-  const pollMs = 500;
-  for (let i = 0; i < maxAttempts; i++) {
-    if (await isCaddyRunning()) {
-      log.info('Caddy container is running');
+  // Wait for caddy's admin API to be ready. This runs regardless of whether
+  // we just started the container or it was already running — another ox
+  // process may have started it moments earlier with the admin API still
+  // initializing. Without this, a subsequent `caddy reload` will fail with
+  // "connection refused".
+  const readyAttempts = 14;
+  const readyPollMs = 500;
+  for (let i = 0; i < readyAttempts; i++) {
+    if (await isCaddyAdminReady()) {
+      log.info('Caddy admin API is ready');
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    await new Promise((resolve) => setTimeout(resolve, readyPollMs));
   }
 
   throw new Error(
-    'Caddy container failed to start within the expected timeframe',
+    'Caddy container is running but admin API did not become ready in time',
   );
 }
 

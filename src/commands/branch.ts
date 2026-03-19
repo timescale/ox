@@ -12,6 +12,7 @@ import { type ForkResult, forkDatabase } from '../services/db';
 import { generateBranchName, tryGetRepoInfo } from '../services/git';
 import { log } from '../services/logger.ts';
 import { ensureOpencodeAuth } from '../services/opencode';
+import type { RequestSudoFn } from '../services/portForwarding/sudo.ts';
 import type { SandboxProviderType } from '../services/sandbox';
 import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
 import { printErr } from '../utils/shell.ts';
@@ -208,6 +209,22 @@ export async function branchAction(
   const isInteractiveAgent =
     effectiveAgentMode === 'interactive' || effectiveAgentMode === 'plan';
 
+  // CLI requestSudo: spawn `sudo -v` with inherited stdio so the user can
+  // type their password directly. No TUI to suspend/resume here.
+  const requestSudo: RequestSudoFn = async (reason) => {
+    try {
+      printErr(`\n${reason}`);
+      const proc = Bun.spawn(['sudo', '-v'], {
+        stdio: ['inherit', 'inherit', 'inherit'],
+      });
+      const exitCode = await proc.exited;
+      return exitCode === 0;
+    } catch (err) {
+      log.warn({ err }, 'Failed to request sudo credentials');
+      return false;
+    }
+  };
+
   const session = await provider.create({
     branchName,
     name: branchName,
@@ -220,6 +237,8 @@ export async function branchAction(
     mountDir,
     isGitRepo,
     agentMode: effectiveAgentMode,
+    onProgress: printErr,
+    requestSudo,
     agentArgs:
       effectiveAgentMode === 'plan'
         ? effectiveAgent === 'claude'
