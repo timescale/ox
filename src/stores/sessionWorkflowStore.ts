@@ -467,7 +467,9 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         const agentArgs = isPlan
           ? agent === 'claude'
             ? ['--permission-mode', 'plan']
-            : ['--agent', 'plan']
+            : agent === 'opencode'
+              ? ['--agent', 'plan']
+              : undefined // codex: no plan mode CLI support
           : undefined;
 
         updateView((v) =>
@@ -590,7 +592,9 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         const agentArgs = isPlan
           ? session.agent === 'claude'
             ? ['--permission-mode', 'plan']
-            : ['--agent', 'plan']
+            : session.agent === 'opencode'
+              ? ['--agent', 'plan']
+              : undefined // codex: no plan mode CLI support
           : undefined;
 
         const resumeMode = isInteractive ? 'interactive' : 'detached';

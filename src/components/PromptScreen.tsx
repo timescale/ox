@@ -203,6 +203,14 @@ export function PromptScreen() {
     usePromptHistoryStore.getState().initialize();
   }, []);
 
+  // Codex CLI has no plan mode flag; reset to interactive if persisted config
+  // or a store update leaves us in an unsupported agent+mode combination.
+  useEffect(() => {
+    if (agent === 'codex' && agentMode === 'plan') {
+      setAgentMode('interactive');
+    }
+  }, [agent, agentMode, setAgentMode]);
+
   // Auto-select a model when models load for the current agent and the current
   // modelId is null or doesn't match any loaded model.  This handles the
   // quick-switch case: user presses Tab before OpenCode models have loaded,
@@ -283,6 +291,11 @@ export function PromptScreen() {
     // Store handles saving old model + restoring new agent's model
     setAgent(newAgent);
 
+    // Codex CLI has no plan mode flag; reset to interactive when switching to Codex
+    if (newAgent === 'codex' && agentMode === 'plan') {
+      setAgentMode('interactive');
+    }
+
     // If the store didn't restore a model (i.e. null), try equivalent match
     const restoredModel = usePromptSettingsStore.getState().modelId;
     if (!restoredModel) {
@@ -295,7 +308,15 @@ export function PromptScreen() {
         setModelId(fallback);
       }
     }
-  }, [resumeSession, agent, modelId, setAgent, setModelId]);
+  }, [
+    resumeSession,
+    agent,
+    modelId,
+    agentMode,
+    setAgent,
+    setModelId,
+    setAgentMode,
+  ]);
 
   // Toggle sandbox provider (extracted so click handler can reuse it)
   const toggleProvider = useCallback(() => {
@@ -347,14 +368,19 @@ export function PromptScreen() {
       {
         id: 'mode.cycle',
         title: 'Switch interaction mode',
-        description: 'Cycle between interactive, plan, and async modes',
+        description:
+          agent === 'codex'
+            ? 'Cycle between interactive and async modes'
+            : 'Cycle between interactive, plan, and async modes',
         category: 'Prompt',
         keybind: { key: 'tab', shift: true, display: 'shift+tab' },
         onSelect: () => {
           const m = agentMode;
           if (m === 'async') setAgentMode('interactive');
-          else if (m === 'interactive') setAgentMode('plan');
-          else setAgentMode('async');
+          else if (m === 'interactive') {
+            // Codex CLI has no plan mode flag; skip straight to async
+            setAgentMode(agent === 'codex' ? 'async' : 'plan');
+          } else setAgentMode('async');
         },
       },
       {
@@ -466,6 +492,7 @@ export function PromptScreen() {
       },
     ],
     [
+      agent,
       resumeSession,
       currentModels,
       switchAgent,
@@ -726,18 +753,23 @@ export function PromptScreen() {
           setAgentMode('interactive');
         },
       },
-      {
-        name: 'plan',
-        description: 'Switch to plan mode (interactive, read-only agent)',
-        onSelect: () => {
-          setShowSlashCommands(false);
-          setSlashQuery('');
-          if (textareaRef.current) {
-            textareaRef.current.clear();
-          }
-          setAgentMode('plan');
-        },
-      },
+      // Codex CLI has no plan mode flag; hide the command for Codex
+      ...(agent !== 'codex'
+        ? [
+            {
+              name: 'plan',
+              description: 'Switch to plan mode (interactive, read-only agent)',
+              onSelect: () => {
+                setShowSlashCommands(false);
+                setSlashQuery('');
+                if (textareaRef.current) {
+                  textareaRef.current.clear();
+                }
+                setAgentMode('plan');
+              },
+            },
+          ]
+        : []),
       {
         name: 'feedback',
         description: 'Send feedback to the ox team',
@@ -752,6 +784,7 @@ export function PromptScreen() {
       },
     ],
     [
+      agent,
       resumeSession,
       currentModels,
       switchAgent,
@@ -1139,7 +1172,7 @@ export function PromptScreen() {
           {agent === 'opencode' ? (
             <FilterableSelector
               title=""
-              description="Select a model for OpenCode"
+              description={`Select a model for ${agentInfo.name}`}
               options={modelOptions}
               initialIndex={modelIndex >= 0 ? modelIndex : 0}
               onSelect={handleModelSelect}
@@ -1148,7 +1181,7 @@ export function PromptScreen() {
           ) : (
             <Selector
               title=""
-              description="Select a model for Claude Code"
+              description={`Select a model for ${agentInfo.name}`}
               options={modelOptions}
               initialIndex={modelIndex >= 0 ? modelIndex : 0}
               onSelect={handleModelSelect}

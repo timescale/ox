@@ -546,13 +546,17 @@ export function ConfigWizard({
       value: model.id,
     }));
 
+    const defaultModelId =
+      config?.agent === 'claude'
+        ? 'sonnet'
+        : config?.agent === 'opencode'
+          ? 'anthropic/claude-sonnet-4-5'
+          : undefined; // codex: default to first model in list
     const initialIndex = config?.model
       ? modelOptions.findIndex((opt) => opt.value === config.model)
-      : modelOptions.findIndex((opt) =>
-          config?.agent === 'claude'
-            ? opt.value === 'sonnet'
-            : opt.value === 'anthropic/claude-sonnet-4-5',
-        );
+      : defaultModelId
+        ? modelOptions.findIndex((opt) => opt.value === defaultModelId)
+        : 0;
 
     const handleModelSelect = (value: string | null) => {
       setConfig((c) => ({ ...c, model: value || undefined }));
