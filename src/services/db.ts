@@ -2,7 +2,7 @@
 // Database Fork Service
 // ============================================================================
 
-import { raceAbort } from '../utils/abort.ts';
+import { onAbort, throwIfAborted } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { log } from './logger';
 
@@ -34,13 +34,28 @@ export async function forkDatabase(
   const forkArgs = ['--now', '--name', branchName, '--with-password'];
 
   // Fork and get JSON output for metadata (service_id, name)
+  throwIfAborted(signal);
   let jsonOutput: string;
   try {
-    const proc = await raceAbort(
-      signal,
-      Bun.$`tiger svc fork ${baseArgs} ${forkArgs} -o json`.quiet(),
+    const forkProc = Bun.spawn(
+      ['tiger', 'svc', 'fork', ...baseArgs, ...forkArgs, '-o', 'json'],
+      { stdout: 'pipe', stderr: 'pipe' },
     );
-    jsonOutput = proc.stdout.toString();
+    const cleanupFork = onAbort(signal, () => forkProc.kill());
+    try {
+      await forkProc.exited;
+      throwIfAborted(signal);
+      if (forkProc.exitCode !== 0) {
+        const stderr = await new Response(forkProc.stderr).text();
+        throw Object.assign(new Error('tiger svc fork failed'), {
+          exitCode: forkProc.exitCode,
+          stderr,
+        });
+      }
+      jsonOutput = await new Response(forkProc.stdout).text();
+    } finally {
+      cleanupFork();
+    }
   } catch (err) {
     log.error({ err }, 'Failed to fork database');
     throw formatShellError(err as ShellError);
@@ -48,13 +63,36 @@ export async function forkDatabase(
   const metadata = JSON.parse(jsonOutput);
 
   // Get env output for the PG* variables using the new service's ID
+  throwIfAborted(signal);
   let envOutput: string;
   try {
-    const proc = await raceAbort(
-      signal,
-      Bun.$`tiger svc get ${metadata.service_id} -o env --with-password`.quiet(),
+    const getProc = Bun.spawn(
+      [
+        'tiger',
+        'svc',
+        'get',
+        metadata.service_id,
+        '-o',
+        'env',
+        '--with-password',
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
     );
-    envOutput = proc.stdout.toString();
+    const cleanupGet = onAbort(signal, () => getProc.kill());
+    try {
+      await getProc.exited;
+      throwIfAborted(signal);
+      if (getProc.exitCode !== 0) {
+        const stderr = await new Response(getProc.stderr).text();
+        throw Object.assign(new Error('tiger svc get failed'), {
+          exitCode: getProc.exitCode,
+          stderr,
+        });
+      }
+      envOutput = await new Response(getProc.stdout).text();
+    } finally {
+      cleanupGet();
+    }
   } catch (err) {
     log.error(
       { err },

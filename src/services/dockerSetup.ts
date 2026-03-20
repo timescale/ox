@@ -141,10 +141,14 @@ export async function startProvider(
       throw new Error('OrbStack is only available on macOS');
     }
     log('Starting OrbStack');
+    // Note: ensureOrbStackRunning is from build-strap and doesn't accept an
+    // AbortSignal. raceAbort lets the caller unblock on abort even though the
+    // underlying polling loop continues until the process exits.
     await raceAbort(signal, ensureOrbStackRunning(timeoutSeconds));
   } else {
     if (isMac()) {
       log('Starting Docker Desktop');
+      // Same limitation as above — ensureDockerRunning doesn't accept a signal.
       await raceAbort(signal, ensureDockerRunning(timeoutSeconds));
     } else {
       throw new Error(

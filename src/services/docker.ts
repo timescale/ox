@@ -1142,11 +1142,12 @@ async function tryPullImage(
 
   try {
     const exitCode = await proc.exited;
-    throwIfAborted(options?.signal);
-    if (exitCode === 0) {
+    const success = exitCode === 0;
+    if (success) {
       invalidateImageExistsCache(imageTag);
     }
-    return exitCode === 0;
+    throwIfAborted(options?.signal);
+    return success;
   } finally {
     cleanupAbort();
   }
@@ -1207,12 +1208,13 @@ async function buildDockerImage(
 
   try {
     const exitCode = await proc.exited;
+    if (exitCode === 0) {
+      invalidateImageExistsCache(imageName);
+    }
     throwIfAborted(signal);
-
     if (exitCode !== 0) {
       throw new Error(`Docker build failed with exit code ${exitCode}`);
     }
-    invalidateImageExistsCache(imageName);
   } finally {
     cleanupAbort();
   }

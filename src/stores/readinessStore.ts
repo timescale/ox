@@ -302,7 +302,16 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
 
       set({ ghAuth: 'checking' });
 
-      const ghOk = await checkGhCredentials(signal).catch(() => false);
+      let ghOk: boolean;
+      try {
+        ghOk = await checkGhCredentials(signal);
+      } catch (err) {
+        if (isAbortError(err)) {
+          set({ ghAuth: 'unknown' });
+          return;
+        }
+        ghOk = false;
+      }
 
       set({ ghAuth: ghOk ? 'ready' : 'invalid' });
     } finally {
