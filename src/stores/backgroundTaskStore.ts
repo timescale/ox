@@ -17,6 +17,12 @@ export interface BackgroundTaskState {
   shuttingDown: boolean;
 
   enqueue: (label: string, fn: () => Promise<void>) => string;
+  /**
+   * Enqueue a no-op task that immediately completes.
+   * This triggers a 1→0 transition on pendingCount, which is useful for
+   * signaling shutdown completion when no real cleanup tasks were spawned.
+   */
+  triggerQuietTransition: () => void;
   waitForAll: () => Promise<void>;
   setShuttingDown: (value: boolean) => void;
   clear: () => void;
@@ -99,6 +105,12 @@ export const useBackgroundTaskStore = create<BackgroundTaskState>()(
           unsub();
           resolve();
         }
+      });
+    },
+
+    triggerQuietTransition: () => {
+      get().enqueue('Shutdown transition', async () => {
+        await Promise.resolve();
       });
     },
 

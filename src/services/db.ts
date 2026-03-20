@@ -2,7 +2,7 @@
 // Database Fork Service
 // ============================================================================
 
-import { onAbort, throwIfAborted } from '../utils/abort.ts';
+import { raceAbort, throwIfAborted } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { log } from './logger';
 
@@ -41,21 +41,20 @@ export async function forkDatabase(
       ['tiger', 'svc', 'fork', ...baseArgs, ...forkArgs, '-o', 'json'],
       { stdout: 'pipe', stderr: 'pipe' },
     );
-    const cleanupFork = onAbort(signal, () => forkProc.kill());
-    try {
-      await forkProc.exited;
-      throwIfAborted(signal);
-      if (forkProc.exitCode !== 0) {
-        const stderr = await new Response(forkProc.stderr).text();
-        throw Object.assign(new Error('tiger svc fork failed'), {
-          exitCode: forkProc.exitCode,
-          stderr,
-        });
-      }
-      jsonOutput = await new Response(forkProc.stdout).text();
-    } finally {
-      cleanupFork();
+    // Use raceAbort to unblock on abort even if the process doesn't exit quickly
+    // after being killed. The process is killed when the signal aborts.
+    if (signal) {
+      signal.addEventListener('abort', () => forkProc.kill(), { once: true });
     }
+    await raceAbort(signal, forkProc.exited);
+    if (forkProc.exitCode !== 0) {
+      const stderr = await new Response(forkProc.stderr).text();
+      throw Object.assign(new Error('tiger svc fork failed'), {
+        exitCode: forkProc.exitCode,
+        stderr,
+      });
+    }
+    jsonOutput = await new Response(forkProc.stdout).text();
   } catch (err) {
     log.error({ err }, 'Failed to fork database');
     throw formatShellError(err as ShellError);
@@ -78,21 +77,20 @@ export async function forkDatabase(
       ],
       { stdout: 'pipe', stderr: 'pipe' },
     );
-    const cleanupGet = onAbort(signal, () => getProc.kill());
-    try {
-      await getProc.exited;
-      throwIfAborted(signal);
-      if (getProc.exitCode !== 0) {
-        const stderr = await new Response(getProc.stderr).text();
-        throw Object.assign(new Error('tiger svc get failed'), {
-          exitCode: getProc.exitCode,
-          stderr,
-        });
-      }
-      envOutput = await new Response(getProc.stdout).text();
-    } finally {
-      cleanupGet();
+    // Use raceAbort to unblock on abort even if the process doesn't exit quickly
+    // after being killed. The process is killed when the signal aborts.
+    if (signal) {
+      signal.addEventListener('abort', () => getProc.kill(), { once: true });
     }
+    await raceAbort(signal, getProc.exited);
+    if (getProc.exitCode !== 0) {
+      const stderr = await new Response(getProc.stderr).text();
+      throw Object.assign(new Error('tiger svc get failed'), {
+        exitCode: getProc.exitCode,
+        stderr,
+      });
+    }
+    envOutput = await new Response(getProc.stdout).text();
   } catch (err) {
     log.error(
       { err },
