@@ -19,6 +19,7 @@ import {
   runInDocker,
   type VirtualFile,
 } from './runInDocker';
+import { colorEnvArgs } from '../utils/shell';
 
 const homePaths = {
   authJson: join(homedir(), '.codex', 'auth.json'),
@@ -243,13 +244,7 @@ export const runCodexInDocker = async ({
   const resolvedImage =
     dockerImage ?? (await ensureDockerImageForAgent('codex'));
 
-  const effectiveDockerArgs = [
-    ...dockerArgs,
-    ...(process.env.TERM ? ['-e', `TERM=${process.env.TERM}`] : []),
-    ...(process.env.COLORTERM
-      ? ['-e', `COLORTERM=${process.env.COLORTERM}`]
-      : []),
-  ];
+  const effectiveDockerArgs = [...colorEnvArgs, ...dockerArgs];
 
   const result = await runInDocker({
     dockerArgs: effectiveDockerArgs,

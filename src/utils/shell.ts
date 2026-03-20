@@ -2,6 +2,8 @@
 // Shared CLI Utilities
 // ============================================================================
 
+import { toEnvArgs } from './docker';
+
 // ============================================================================
 // Console Output Utilities
 // ============================================================================
@@ -211,3 +213,25 @@ export function formatShellError(error: ShellError): Error {
 export function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
+
+const getSafeTerm: () => string = () => {
+  const term = process.env.TERM ?? 'xterm-256color';
+  const safeTerms = new Set([
+    'xterm-256color',
+    'xterm-color',
+    'xterm',
+    'screen-256color',
+    'tmux-256color',
+  ]);
+  return safeTerms.has(term) ? term : 'xterm-256color';
+};
+
+export const colorEnv = (): string[] => {
+  const items = [`TERM=${getSafeTerm()}`];
+  if (process.env.COLORTERM) {
+    items.push(`COLORTERM=${process.env.COLORTERM}`);
+  }
+  return items;
+};
+
+export const colorEnvArgs = toEnvArgs(colorEnv());

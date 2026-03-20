@@ -17,6 +17,7 @@ import {
   type VirtualFile,
 } from './runInDocker';
 import { getThemeNames } from './theme.ts';
+import { colorEnvArgs } from '../utils/shell.ts';
 
 const homePaths = {
   authJson: join(getXdgData(), 'opencode', 'auth.json'),
@@ -265,13 +266,7 @@ export const runOpencodeInDocker = async ({
   const resolvedImage =
     dockerImage ?? (await ensureDockerImageForAgent('opencode'));
 
-  const effectiveDockerArgs = [
-    ...dockerArgs,
-    ...(process.env.TERM ? ['-e', `TERM=${process.env.TERM}`] : []),
-    ...(process.env.COLORTERM
-      ? ['-e', `COLORTERM=${process.env.COLORTERM}`]
-      : []),
-  ];
+  const effectiveDockerArgs = [...dockerArgs, ...colorEnvArgs];
 
   const result = await runInDocker({
     dockerArgs: effectiveDockerArgs,

@@ -7,6 +7,7 @@ import type {
   ClaudeOAuthAccount,
 } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
+import { colorEnvArgs } from '../utils/shell';
 import { readCache, writeCache } from './cache';
 import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
@@ -434,13 +435,7 @@ export const runClaudeInDocker = async ({
   const resolvedImage =
     dockerImage ?? (await ensureDockerImageForAgent('claude'));
 
-  const effectiveDockerArgs = [
-    ...dockerArgs,
-    ...(process.env.TERM ? ['-e', `TERM=${process.env.TERM}`] : []),
-    ...(process.env.COLORTERM
-      ? ['-e', `COLORTERM=${process.env.COLORTERM}`]
-      : []),
-  ];
+  const effectiveDockerArgs = [...colorEnvArgs, ...dockerArgs];
 
   const result = await runInDocker({
     dockerArgs: effectiveDockerArgs,

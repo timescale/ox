@@ -25,8 +25,10 @@ import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
 };
 import toolVersions from '../../sandbox/versions.json' with { type: 'json' };
 import { runDockerSetupScreen } from '../components/DockerSetup';
+import { toVolumeArgs } from '../utils/docker.ts';
 import {
   CLI_SUBPROCESS_OPTS,
+  colorEnvArgs,
   enterSubprocessScreen,
   formatShellError,
   resetTerminal,
@@ -53,9 +55,6 @@ import {
 } from './opencode';
 import { runInDocker, type VirtualFile } from './runInDocker';
 import type { AgentMode, AttachOptions } from './sandbox/types';
-
-export const toVolumeArgs = (volumes: string[]): string[] =>
-  volumes.flatMap((v) => ['-v', v]);
 
 export const getCredentialFiles = async (
   homeDir = CONTAINER_HOME,
@@ -1954,13 +1953,6 @@ export async function resumeSession(
   for (const envVar of container.Config.Env ?? []) {
     envArgs.push('-e', envVar);
   }
-  // Ensure terminal env vars are current (may not have been in the original container)
-  for (const key of ['TERM', 'COLORTERM']) {
-    const value = process.env[key];
-    if (value) {
-      envArgs.push('-e', `${key}=${value}`);
-    }
-  }
 
   // Read config for overlay mounts and init script
   const config = await readConfig();
@@ -2174,7 +2166,7 @@ export async function startContainer(
   // an env-var key and file-based OAuth tokens causes some agents (notably
   // codex) to attempt conflicting auth flows, leading to noisy
   // "refresh_token_reused" errors.
-  const hostEnvArgs: string[] = [];
+  const hostEnvArgs: string[] = [...colorEnvArgs];
   const pushEnv = (key: string) => {
     const value = process.env[key];
     if (value) {
@@ -2199,14 +2191,6 @@ export async function startContainer(
         pushEnv('OPENAI_API_KEY');
       }
       break;
-  }
-
-  // Pass through terminal environment for proper color rendering
-  for (const key of ['TERM', 'COLORTERM']) {
-    const value = process.env[key];
-    if (value) {
-      hostEnvArgs.push('-e', `${key}=${value}`);
-    }
   }
 
   // Explicit env vars passed to startContainer (highest precedence)
@@ -2383,19 +2367,13 @@ export async function startShellContainer(
   const containerName = `ox-shell-${shellSuffix}`;
 
   // Pass through API keys and terminal env from host environment
-  const hostEnvArgs: string[] = [];
-  const apiKeysToPassthrough2 = [
+  const hostEnvArgs: string[] = [...colorEnvArgs];
+  const apiKeysToPassthrough = [
     'ANTHROPIC_API_KEY',
     'OPENAI_API_KEY',
     'CODEX_API_KEY',
   ];
-  for (const key of apiKeysToPassthrough2) {
-    const value = process.env[key];
-    if (value) {
-      hostEnvArgs.push('-e', `${key}=${value}`);
-    }
-  }
-  for (const key of ['TERM', 'COLORTERM']) {
+  for (const key of apiKeysToPassthrough) {
     const value = process.env[key];
     if (value) {
       hostEnvArgs.push('-e', `${key}=${value}`);
