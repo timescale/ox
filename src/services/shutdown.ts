@@ -15,7 +15,6 @@ export function abortShutdown(reason?: unknown): void {
   ensureController().abort(reason);
 }
 
-export function resetShutdown(): AbortSignal {
+export function resetShutdown(): void {
   shutdownController = new AbortController();
-  return shutdownController.signal;
 }

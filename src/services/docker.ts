@@ -514,8 +514,8 @@ async function ensureRootScriptLayer(
       cleanupAbort();
     }
 
-    const exitCode = await proc.exited;
     throwIfAborted(options?.signal);
+    const exitCode = proc.exitCode;
     if (exitCode !== 0) {
       throw Object.assign(new Error(`Failed with exit code ${exitCode}`), {
         exitCode,

@@ -38,10 +38,9 @@ export async function raceAbort<T>(
   }
 
   return new Promise<T>((resolve, reject) => {
-    const cleanup = onAbort(signal, () => {
-      cleanup();
-      reject(new AbortError());
-    });
+    // `once: true` on the abort listener auto-removes it, so no manual
+    // cleanup is needed inside the handler — only in the resolve/reject paths.
+    const cleanup = onAbort(signal, () => reject(new AbortError()));
 
     promise.then(
       (value) => {

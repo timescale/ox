@@ -223,6 +223,9 @@ function SessionsApp({
         // Second Ctrl+C: force quit
         process.exit(1);
       }
+      // Enqueue a no-op task so pendingCount transitions 1→0 after abort,
+      // which triggers the auto-quit effect below. Without this, pressing
+      // Ctrl+C when no cleanup tasks are spawned would never reach count 0.
       useBackgroundTaskStore
         .getState()
         .enqueue('Cancelling startup', async () => {
