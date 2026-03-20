@@ -22,12 +22,24 @@ authCommand
   .aliases(['status', 'c', 's'])
   .description('Check authentication status')
   .argument('<provider>', 'The provider to check: claude, opencode, codex, gh')
-  .action(async (provider: string) => {
+  .option('-m, --model <model>', 'Model to test API access with')
+  .action(async (provider: string, options: { model?: string }) => {
     try {
+      const { model } = options;
+
+      // Validate --model is not used with gh provider
+      if (provider === 'gh' && model) {
+        console.error(
+          'The --model flag is not applicable to GitHub authentication',
+        );
+        process.exit(1);
+        return;
+      }
+
       await ensureDockerSandbox();
       switch (provider) {
         case 'claude': {
-          if (await checkClaudeCredentials()) {
+          if (await checkClaudeCredentials(model)) {
             console.log('Claude CLI credentials are valid.');
             process.exit(0);
             return;
@@ -36,7 +48,7 @@ authCommand
           break;
         }
         case 'opencode': {
-          if (await checkOpencodeCredentials()) {
+          if (await checkOpencodeCredentials(model)) {
             console.log('OpenCode credentials are valid.');
             process.exit(0);
             return;
@@ -45,7 +57,7 @@ authCommand
           break;
         }
         case 'codex': {
-          if (await checkCodexCredentials()) {
+          if (await checkCodexCredentials(model)) {
             console.log('Codex credentials are valid.');
             process.exit(0);
             return;
