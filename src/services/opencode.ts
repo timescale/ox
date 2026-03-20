@@ -6,7 +6,7 @@ import { AbortError } from '../utils/abort.ts';
 import { colorEnvArgs } from '../utils/shell.ts';
 import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
-import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
+import { getClaudeApiKey } from './claude';
 import { readConfigValue } from './config';
 import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
@@ -154,22 +154,12 @@ const mergeCredentials = async (): Promise<OpencodeAuthJson> => {
     }
   }
   if (!opencodeAuthEntryValid(merged.anthropic)) {
-    const credsJson = await getClaudeCredentialsJson();
-    if (credsJson?.claudeAiOauth?.accessToken) {
+    const apiKey = await getClaudeApiKey();
+    if (apiKey) {
       merged.anthropic = {
-        type: 'oauth',
-        refresh: credsJson.claudeAiOauth.refreshToken,
-        access: credsJson.claudeAiOauth.accessToken,
-        expires: credsJson.claudeAiOauth.expiresAt,
+        type: 'api',
+        key: apiKey,
       };
-    } else {
-      const apiKey = await getClaudeApiKey();
-      if (apiKey) {
-        merged.anthropic = {
-          type: 'api',
-          key: apiKey,
-        };
-      }
     }
   }
   return merged;
