@@ -3,6 +3,7 @@ import { file } from 'bun';
 import type { AuthEntry, OpencodeAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { AbortError } from '../utils/abort.ts';
+import { colorEnvArgs } from '../utils/shell.ts';
 import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
@@ -18,7 +19,6 @@ import {
   type VirtualFile,
 } from './runInDocker';
 import { getThemeNames } from './theme.ts';
-import { colorEnvArgs } from '../utils/shell.ts';
 
 const homePaths = {
   authJson: join(getXdgData(), 'opencode', 'auth.json'),

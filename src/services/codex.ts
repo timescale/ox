@@ -8,6 +8,7 @@ import { file } from 'bun';
 import type { CodexAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { AbortError } from '../utils/abort.ts';
+import { colorEnvArgs } from '../utils/shell';
 import { readCache, writeCache } from './cache';
 import { readConfigValue } from './config';
 import { ensureDockerImageForAgent } from './docker';
@@ -20,7 +21,6 @@ import {
   runInDocker,
   type VirtualFile,
 } from './runInDocker';
-import { colorEnvArgs } from '../utils/shell';
 
 const homePaths = {
   authJson: join(homedir(), '.codex', 'auth.json'),
