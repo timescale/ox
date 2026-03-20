@@ -119,7 +119,7 @@ export const runInDocker = async ({
     return abortedStubResult();
   }
 
-  const resolvedImage = dockerImage ?? (await ensureDockerImage());
+  const resolvedImage = dockerImage ?? (await ensureDockerImage({ signal }));
 
   // Check after potentially slow image resolution.
   if (signal?.aborted) {

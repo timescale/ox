@@ -143,16 +143,19 @@ export class DockerSandboxProvider implements SandboxProvider {
     agent?: AgentType;
     force?: boolean;
     onProgress?: (progress: SandboxBuildProgress) => void;
+    signal?: AbortSignal;
   }): Promise<string> {
     if (options?.agent) {
       return ensureDockerImageForAgent(options.agent, {
         onProgress: options?.onProgress,
         force: options?.force,
+        signal: options?.signal,
       });
     }
     const baseImage = await ensureDockerImage({
       onProgress: options?.onProgress,
       force: options?.force,
+      signal: options?.signal,
     });
 
     // Chain through project setup layer if configured
@@ -161,6 +164,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       return ensureProjectSetupLayer(baseImage, config.projectSetupLayer, {
         onProgress: options?.onProgress,
         force: options?.force,
+        signal: options?.signal,
       });
     }
 
@@ -180,7 +184,10 @@ export class DockerSandboxProvider implements SandboxProvider {
 
     // Ensure agent-specific overlay image exists
     onProgress?.('Preparing agent image');
-    const agentImage = await this.ensureImage({ agent: options.agent });
+    const agentImage = await this.ensureImage({
+      agent: options.agent,
+      signal: options.signal,
+    });
 
     onProgress?.('Starting container');
     const containerName = await startContainer({
@@ -196,6 +203,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       agentArgs: options.agentArgs,
       agentMode: options.agentMode,
       dockerImage: agentImage,
+      signal: options.signal,
     });
 
     // Fetch the full session info for the container

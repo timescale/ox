@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { nanoid } from 'nanoid';
+import { AbortError, raceAbort, throwIfAborted } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { runClaudeInDocker } from './claude';
 import { runCodexInDocker } from './codex';
@@ -143,6 +144,7 @@ export interface GenerateBranchNameOptions {
   model?: string;
   onProgress?: (message: string) => void;
   maxRetries?: number;
+  signal?: AbortSignal;
 }
 
 export async function generateBranchName({
@@ -151,14 +153,19 @@ export async function generateBranchName({
   model,
   onProgress,
   maxRetries = 3,
+  signal,
 }: GenerateBranchNameOptions): Promise<string> {
+  throwIfAborted(signal);
   // Gather all existing names to avoid conflicts
   const [existingBranches, existingServices, existingContainers] =
-    await Promise.all([
-      getExistingBranches(),
-      getExistingServices(),
-      getExistingContainers(),
-    ]);
+    await raceAbort(
+      signal,
+      Promise.all([
+        getExistingBranches(),
+        getExistingServices(),
+        getExistingContainers(),
+      ]),
+    );
 
   const allExistingNames = new Set([
     ...existingBranches,
@@ -204,7 +211,10 @@ ${[...allExistingNames].join(', ')}`;
           const cmdArgs = effectiveModel
             ? ['--model', effectiveModel, '-p', llmPrompt]
             : ['-p', llmPrompt];
-          const proc = await runClaudeInDocker({ cmdArgs });
+          const proc = await runClaudeInDocker({ cmdArgs, signal });
+          if (signal?.aborted) {
+            throw new AbortError();
+          }
           result = proc.text();
           break;
         }
@@ -217,7 +227,10 @@ ${[...allExistingNames].join(', ')}`;
           const cmdArgs = effectiveModel
             ? [...baseArgs, '--model', effectiveModel, llmPrompt]
             : [...baseArgs, llmPrompt];
-          const codexResult = await runCodexInDocker({ cmdArgs });
+          const codexResult = await runCodexInDocker({ cmdArgs, signal });
+          if (signal?.aborted) {
+            throw new AbortError();
+          }
           result = codexResult.text();
           break;
         }
@@ -225,7 +238,10 @@ ${[...allExistingNames].join(', ')}`;
           const cmdArgs = effectiveModel
             ? ['run', '--model', effectiveModel, llmPrompt]
             : ['run', llmPrompt];
-          const proc = await runOpencodeInDocker({ cmdArgs });
+          const proc = await runOpencodeInDocker({ cmdArgs, signal });
+          if (signal?.aborted) {
+            throw new AbortError();
+          }
           result = proc.text();
           break;
         }

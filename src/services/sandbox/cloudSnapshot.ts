@@ -2,6 +2,8 @@
 // Cloud Snapshot Management - Base + agent overlay snapshots for cloud sandboxes
 // ============================================================================
 
+import { useBackgroundTaskStore } from '../../stores/backgroundTaskStore.ts';
+import { throwIfAborted } from '../../utils/abort.ts';
 import { BuildError } from '../buildError.ts';
 import type { AgentType, OxConfig } from '../config.ts';
 import {
@@ -24,6 +26,10 @@ export type SnapshotBuildProgress =
   | { type: 'cleaning-up'; message: string }
   | { type: 'done'; snapshotSlug: string }
   | { type: 'error'; message: string };
+
+function enqueueCleanupTask(label: string, cleanup: () => Promise<void>): void {
+  useBackgroundTaskStore.getState().enqueue(label, cleanup);
+}
 
 export function getBaseSnapshotSlug(
   config: Pick<OxConfig, 'dockerInSandbox'> = {},
@@ -113,8 +119,10 @@ export async function ensureCloudSnapshot(options: {
   config?: Pick<OxConfig, 'dockerInSandbox'>;
   force?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
+  signal?: AbortSignal;
 }): Promise<string> {
-  const { token, region, config = {}, force, onProgress } = options;
+  const { token, region, config = {}, force, onProgress, signal } = options;
+  throwIfAborted(signal);
   const client = new DenoApiClient(token);
   const snapshotSlug = getBaseSnapshotSlug(config);
 
@@ -175,6 +183,7 @@ export async function ensureCloudSnapshot(options: {
   let buildSandboxId: string | undefined;
 
   try {
+    throwIfAborted(signal);
     // 3. Boot sandbox directly from the volume (it's bootable!)
     onProgress?.({
       type: 'booting-sandbox',
@@ -190,13 +199,15 @@ export async function ensureCloudSnapshot(options: {
       });
     } catch (err) {
       log.error({ err, region }, 'Failed to create build sandbox');
-      throw err;
+      throw err instanceof Error ? err : new Error(String(err));
     }
+    throwIfAborted(signal);
     buildSandboxId = sandbox.resolvedId || sandbox.id;
     log.debug({ sandboxId: buildSandboxId }, 'Build sandbox created');
 
     // 4. Execute all base build steps
     for (const step of getCloudBaseSteps(config)) {
+      throwIfAborted(signal);
       onProgress?.({
         type: 'installing',
         message: step.message,
@@ -226,6 +237,7 @@ export async function ensureCloudSnapshot(options: {
         'No sandbox ID available — cannot kill build sandbox. It may need manual cleanup.',
       );
     }
+    throwIfAborted(signal);
     sandbox = null; // Prevent double-kill in finally
 
     // 12. Snapshot the volume (retries on VOLUME_IS_MOUNTED — the platform
@@ -241,13 +253,14 @@ export async function ensureCloudSnapshot(options: {
         { err, volumeId: volume.id, snapshotSlug },
         'Failed to snapshot build volume',
       );
-      throw err;
+      throw err instanceof Error ? err : new Error(String(err));
     }
     snapshotCreated = true;
 
     onProgress?.({ type: 'done', snapshotSlug });
     return snapshotSlug;
   } finally {
+    const aborted = signal?.aborted === true;
     // Only emit cleaning-up progress if we actually need to clean up
     // (i.e., the snapshot wasn't successfully created). On the success path,
     // 'done' has already been emitted — showing 'cleaning-up' after would
@@ -260,17 +273,25 @@ export async function ensureCloudSnapshot(options: {
       });
     }
     if (sandbox) {
-      try {
-        await sandbox.close();
-      } catch {
-        // ignore close errors
-      }
-      if (buildSandboxId) {
+      const buildSandbox = sandbox;
+      const cleanup = async () => {
         try {
-          await client.killSandbox(buildSandboxId);
-        } catch (err) {
-          log.debug({ err }, 'Failed to kill build sandbox in cleanup');
+          await buildSandbox.close();
+        } catch {
+          // ignore close errors
         }
+        if (buildSandboxId) {
+          try {
+            await client.killSandbox(buildSandboxId);
+          } catch (err) {
+            log.debug({ err }, 'Failed to kill build sandbox in cleanup');
+          }
+        }
+      };
+      if (aborted) {
+        enqueueCleanupTask('Killing build sandbox', cleanup);
+      } else {
+        await cleanup();
       }
     }
     // Only delete the build volume if the snapshot was NOT created.
@@ -279,10 +300,17 @@ export async function ensureCloudSnapshot(options: {
     // On success, leave the volume — it can be cleaned up manually or
     // via `ox sessions clean`.
     if (!snapshotCreated) {
-      try {
-        await client.deleteVolume(volume.id);
-      } catch (err) {
-        log.debug({ err }, 'Failed to delete build volume');
+      const cleanup = async () => {
+        try {
+          await client.deleteVolume(volume.id);
+        } catch (err) {
+          log.debug({ err }, 'Failed to delete build volume');
+        }
+      };
+      if (aborted) {
+        enqueueCleanupTask('Deleting build volume', cleanup);
+      } else {
+        await cleanup();
       }
     } else {
       log.debug(
@@ -310,9 +338,11 @@ export async function ensureProjectSetupCloudSnapshot(options: {
   /** Stream the setup script's output to the terminal */
   stream?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
+  signal?: AbortSignal;
 }): Promise<string> {
-  const { token, region, baseSnapshotSlug, script, force, onProgress } =
+  const { token, region, baseSnapshotSlug, script, force, onProgress, signal } =
     options;
+  throwIfAborted(signal);
   const client = new DenoApiClient(token);
 
   // Derive the base hash from the base snapshot slug (ox-base-{hash} -> {hash})
@@ -382,6 +412,7 @@ export async function ensureProjectSetupCloudSnapshot(options: {
   let buildSandboxId: string | undefined;
 
   try {
+    throwIfAborted(signal);
     // 3. Boot sandbox from the base volume
     onProgress?.({
       type: 'booting-sandbox',
@@ -394,6 +425,7 @@ export async function ensureProjectSetupCloudSnapshot(options: {
       timeout: '30m',
       memory: '2GiB',
     });
+    throwIfAborted(signal);
     buildSandboxId = sandbox.resolvedId || sandbox.id;
     log.debug(
       { sandboxId: buildSandboxId },
@@ -435,12 +467,14 @@ export async function ensureProjectSetupCloudSnapshot(options: {
         outputLines,
       );
     }
+    throwIfAborted(signal);
 
     // Clean up temp files
     await sandboxExec(sandbox, 'rm -f /tmp/project-setup.sh', {
       label: 'Clean up project setup script',
       sudo: true,
     });
+    throwIfAborted(signal);
 
     // 5. Kill sandbox and wait for volume detachment
     onProgress?.({
@@ -456,6 +490,7 @@ export async function ensureProjectSetupCloudSnapshot(options: {
     if (buildSandboxId) {
       await client.killAndWaitForDetach(buildSandboxId);
     }
+    throwIfAborted(signal);
     sandbox = null;
 
     // 6. Snapshot the volume
@@ -470,13 +505,14 @@ export async function ensureProjectSetupCloudSnapshot(options: {
         { err, volumeId: volume.id, snapshotSlug },
         'Failed to snapshot project setup volume',
       );
-      throw err;
+      throw err instanceof Error ? err : new Error(String(err));
     }
     snapshotCreated = true;
 
     onProgress?.({ type: 'done', snapshotSlug });
     return snapshotSlug;
   } finally {
+    const aborted = signal?.aborted === true;
     const needsCleanup = !snapshotCreated || sandbox !== null;
     if (needsCleanup) {
       onProgress?.({
@@ -485,24 +521,42 @@ export async function ensureProjectSetupCloudSnapshot(options: {
       });
     }
     if (sandbox) {
-      try {
-        await sandbox.close();
-      } catch {
-        // ignore close errors
-      }
-      if (buildSandboxId) {
+      const buildSandbox = sandbox;
+      const cleanup = async () => {
         try {
-          await client.killSandbox(buildSandboxId);
-        } catch (err) {
-          log.debug({ err }, 'Failed to kill project setup sandbox in cleanup');
+          await buildSandbox.close();
+        } catch {
+          // ignore close errors
         }
+        if (buildSandboxId) {
+          try {
+            await client.killSandbox(buildSandboxId);
+          } catch (err) {
+            log.debug(
+              { err },
+              'Failed to kill project setup sandbox in cleanup',
+            );
+          }
+        }
+      };
+      if (aborted) {
+        enqueueCleanupTask('Killing project setup sandbox', cleanup);
+      } else {
+        await cleanup();
       }
     }
     if (!snapshotCreated) {
-      try {
-        await client.deleteVolume(volume.id);
-      } catch (err) {
-        log.debug({ err }, 'Failed to delete project setup build volume');
+      const cleanup = async () => {
+        try {
+          await client.deleteVolume(volume.id);
+        } catch (err) {
+          log.debug({ err }, 'Failed to delete project setup build volume');
+        }
+      };
+      if (aborted) {
+        enqueueCleanupTask('Deleting project setup build volume', cleanup);
+      } else {
+        await cleanup();
       }
     } else {
       log.debug(
@@ -532,6 +586,7 @@ export async function ensureAgentCloudSnapshot(options: {
   config?: Pick<OxConfig, 'dockerInSandbox'>;
   force?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
+  signal?: AbortSignal;
 }): Promise<string> {
   const {
     token,
@@ -541,7 +596,9 @@ export async function ensureAgentCloudSnapshot(options: {
     config = {},
     force,
     onProgress,
+    signal,
   } = options;
+  throwIfAborted(signal);
   const client = new DenoApiClient(token);
   const snapshotSlug = getAgentSnapshotSlug(agent, options.setupHash, config);
 
@@ -605,6 +662,7 @@ export async function ensureAgentCloudSnapshot(options: {
   let buildSandboxId: string | undefined;
 
   try {
+    throwIfAborted(signal);
     // 3. Boot sandbox from the base volume
     onProgress?.({
       type: 'booting-sandbox',
@@ -617,6 +675,7 @@ export async function ensureAgentCloudSnapshot(options: {
       timeout: '30m',
       memory: '2GiB',
     });
+    throwIfAborted(signal);
     buildSandboxId = sandbox.resolvedId || sandbox.id;
     log.debug(
       { sandboxId: buildSandboxId, agent },
@@ -638,6 +697,7 @@ export async function ensureAgentCloudSnapshot(options: {
       `cat > /tmp/install-agent.sh << 'INSTALL_EOF'\n${agentScript}\nINSTALL_EOF\nbash /tmp/install-agent.sh ${agentVersion}`,
       { label: `Install ${agent}` },
     );
+    throwIfAborted(signal);
 
     // 5. Install Tiger CLI
     onProgress?.({
@@ -650,6 +710,7 @@ export async function ensureAgentCloudSnapshot(options: {
       `cat > /tmp/install-tiger.sh << 'INSTALL_EOF'\n${tigerScript}\nINSTALL_EOF\nbash /tmp/install-tiger.sh`,
       { label: 'Install Tiger CLI' },
     );
+    throwIfAborted(signal);
 
     // 6. Add agent-specific bin dirs to PATH
     // The base already has ~/.local/bin. Agents like opencode install to
@@ -666,6 +727,7 @@ export async function ensureAgentCloudSnapshot(options: {
         { label: 'Add opencode bin to bashrc' },
       );
     }
+    throwIfAborted(signal);
 
     // Clean up temp files
     await sandboxExec(
@@ -675,6 +737,7 @@ export async function ensureAgentCloudSnapshot(options: {
         label: 'Clean up temp install scripts',
       },
     );
+    throwIfAborted(signal);
 
     // 7. Kill sandbox and wait for volume detachment
     onProgress?.({
@@ -690,6 +753,7 @@ export async function ensureAgentCloudSnapshot(options: {
     if (buildSandboxId) {
       await client.killAndWaitForDetach(buildSandboxId);
     }
+    throwIfAborted(signal);
     sandbox = null;
 
     // 8. Snapshot the volume (retries on VOLUME_IS_MOUNTED)
@@ -704,13 +768,14 @@ export async function ensureAgentCloudSnapshot(options: {
         { err, volumeId: volume.id, snapshotSlug },
         'Failed to snapshot agent build volume',
       );
-      throw err;
+      throw err instanceof Error ? err : new Error(String(err));
     }
     snapshotCreated = true;
 
     onProgress?.({ type: 'done', snapshotSlug });
     return snapshotSlug;
   } finally {
+    const aborted = signal?.aborted === true;
     const needsCleanup = !snapshotCreated || sandbox !== null;
     if (needsCleanup) {
       onProgress?.({
@@ -719,24 +784,39 @@ export async function ensureAgentCloudSnapshot(options: {
       });
     }
     if (sandbox) {
-      try {
-        await sandbox.close();
-      } catch {
-        // ignore close errors
-      }
-      if (buildSandboxId) {
+      const buildSandbox = sandbox;
+      const cleanup = async () => {
         try {
-          await client.killSandbox(buildSandboxId);
-        } catch (err) {
-          log.debug({ err }, 'Failed to kill agent build sandbox in cleanup');
+          await buildSandbox.close();
+        } catch {
+          // ignore close errors
         }
+        if (buildSandboxId) {
+          try {
+            await client.killSandbox(buildSandboxId);
+          } catch (err) {
+            log.debug({ err }, 'Failed to kill agent build sandbox in cleanup');
+          }
+        }
+      };
+      if (aborted) {
+        enqueueCleanupTask('Killing agent build sandbox', cleanup);
+      } else {
+        await cleanup();
       }
     }
     if (!snapshotCreated) {
-      try {
-        await client.deleteVolume(volume.id);
-      } catch (err) {
-        log.debug({ err }, 'Failed to delete agent build volume');
+      const cleanup = async () => {
+        try {
+          await client.deleteVolume(volume.id);
+        } catch (err) {
+          log.debug({ err }, 'Failed to delete agent build volume');
+        }
+      };
+      if (aborted) {
+        enqueueCleanupTask('Deleting agent build volume', cleanup);
+      } else {
+        await cleanup();
       }
     } else {
       log.debug(

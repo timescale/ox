@@ -2,6 +2,8 @@ import { join } from 'node:path';
 import { file } from 'bun';
 import type { AuthEntry, OpencodeAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
+import { AbortError } from '../utils/abort.ts';
+import { colorEnvArgs } from '../utils/shell.ts';
 import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
 import { getClaudeApiKey, getClaudeCredentialsJson } from './claude';
@@ -17,7 +19,6 @@ import {
   type VirtualFile,
 } from './runInDocker';
 import { getThemeNames } from './theme.ts';
-import { colorEnvArgs } from '../utils/shell.ts';
 
 const homePaths = {
   authJson: join(getXdgData(), 'opencode', 'auth.json'),
@@ -257,6 +258,7 @@ export const runOpencodeInDocker = async ({
   shouldThrow = true,
   files = [],
   labels,
+  signal,
 }: RunInDockerOptionsBase): Promise<
   RunInDockerResult & { credsCaptured: Promise<boolean> }
 > => {
@@ -264,7 +266,7 @@ export const runOpencodeInDocker = async ({
 
   // Ensure the opencode agent overlay image is available when no explicit image is provided
   const resolvedImage =
-    dockerImage ?? (await ensureDockerImageForAgent('opencode'));
+    dockerImage ?? (await ensureDockerImageForAgent('opencode', { signal }));
 
   const effectiveDockerArgs = [...dockerArgs, ...colorEnvArgs];
 
@@ -277,6 +279,7 @@ export const runOpencodeInDocker = async ({
     shouldThrow,
     files: [...configFiles, ...files],
     labels,
+    signal,
   });
 
   const deferredCredsCaptured = new Deferred<boolean>();
@@ -314,12 +317,17 @@ export const runOpencodeInDocker = async ({
 
 export const checkOpencodeCredentials = async (
   model?: string,
+  signal?: AbortSignal,
 ): Promise<boolean> => {
   const listProc = await runOpencodeInDocker({
     cmdArgs: ['auth', 'list'],
     shouldThrow: false,
+    signal,
   });
   const exitCode = await listProc.exited;
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
   const output = listProc.text().trim();
   const match = output.match(/(\d+)\s+credentials/);
   const numCreds = match?.[1] ? parseInt(match[1], 10) : 0;
@@ -337,8 +345,12 @@ export const checkOpencodeCredentials = async (
       'just output `true`, and nothing else',
     ],
     shouldThrow: false,
+    signal,
   });
   const testExitCode = await testProc.exited;
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
   const errText = testProc.errorText().trim();
   const valid = testExitCode === 0 && !errText.includes('Error');
   if (valid) {

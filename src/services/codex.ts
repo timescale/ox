@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { file } from 'bun';
 import type { CodexAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
+import { AbortError } from '../utils/abort.ts';
+import { colorEnvArgs } from '../utils/shell';
 import { readCache, writeCache } from './cache';
 import { readConfigValue } from './config';
 import { ensureDockerImageForAgent } from './docker';
@@ -19,7 +21,6 @@ import {
   runInDocker,
   type VirtualFile,
 } from './runInDocker';
-import { colorEnvArgs } from '../utils/shell';
 
 const homePaths = {
   authJson: join(homedir(), '.codex', 'auth.json'),
@@ -235,6 +236,7 @@ export const runCodexInDocker = async ({
   files = [],
   labels,
   mountCwd,
+  signal,
 }: RunInDockerOptionsBase): Promise<
   RunInDockerResult & { credsCaptured: Promise<boolean> }
 > => {
@@ -242,7 +244,7 @@ export const runCodexInDocker = async ({
 
   // Ensure the codex agent overlay image is available when no explicit image is provided
   const resolvedImage =
-    dockerImage ?? (await ensureDockerImageForAgent('codex'));
+    dockerImage ?? (await ensureDockerImageForAgent('codex', { signal }));
 
   const effectiveDockerArgs = [...colorEnvArgs, ...dockerArgs];
 
@@ -256,6 +258,7 @@ export const runCodexInDocker = async ({
     files: [...configFiles, ...files],
     labels,
     mountCwd,
+    signal,
   });
 
   const deferredCredsCaptured = new Deferred<boolean>();
@@ -291,12 +294,17 @@ export const runCodexInDocker = async ({
 
 export const checkCodexCredentials = async (
   model?: string,
+  signal?: AbortSignal,
 ): Promise<boolean> => {
   const statusProc = await runCodexInDocker({
     cmdArgs: ['login', 'status'],
     shouldThrow: false,
+    signal,
   });
   const statusExitCode = await statusProc.exited;
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
   const statusOutput = statusProc.text().trim();
   log.trace(
     { exitCode: statusExitCode, output: statusOutput },
@@ -316,8 +324,12 @@ export const checkCodexCredentials = async (
       'just output `true`, and nothing else',
     ],
     shouldThrow: false,
+    signal,
   });
   const testExitCode = await testProc.exited;
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
   const valid = testExitCode === 0;
   if (valid) {
     log.debug('checkCodexCredentials (valid)');

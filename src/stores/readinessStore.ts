@@ -5,6 +5,8 @@ import type { PullLayer } from '../services/docker.ts';
 import type { DockerProvider, DockerStatus } from '../services/dockerSetup.ts';
 import { log } from '../services/logger.ts';
 import type { SandboxProviderType } from '../services/sandbox/types.ts';
+import { abortShutdown, getShutdownSignal } from '../services/shutdown.ts';
+import { isAbortError } from '../utils/abort.ts';
 
 // ============================================================================
 // Types
@@ -60,6 +62,7 @@ export interface ReadinessState {
 
   // Actions
   runChecks: () => Promise<void>;
+  abort: () => void;
   checkAgentAuth: (
     agent: 'claude' | 'opencode' | 'codex',
     model?: string,
@@ -82,6 +85,7 @@ export interface ReadinessState {
 const initialState: Omit<
   ReadinessState,
   | 'runChecks'
+  | 'abort'
   | 'checkAgentAuth'
   | 'prebuildAgentImage'
   | 'reset'
@@ -135,6 +139,10 @@ export const waitForAgentAuthCheck = (
 export const useReadinessStore = create<ReadinessState>()((set) => ({
   ...initialState,
 
+  abort: () => {
+    abortShutdown();
+  },
+
   reset: () => {
     checksRunning = false;
     set(initialState);
@@ -165,6 +173,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
     checksRunning = true;
 
     try {
+      const signal = getShutdownSignal();
       // Lazy imports to avoid circular dependencies and keep the store lightweight
       const { checkDockerStatus, startProvider } = await import(
         '../services/dockerSetup.ts'
@@ -216,9 +225,12 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
         }
 
         try {
-          await startProvider(provider, 600);
+          await startProvider(provider, 600, undefined, signal);
           set({ dockerRunning: 'running' });
         } catch (err) {
+          if (isAbortError(err)) {
+            return;
+          }
           log.error({ err }, 'Failed to start Docker provider');
           set({
             dockerRunning: 'not-running',
@@ -251,6 +263,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
 
         try {
           await ensureDockerImage({
+            signal,
             onProgress: (progress) => {
               if (
                 progress.type === 'pulling' ||
@@ -266,6 +279,9 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
           });
           set({ sandboxBaseImage: 'ready', basePullLayers: [] });
         } catch (err) {
+          if (isAbortError(err)) {
+            return;
+          }
           log.error({ err }, 'Failed to pull/build sandbox image');
           set({
             sandboxBaseImage: 'error',
@@ -286,7 +302,16 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
 
       set({ ghAuth: 'checking' });
 
-      const ghOk = await checkGhCredentials().catch(() => false);
+      let ghOk: boolean;
+      try {
+        ghOk = await checkGhCredentials(signal);
+      } catch (err) {
+        if (isAbortError(err)) {
+          set({ ghAuth: 'unknown' });
+          return;
+        }
+        ghOk = false;
+      }
 
       set({ ghAuth: ghOk ? 'ready' : 'invalid' });
     } finally {
@@ -325,27 +350,32 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
     // OAuth token refresh.
     const checkPromise = (async () => {
       try {
+        const signal = getShutdownSignal();
         let ok: boolean;
         switch (agent) {
           case 'claude':
             ok = await (
               await import('../services/claude.ts')
-            ).checkClaudeCredentials(model);
+            ).checkClaudeCredentials(model, signal);
             break;
           case 'codex':
             ok = await (
               await import('../services/codex.ts')
-            ).checkCodexCredentials();
+            ).checkCodexCredentials(undefined, signal);
             break;
           default:
             ok = await (
               await import('../services/opencode.ts')
-            ).checkOpencodeCredentials(model);
+            ).checkOpencodeCredentials(model, signal);
             break;
         }
         set({ [authKey]: ok ? 'ready' : 'invalid' });
         return ok;
-      } catch {
+      } catch (err) {
+        if (isAbortError(err)) {
+          set({ [authKey]: 'unknown' });
+          return false;
+        }
         set({ [authKey]: 'error' });
         return false;
       } finally {
@@ -394,6 +424,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
     // Fire-and-forget async build
     (async () => {
       try {
+        const signal = getShutdownSignal();
         const { getSandboxProvider } = await import(
           '../services/sandbox/index.ts'
         );
@@ -407,6 +438,7 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
 
         await provider.ensureImage({
           agent,
+          signal,
           onProgress: (progress) => {
             // Only update if this is still the active build
             const current = useReadinessStore.getState();
@@ -449,6 +481,21 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
           });
         }
       } catch (err) {
+        if (isAbortError(err)) {
+          const current = useReadinessStore.getState();
+          if (
+            current.agentImageAgent === agent &&
+            current.agentImageProvider === providerType
+          ) {
+            set({
+              sandboxAgentImage: 'unknown',
+              agentBuildLayers: [],
+              agentBuildMessage: null,
+              agentBuildDetail: null,
+            });
+          }
+          return;
+        }
         // Only set error if this is still the active build
         const current = useReadinessStore.getState();
         if (

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { YAML } from 'bun';
 import { Deferred } from '../types/deferred';
+import { AbortError } from '../utils/abort.ts';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
 import { log } from './logger';
@@ -281,13 +282,19 @@ export const runGhInDocker = async ({
   };
 };
 
-export const checkGhCredentials = async (): Promise<boolean> => {
+export const checkGhCredentials = async (
+  signal?: AbortSignal,
+): Promise<boolean> => {
   const proc = await runGhInDocker({
     cmdArgs: ['auth', 'status'],
     shouldThrow: false,
     quiet: true,
+    signal,
   });
   const exitCode = await proc.exited;
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
   const output = proc.text().trim();
   log.trace({ exitCode, output }, 'checkGhCredentials');
   log.debug(`checkGhCredentials (${exitCode === 0 ? 'valid' : 'invalid'})`);

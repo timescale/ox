@@ -2,6 +2,7 @@
 // Database Fork Service
 // ============================================================================
 
+import { raceAbort, throwIfAborted } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { log } from './logger';
 
@@ -27,16 +28,33 @@ export function parseEnvOutput(output: string): Record<string, string> {
 export async function forkDatabase(
   branchName: string,
   serviceId?: string | null,
+  signal?: AbortSignal,
 ): Promise<ForkResult> {
   const baseArgs = serviceId ? [serviceId] : [];
   const forkArgs = ['--now', '--name', branchName, '--with-password'];
 
   // Fork and get JSON output for metadata (service_id, name)
+  throwIfAborted(signal);
   let jsonOutput: string;
   try {
-    const proc =
-      await Bun.$`tiger svc fork ${baseArgs} ${forkArgs} -o json`.quiet();
-    jsonOutput = proc.stdout.toString();
+    const forkProc = Bun.spawn(
+      ['tiger', 'svc', 'fork', ...baseArgs, ...forkArgs, '-o', 'json'],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    // Use raceAbort to unblock on abort even if the process doesn't exit quickly
+    // after being killed. The process is killed when the signal aborts.
+    if (signal) {
+      signal.addEventListener('abort', () => forkProc.kill(), { once: true });
+    }
+    await raceAbort(signal, forkProc.exited);
+    if (forkProc.exitCode !== 0) {
+      const stderr = await new Response(forkProc.stderr).text();
+      throw Object.assign(new Error('tiger svc fork failed'), {
+        exitCode: forkProc.exitCode,
+        stderr,
+      });
+    }
+    jsonOutput = await new Response(forkProc.stdout).text();
   } catch (err) {
     log.error({ err }, 'Failed to fork database');
     throw formatShellError(err as ShellError);
@@ -44,11 +62,35 @@ export async function forkDatabase(
   const metadata = JSON.parse(jsonOutput);
 
   // Get env output for the PG* variables using the new service's ID
+  throwIfAborted(signal);
   let envOutput: string;
   try {
-    const proc =
-      await Bun.$`tiger svc get ${metadata.service_id} -o env --with-password`.quiet();
-    envOutput = proc.stdout.toString();
+    const getProc = Bun.spawn(
+      [
+        'tiger',
+        'svc',
+        'get',
+        metadata.service_id,
+        '-o',
+        'env',
+        '--with-password',
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    // Use raceAbort to unblock on abort even if the process doesn't exit quickly
+    // after being killed. The process is killed when the signal aborts.
+    if (signal) {
+      signal.addEventListener('abort', () => getProc.kill(), { once: true });
+    }
+    await raceAbort(signal, getProc.exited);
+    if (getProc.exitCode !== 0) {
+      const stderr = await new Response(getProc.stderr).text();
+      throw Object.assign(new Error('tiger svc get failed'), {
+        exitCode: getProc.exitCode,
+        stderr,
+      });
+    }
+    envOutput = await new Response(getProc.stdout).text();
   } catch (err) {
     log.error(
       { err },

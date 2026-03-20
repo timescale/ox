@@ -32,6 +32,8 @@ import type {
   SandboxProvider,
   SandboxProviderType,
 } from '../services/sandbox/types.ts';
+import { getShutdownSignal } from '../services/shutdown.ts';
+import { isAbortError, throwIfAborted } from '../utils/abort.ts';
 
 import { usePromptSettingsStore } from './promptSettingsStore.ts';
 import { useReadinessStore, waitForAgentAuthCheck } from './readinessStore.ts';
@@ -212,6 +214,8 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         goToDetail,
       } = useRouterStore.getState();
       try {
+        const signal = getShutdownSignal();
+        throwIfAborted(signal);
         const state = get();
         // Use selected provider or fall back to the default provider
         const activeProvider = selectedProvider
@@ -261,12 +265,12 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           step: 'Preparing sandbox environment',
           mode,
         });
-        await activeProvider.ensureImage({ agent });
+        await activeProvider.ensureImage({ agent, signal });
 
         // Credential checks always run via Docker containers, so ensure the
         // Docker image is available even when using a non-Docker sandbox provider.
         if (activeProvider.type !== 'docker') {
-          await ensureDockerImage({});
+          await ensureDockerImage({ signal });
         }
 
         // Check agent credentials before starting container
@@ -309,14 +313,16 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
               case 'claude':
                 agentAuthValid = await checkClaudeCredentials(
                   model || undefined,
+                  signal,
                 );
                 break;
               case 'codex':
-                agentAuthValid = await checkCodexCredentials();
+                agentAuthValid = await checkCodexCredentials(undefined, signal);
                 break;
               default:
                 agentAuthValid = await checkOpencodeCredentials(
                   model || undefined,
+                  signal,
                 );
                 break;
             }
@@ -372,6 +378,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             prompt,
             agent,
             model,
+            signal,
           });
         } else {
           branchName = `${mode}-${nanoid(6).toLowerCase()}`;
@@ -389,7 +396,11 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           updateView((v) =>
             v.type === 'starting' ? { ...v, step: 'Forking database' } : v,
           );
-          forkResult = await forkDatabase(branchName, effectiveServiceId);
+          forkResult = await forkDatabase(
+            branchName,
+            effectiveServiceId,
+            signal,
+          );
         }
 
         // Only check GitHub credentials if in a git repo
@@ -400,7 +411,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             ? true
             : cachedGhAuth === 'invalid'
               ? false
-              : await checkGhCredentials();
+              : await checkGhCredentials(signal);
         if (inGitRepo && !ghAuthValid) {
           useRouterStore.getState().needsGhAuth({
             agent,
@@ -449,6 +460,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             updateView((v) => (v.type === 'starting' ? { ...v, step } : v));
           },
           requestSudo: get().requestSudo,
+          signal,
         });
 
         if (isInteractive) {
@@ -460,6 +472,10 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           goToDetail(session);
         }
       } catch (err) {
+        if (isAbortError(err)) {
+          log.debug('startSession aborted during shutdown');
+          return;
+        }
         log.error({ err }, 'Failed to start session');
         if (err instanceof BuildError && err.outputLines.length > 0) {
           useRouterStore
@@ -494,6 +510,8 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         goToPrompt,
       } = useRouterStore.getState();
       try {
+        const signal = getShutdownSignal();
+        throwIfAborted(signal);
         const state = get();
         // Use selected provider or fall back to the default provider
         const activeProvider = selectedProvider
@@ -575,6 +593,10 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           goToDetail(newSession);
         }
       } catch (err) {
+        if (isAbortError(err)) {
+          log.debug('resumeSessionFlow aborted during shutdown');
+          return;
+        }
         log.error({ err }, 'Failed to resume session');
         useToastStore
           .getState()
@@ -595,6 +617,8 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
       const { updateView, goToStartingShell, goToPrompt, connectShell } =
         useRouterStore.getState();
       try {
+        const signal = getShutdownSignal();
+        throwIfAborted(signal);
         const state = get();
         const activeProvider = selectedProvider
           ? getSandboxProvider(selectedProvider)
@@ -607,6 +631,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         goToStartingShell('Preparing sandbox environment');
 
         await activeProvider.ensureImage({
+          signal,
           onProgress: (progress) => {
             if (progress.type === 'pulling-cache') {
               updateView((v) =>
@@ -632,6 +657,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           repoInfo: shellRepoInfo,
           mountDir: shellMountDir,
           isGitRepo: shellIsGitRepo,
+          signal,
           onProgress: (step) => {
             updateView((v) =>
               v.type === 'starting-shell' ? { ...v, step } : v,
@@ -642,6 +668,10 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         // Shell is prepared — exit TUI so the outer loop can connect
         connectShell(shell);
       } catch (err) {
+        if (isAbortError(err)) {
+          log.debug('startShellSession aborted during shutdown');
+          return;
+        }
         log.error({ err }, 'Failed to start shell');
         if (err instanceof BuildError && err.outputLines.length > 0) {
           useRouterStore
