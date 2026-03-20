@@ -69,6 +69,7 @@ export interface CreateSandboxOptions {
   overlayMounts?: string[];
   onProgress?: (step: string) => void;
   requestSudo?: RequestSudoFn;
+  signal?: AbortSignal;
 }
 
 // Options for creating a shell sandbox
@@ -77,6 +78,7 @@ export interface CreateShellSandboxOptions {
   mountDir?: string;
   isGitRepo?: boolean;
   onProgress?: (step: string) => void;
+  signal?: AbortSignal;
 }
 
 // Handle returned by createShell for split connect/cleanup lifecycle
@@ -138,6 +140,7 @@ export interface SandboxProvider {
     /** Skip existence checks and force a rebuild of all layers */
     force?: boolean;
     onProgress?: (progress: SandboxBuildProgress) => void;
+    signal?: AbortSignal;
   }): Promise<string>;
 
   // Lifecycle — create/resume always return a session (never attach internally).

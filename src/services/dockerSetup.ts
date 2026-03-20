@@ -10,6 +10,7 @@ import {
   ensureOrbStackRunning,
   isMac,
 } from 'build-strap';
+import { raceAbort } from '../utils/abort.ts';
 import { log } from './logger';
 
 // ============================================================================
@@ -126,6 +127,7 @@ export async function startProvider(
   provider: DockerProvider,
   timeoutSeconds = 600,
   onProgress?: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const log = onProgress ?? (() => {});
 
@@ -139,11 +141,11 @@ export async function startProvider(
       throw new Error('OrbStack is only available on macOS');
     }
     log('Starting OrbStack');
-    await ensureOrbStackRunning(timeoutSeconds);
+    await raceAbort(signal, ensureOrbStackRunning(timeoutSeconds));
   } else {
     if (isMac()) {
       log('Starting Docker Desktop');
-      await ensureDockerRunning(timeoutSeconds);
+      await raceAbort(signal, ensureDockerRunning(timeoutSeconds));
     } else {
       throw new Error(
         'Docker is not running. Please start Docker Desktop manually.',

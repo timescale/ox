@@ -5,6 +5,7 @@
 import type { Database } from 'bun:sqlite';
 import type { Sandbox } from '@deno/sandbox';
 import { runCloudSetupScreen } from '../../components/CloudSetup.tsx';
+import { throwIfAborted } from '../../utils/abort.ts';
 import {
   enterSubprocessScreen,
   resetTerminal,
@@ -598,7 +599,9 @@ export class CloudSandboxProvider implements SandboxProvider {
     agent?: AgentType;
     force?: boolean;
     onProgress?: (progress: SandboxBuildProgress) => void;
+    signal?: AbortSignal;
   }): Promise<string> {
+    throwIfAborted(options?.signal);
     const token = await getDenoToken();
     if (!token) {
       throw new Error(
@@ -649,6 +652,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       config,
       force: options?.force,
       onProgress: mapProgress,
+      signal: options?.signal,
     });
 
     // 2. If projectSetupLayer is configured, ensure setup layer snapshot
@@ -662,6 +666,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         script: config.projectSetupLayer,
         force: options?.force,
         onProgress: mapProgress,
+        signal: options?.signal,
       });
       // Extract the setup hash for use in agent slug computation
       setupHash = effectiveBaseSlug.replace('oxl-', '');
@@ -678,6 +683,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         config,
         force: options?.force,
         onProgress: mapProgress,
+        signal: options?.signal,
       });
       return agentSlug;
     }
@@ -697,9 +703,13 @@ export class CloudSandboxProvider implements SandboxProvider {
     }
 
     const { onProgress, requestSudo } = options;
+    throwIfAborted(options.signal);
     const client = await this.getClient();
     const region = await this.resolveRegion();
-    const baseSnapshot = await this.ensureImage({ agent: options.agent });
+    const baseSnapshot = await this.ensureImage({
+      agent: options.agent,
+      signal: options.signal,
+    });
 
     // 1. Create session-specific root volume from the base snapshot.
     onProgress?.('Creating volume');
@@ -710,6 +720,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       capacity: '10GiB',
       from: baseSnapshot,
     });
+    throwIfAborted(options.signal);
 
     // 2. Build env vars
     const env: Record<string, string> = { ...options.envVars };
@@ -756,6 +767,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       }
       throw err;
     }
+    throwIfAborted(options.signal);
 
     // Record in SQLite immediately after boot (before provisioning)
     const sessionId = sandbox.resolvedId || sandbox.id;
@@ -845,11 +857,12 @@ export class CloudSandboxProvider implements SandboxProvider {
 
   async createShell(options: CreateShellSandboxOptions): Promise<ShellSession> {
     const { onProgress } = options;
+    throwIfAborted(options.signal);
     const client = await this.getClient();
     const region = await this.resolveRegion();
 
     onProgress?.('Preparing sandbox image');
-    const baseSnapshot = await this.ensureImage();
+    const baseSnapshot = await this.ensureImage({ signal: options.signal });
 
     // Create an ephemeral root volume from the base snapshot so installed
     // tools are visible (snapshot-direct boot uses a read-only overlay).
@@ -860,6 +873,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       capacity: '10GiB',
       from: baseSnapshot,
     });
+    throwIfAborted(options.signal);
 
     onProgress?.('Starting cloud sandbox');
     const sandbox = await client.createSandbox({
@@ -869,6 +883,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       memory: '2GiB',
       labels: { 'ox.managed': 'true' },
     });
+    throwIfAborted(options.signal);
 
     // Inject credentials
     onProgress?.('Injecting credentials');

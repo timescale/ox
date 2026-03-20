@@ -2,6 +2,7 @@
 // Database Fork Service
 // ============================================================================
 
+import { raceAbort } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { log } from './logger';
 
@@ -27,6 +28,7 @@ export function parseEnvOutput(output: string): Record<string, string> {
 export async function forkDatabase(
   branchName: string,
   serviceId?: string | null,
+  signal?: AbortSignal,
 ): Promise<ForkResult> {
   const baseArgs = serviceId ? [serviceId] : [];
   const forkArgs = ['--now', '--name', branchName, '--with-password'];
@@ -34,8 +36,10 @@ export async function forkDatabase(
   // Fork and get JSON output for metadata (service_id, name)
   let jsonOutput: string;
   try {
-    const proc =
-      await Bun.$`tiger svc fork ${baseArgs} ${forkArgs} -o json`.quiet();
+    const proc = await raceAbort(
+      signal,
+      Bun.$`tiger svc fork ${baseArgs} ${forkArgs} -o json`.quiet(),
+    );
     jsonOutput = proc.stdout.toString();
   } catch (err) {
     log.error({ err }, 'Failed to fork database');
@@ -46,8 +50,10 @@ export async function forkDatabase(
   // Get env output for the PG* variables using the new service's ID
   let envOutput: string;
   try {
-    const proc =
-      await Bun.$`tiger svc get ${metadata.service_id} -o env --with-password`.quiet();
+    const proc = await raceAbort(
+      signal,
+      Bun.$`tiger svc get ${metadata.service_id} -o env --with-password`.quiet(),
+    );
     envOutput = proc.stdout.toString();
   } catch (err) {
     log.error(

@@ -47,6 +47,11 @@ import {
   type SandboxProviderType,
 } from '../services/sandbox/index.ts';
 import { formatRelativeTime } from '../services/sessionDisplay.ts';
+import {
+  abortShutdown,
+  getShutdownSignal,
+  resetShutdown,
+} from '../services/shutdown.ts';
 import { createTui } from '../services/tui.ts';
 import {
   checkForUpdate,
@@ -92,6 +97,7 @@ export async function handleNeedsGhAuth(
   const { agent, model, prompt } = result.ghAuthInfo;
 
   await ensureDockerImage({
+    signal: getShutdownSignal(),
     onProgress: (progress) => {
       if (progress.type === 'pulling' || progress.type === 'pulling-cache') {
         const layers = progress.layers ?? [];
@@ -217,15 +223,15 @@ function SessionsApp({
         // Second Ctrl+C: force quit
         process.exit(1);
       }
-      if (pendingCount > 0) {
-        // First Ctrl+C with pending tasks: show shutdown overlay
-        setShuttingDown(true);
-        key.stopPropagation();
-        key.preventDefault();
-      } else {
-        // No pending tasks: exit immediately
-        useRouterStore.getState().quit();
-      }
+      useBackgroundTaskStore
+        .getState()
+        .enqueue('Cancelling startup', async () => {
+          await Promise.resolve();
+        });
+      abortShutdown();
+      setShuttingDown(true);
+      key.stopPropagation();
+      key.preventDefault();
     }
   });
 
@@ -456,6 +462,7 @@ export async function runSessionsTui({
   sandboxProvider,
   autoSubmitAgentMode,
 }: RunSessionsTuiOptions = {}): Promise<void> {
+  resetShutdown();
   const provider = sandboxProvider
     ? getSandboxProvider(sandboxProvider)
     : await getDefaultProvider();
@@ -686,6 +693,7 @@ export async function runSessionsTui({
       // available before attempting login.
       try {
         await ensureDockerImage({
+          signal: getShutdownSignal(),
           onProgress: (progress) => {
             if (
               progress.type === 'pulling' ||

@@ -25,6 +25,13 @@ import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
 };
 import toolVersions from '../../sandbox/versions.json' with { type: 'json' };
 import { runDockerSetupScreen } from '../components/DockerSetup';
+import { useBackgroundTaskStore } from '../stores/backgroundTaskStore.ts';
+import {
+  AbortError,
+  isAbortError,
+  onAbort,
+  throwIfAborted,
+} from '../utils/abort.ts';
 import { toVolumeArgs } from '../utils/docker.ts';
 import {
   CLI_SUBPROCESS_OPTS,
@@ -417,8 +424,10 @@ async function ensureRootScriptLayer(
     onProgress?: (progress: ImageBuildProgress) => void;
     force?: boolean;
     stream?: boolean;
+    signal?: AbortSignal;
   },
 ): Promise<string> {
+  throwIfAborted(options?.signal);
   if (!options?.force && (await imageExists(setupTag))) {
     log.debug({ setupTag }, `${progressMessage} image already exists`);
     return setupTag;
@@ -431,10 +440,13 @@ async function ensureRootScriptLayer(
   });
 
   const containerName = `ox-setup-${nanoid(6).toLowerCase()}`;
+  let keepContainer = false;
 
   try {
     await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+    throwIfAborted(options?.signal);
     await writeFileToContainer(containerName, '/tmp/project-setup.sh', script);
+    throwIfAborted(options?.signal);
 
     const outputLines: string[] = [];
     const proc = Bun.spawn(
@@ -449,6 +461,7 @@ async function ensureRootScriptLayer(
       ],
       { stdout: 'pipe', stderr: 'pipe' },
     );
+    const cleanupAbort = onAbort(options?.signal, () => proc.kill());
 
     const processStream = async (
       readable: ReadableStream<Uint8Array> | null,
@@ -491,13 +504,18 @@ async function ensureRootScriptLayer(
       }
     };
 
-    await Promise.all([
-      processStream(proc.stdout),
-      processStream(proc.stderr),
-      proc.exited,
-    ]);
+    try {
+      await Promise.all([
+        processStream(proc.stdout),
+        processStream(proc.stderr),
+        proc.exited,
+      ]);
+    } finally {
+      cleanupAbort();
+    }
 
     const exitCode = await proc.exited;
+    throwIfAborted(options?.signal);
     if (exitCode !== 0) {
       throw Object.assign(new Error(`Failed with exit code ${exitCode}`), {
         exitCode,
@@ -508,12 +526,17 @@ async function ensureRootScriptLayer(
     }
 
     await $`docker exec --user root ${containerName} rm -f /tmp/project-setup.sh`.quiet();
+    throwIfAborted(options?.signal);
     await $`docker commit ${containerName} ${setupTag}`.quiet();
     invalidateImageExistsCache(setupTag);
 
     log.info({ setupTag }, `${progressMessage} image built successfully`);
     return setupTag;
   } catch (err) {
+    if (isAbortError(err)) {
+      keepContainer = true;
+      throw err;
+    }
     log.error({ err, setupTag }, `Failed to build ${progressMessage} image`);
     const detail =
       err != null && typeof err === 'object' && 'stderr' in err && err.stderr
@@ -529,7 +552,15 @@ async function ensureRootScriptLayer(
     const base = `Failed to build ${progressMessage} (exit code ${(err as { exitCode?: number }).exitCode ?? '?'})`;
     throw new BuildError(detail ? `${base}\n${detail}` : base, lines);
   } finally {
-    await $`docker rm -f ${containerName}`.quiet().nothrow();
+    if (keepContainer) {
+      useBackgroundTaskStore
+        .getState()
+        .enqueue(`Removing build container ${containerName}`, async () => {
+          await $`docker rm -f ${containerName}`.quiet().nothrow();
+        });
+    } else {
+      await $`docker rm -f ${containerName}`.quiet().nothrow();
+    }
   }
 }
 
@@ -613,9 +644,7 @@ export function getAgentOverlayTag(
 export async function ensureProjectSetupLayer(
   baseImage: string,
   script: string,
-  options?: {
-    onProgress?: (progress: ImageBuildProgress) => void;
-    force?: boolean;
+  options?: EnsureDockerImageOptions & {
     /** Stream the setup script's stdout/stderr to the terminal */
     stream?: boolean;
   },
@@ -662,8 +691,10 @@ export async function ensureAgentOverlay(
   options?: {
     onProgress?: (progress: ImageBuildProgress) => void;
     force?: boolean;
+    signal?: AbortSignal;
   },
 ): Promise<string> {
+  throwIfAborted(options?.signal);
   const overlayTag = getAgentOverlayTag(baseImage, agent);
 
   // Check if overlay already exists locally
@@ -684,7 +715,7 @@ export async function ensureAgentOverlay(
       type: 'pulling',
       message: `Pulling ${agent} agent image`,
     });
-    if (await tryPullImage(ghcrAgentTag)) {
+    if (await tryPullImage(ghcrAgentTag, { signal: options?.signal })) {
       // Tag the GHCR image with the local overlay tag for consistency
       if (ghcrAgentTag !== overlayTag) {
         await $`docker tag ${ghcrAgentTag} ${overlayTag}`.quiet().nothrow();
@@ -712,10 +743,12 @@ export async function ensureAgentOverlay(
 
   const version = getAgentVersion(agent);
   const containerName = `ox-overlay-${agent}-${nanoid(6).toLowerCase()}`;
+  let keepContainer = false;
 
   try {
     // 1. Start a temporary container from the base image
     await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+    throwIfAborted(options?.signal);
 
     // 2. Write install scripts into the container
     const agentScript = getAgentInstallScript(agent);
@@ -725,31 +758,47 @@ export async function ensureAgentOverlay(
       '/tmp/install-agent.sh',
       agentScript,
     );
+    throwIfAborted(options?.signal);
     await writeFileToContainer(
       containerName,
       '/tmp/install-tiger.sh',
       tigerScript,
     );
+    throwIfAborted(options?.signal);
 
     // 3. Execute install scripts as the ox user
     await $`docker exec ${containerName} bash /tmp/install-agent.sh ${version}`.quiet();
+    throwIfAborted(options?.signal);
     await $`docker exec ${containerName} bash /tmp/install-tiger.sh`.quiet();
+    throwIfAborted(options?.signal);
 
     // 4. Clean up temp files and commit
     await $`docker exec ${containerName} rm -f /tmp/install-agent.sh /tmp/install-tiger.sh`.quiet();
+    throwIfAborted(options?.signal);
     await $`docker commit ${containerName} ${overlayTag}`.quiet();
     invalidateImageExistsCache(overlayTag);
 
     log.info({ overlayTag }, 'Agent overlay image built successfully');
     return overlayTag;
   } catch (err) {
+    if (isAbortError(err)) {
+      keepContainer = true;
+      throw err;
+    }
     log.error({ err, overlayTag, agent }, 'Failed to build agent overlay');
     throw new Error(
       `Failed to build ${agent} overlay image: ${err instanceof Error ? err.message : String(err)}`,
     );
   } finally {
-    // Always clean up the temporary container
-    await $`docker rm -f ${containerName}`.quiet().nothrow();
+    if (keepContainer) {
+      useBackgroundTaskStore
+        .getState()
+        .enqueue(`Removing build container ${containerName}`, async () => {
+          await $`docker rm -f ${containerName}`.quiet().nothrow();
+        });
+    } else {
+      await $`docker rm -f ${containerName}`.quiet().nothrow();
+    }
   }
 }
 
@@ -1037,12 +1086,17 @@ export const ensureDockerSandbox = async (): Promise<void> => {
  */
 async function tryPullImage(
   imageTag: string,
-  onProgress?: (layers: PullLayer[]) => void,
+  options?: {
+    onProgress?: (layers: PullLayer[]) => void;
+    signal?: AbortSignal;
+  },
 ): Promise<boolean> {
+  throwIfAborted(options?.signal);
   const proc = Bun.spawn(['docker', 'pull', imageTag], {
     stdout: 'pipe',
     stderr: 'ignore',
   });
+  const cleanupAbort = onAbort(options?.signal, () => proc.kill());
 
   const layers = new Map<string, PullLayerState>();
   const reader = proc.stdout.getReader();
@@ -1076,7 +1130,7 @@ async function tryPullImage(
         } else if (status.startsWith('Already exists')) {
           layers.set(id, 'exists');
         }
-        onProgress?.(
+        options?.onProgress?.(
           [...layers.entries()].map(([layerId, state]) => ({
             id: layerId,
             state,
@@ -1086,11 +1140,16 @@ async function tryPullImage(
     }
   }
 
-  const exitCode = await proc.exited;
-  if (exitCode === 0) {
-    invalidateImageExistsCache(imageTag);
+  try {
+    const exitCode = await proc.exited;
+    throwIfAborted(options?.signal);
+    if (exitCode === 0) {
+      invalidateImageExistsCache(imageTag);
+    }
+    return exitCode === 0;
+  } finally {
+    cleanupAbort();
   }
-  return exitCode === 0;
 }
 
 type ProgressCallback = (message: string, layers?: PullLayer[]) => void;
@@ -1101,13 +1160,16 @@ type ProgressCallback = (message: string, layers?: PullLayer[]) => void;
  */
 async function pullGhcrImageForCache(
   onProgress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   const ghcrTag = getGhcrBaseTag();
   onProgress?.('Pulling sandbox image for cache');
   if (
-    await tryPullImage(ghcrTag, (layers) =>
-      onProgress?.('Pulling sandbox image for cache', layers),
-    )
+    await tryPullImage(ghcrTag, {
+      signal,
+      onProgress: (layers) =>
+        onProgress?.('Pulling sandbox image for cache', layers),
+    })
   ) {
     return ghcrTag;
   }
@@ -1122,7 +1184,9 @@ async function buildDockerImage(
   imageName: string,
   dockerfileContent: string,
   cacheFromImage?: string | null,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   const proc = Bun.spawn(
     [
       'docker',
@@ -1139,13 +1203,19 @@ async function buildDockerImage(
       stderr: 'ignore',
     },
   );
+  const cleanupAbort = onAbort(signal, () => proc.kill());
 
-  const exitCode = await proc.exited;
+  try {
+    const exitCode = await proc.exited;
+    throwIfAborted(signal);
 
-  if (exitCode !== 0) {
-    throw new Error(`Docker build failed with exit code ${exitCode}`);
+    if (exitCode !== 0) {
+      throw new Error(`Docker build failed with exit code ${exitCode}`);
+    }
+    invalidateImageExistsCache(imageName);
+  } finally {
+    cleanupAbort();
   }
-  invalidateImageExistsCache(imageName);
 }
 
 export type PullLayerState = 'waiting' | 'downloading' | 'complete' | 'exists';
@@ -1166,6 +1236,7 @@ export interface EnsureDockerImageOptions {
   onProgress?: (progress: ImageBuildProgress) => void;
   /** Skip existence checks and force a rebuild */
   force?: boolean;
+  signal?: AbortSignal;
 }
 
 /**
@@ -1180,7 +1251,8 @@ export interface EnsureDockerImageOptions {
 export async function ensureDockerImage(
   options: EnsureDockerImageOptions = {},
 ): Promise<string> {
-  const { onProgress } = options;
+  const { onProgress, signal } = options;
+  throwIfAborted(signal);
   const imageConfig = await resolveSandboxImage();
   const config = await readConfig();
 
@@ -1199,8 +1271,10 @@ export async function ensureDockerImage(
       type: 'pulling-cache',
       message: 'Pulling sandbox image for cache',
     });
-    const cacheImage = await pullGhcrImageForCache((message, layers) =>
-      onProgress?.({ type: 'pulling-cache', message, layers }),
+    const cacheImage = await pullGhcrImageForCache(
+      (message, layers) =>
+        onProgress?.({ type: 'pulling-cache', message, layers }),
+      signal,
     );
 
     // Build from Dockerfile
@@ -1215,6 +1289,7 @@ export async function ensureDockerImage(
       imageConfig.image,
       imageConfig.dockerfileContent,
       cacheImage,
+      signal,
     );
 
     onProgress?.({ type: 'done' });
@@ -1233,13 +1308,15 @@ export async function ensureDockerImage(
       type: 'pulling',
       message: `Pulling ${imageConfig.image}`,
     });
-    const pulled = await tryPullImage(imageConfig.image, (layers) =>
-      onProgress?.({
-        type: 'pulling',
-        message: `Pulling ${imageConfig.image}`,
-        layers,
-      }),
-    );
+    const pulled = await tryPullImage(imageConfig.image, {
+      signal,
+      onProgress: (layers) =>
+        onProgress?.({
+          type: 'pulling',
+          message: `Pulling ${imageConfig.image}`,
+          layers,
+        }),
+    });
     if (!pulled) {
       throw new Error(
         `Failed to pull configured sandbox image: ${imageConfig.image}`,
@@ -1264,13 +1341,15 @@ export async function ensureDockerImage(
     message: 'Pulling sandbox image',
   });
   if (
-    await tryPullImage(imageConfig.image, (layers) =>
-      onProgress?.({
-        type: 'pulling',
-        message: 'Pulling sandbox image',
-        layers,
-      }),
-    )
+    await tryPullImage(imageConfig.image, {
+      signal,
+      onProgress: (layers) =>
+        onProgress?.({
+          type: 'pulling',
+          message: 'Pulling sandbox image',
+          layers,
+        }),
+    })
   ) {
     onProgress?.({ type: 'done' });
     return imageConfig.image;
@@ -1287,7 +1366,7 @@ export async function ensureDockerImage(
     type: 'building',
     message: 'Building sandbox docker image',
   });
-  await buildDockerImage(info.image, info.content);
+  await buildDockerImage(info.image, info.content, undefined, signal);
   onProgress?.({ type: 'done' });
   return info.image;
 }
@@ -1315,6 +1394,7 @@ export async function ensureDockerImageForAgent(
   agent: AgentType,
   options: EnsureDockerImageOptions = {},
 ): Promise<string> {
+  throwIfAborted(options.signal);
   const existing = agentImageInFlight.get(agent);
   if (existing) {
     // Subscribe the new caller's progress callback to the in-flight build
@@ -1400,6 +1480,7 @@ export interface StartContainerOptions {
   agentMode?: AgentMode;
   /** Pre-resolved Docker image to use (e.g., agent overlay image). If not set, uses the default resolved image. */
   dockerImage?: string;
+  signal?: AbortSignal;
 }
 
 // ============================================================================
@@ -2144,6 +2225,7 @@ export async function startContainer(
     agentArgs,
     agentMode,
     dockerImage,
+    signal,
   } = options;
 
   const oxEnvPath = '.ox/.env';
@@ -2329,8 +2411,12 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
       labels: oxLabels,
       privileged: privilege.privileged,
       rootExecBeforeStart,
+      signal,
     });
     await result.exited;
+    if (signal?.aborted) {
+      throw new AbortError();
+    }
     return containerName;
   } catch (error) {
     log.error({ error }, 'Error starting container');

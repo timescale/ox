@@ -7,6 +7,7 @@ import type {
   ClaudeOAuthAccount,
 } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
+import { AbortError } from '../utils/abort.ts';
 import { colorEnvArgs } from '../utils/shell';
 import { readCache, writeCache } from './cache';
 import { ensureDockerImageForAgent } from './docker';
@@ -426,6 +427,7 @@ export const runClaudeInDocker = async ({
   shouldThrow = true,
   files = [],
   labels,
+  signal,
 }: RunInDockerOptionsBase): Promise<
   RunInDockerResult & { credsCaptured: Promise<boolean> }
 > => {
@@ -433,7 +435,7 @@ export const runClaudeInDocker = async ({
 
   // Ensure the claude agent overlay image is available when no explicit image is provided
   const resolvedImage =
-    dockerImage ?? (await ensureDockerImageForAgent('claude'));
+    dockerImage ?? (await ensureDockerImageForAgent('claude', { signal }));
 
   const effectiveDockerArgs = [...colorEnvArgs, ...dockerArgs];
 
@@ -446,6 +448,7 @@ export const runClaudeInDocker = async ({
     shouldThrow,
     files: [...configFiles, ...files],
     labels,
+    signal,
   });
 
   const deferredCredsCaptured = new Deferred<boolean>();
@@ -481,12 +484,17 @@ export const runClaudeInDocker = async ({
 
 export const checkClaudeCredentials = async (
   model = 'haiku',
+  signal?: AbortSignal,
 ): Promise<boolean> => {
   const statusProc = await runClaudeInDocker({
     cmdArgs: ['auth', 'status'],
     shouldThrow: false,
+    signal,
   });
   const statusExitCode = await statusProc.exited;
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
   const status = statusProc.json() as { loggedIn: boolean } | null;
   const validStatus = statusExitCode === 0 && status?.loggedIn;
   if (!validStatus) {
@@ -500,8 +508,12 @@ export const checkClaudeCredentials = async (
   const testProc = await runClaudeInDocker({
     cmdArgs: ['--model', model, '-p', 'just output `true`, and nothing else'],
     shouldThrow: false,
+    signal,
   });
   const exitCode = await testProc.exited;
+  if (signal?.aborted) {
+    throw new AbortError();
+  }
   const valid = exitCode === 0;
   if (valid) {
     log.debug('checkClaudeCredentials (valid)');
