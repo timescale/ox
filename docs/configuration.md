@@ -168,7 +168,7 @@ Files are loaded in order of increasing specificity. If the same variable is def
 2. **Project-level files** (highest)
 
 Within each level, the precedence is:
-`generic` → `provider-specific` → `agent-specific` → `provider+agent-specific`
+`generic` → `group-scoped (*.agents)` → `provider-specific` → `provider+group-scoped (*.provider.agents)` → `agent-specific` → `provider+agent-specific`
 
 ### File Format
 

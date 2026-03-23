@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { nanoid } from 'nanoid';
-import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles';
+import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import { resolveSandboxImage } from './docker';
 import { captureGhCredentialsFromContainer, checkGhCredentials } from './gh';
 import { log } from './logger';
