@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { YAML } from 'bun';
 import { Deferred } from '../types/deferred';
 import { AbortError } from '../utils/abort.ts';
+import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, setOxSecret } from './keyring';
 import { log } from './logger';
@@ -231,8 +232,15 @@ export const runGhInDocker = async ({
 > => {
   const configFiles = await getGhConfigFiles({ saveCredentials });
 
+  const envFilePaths = await getExistingEnvFilePaths({
+    provider: 'docker',
+    agent: undefined,
+  });
+  const envFileArgs = toEnvFileArgs(envFilePaths);
+  log.trace({ envFilePaths }, 'gh container env files');
+
   const result = await runInDocker({
-    dockerArgs,
+    dockerArgs: [...envFileArgs, ...dockerArgs],
     cmdArgs,
     cmdName: 'gh',
     dockerImage,

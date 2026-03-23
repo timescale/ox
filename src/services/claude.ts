@@ -8,6 +8,7 @@ import type {
 } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { AbortError } from '../utils/abort.ts';
+import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import { colorEnvArgs } from '../utils/shell';
 import { readCache, writeCache } from './cache';
 import { ensureDockerImageForAgent } from './docker';
@@ -437,7 +438,14 @@ export const runClaudeInDocker = async ({
   const resolvedImage =
     dockerImage ?? (await ensureDockerImageForAgent('claude', { signal }));
 
-  const effectiveDockerArgs = [...colorEnvArgs, ...dockerArgs];
+  const envFilePaths = await getExistingEnvFilePaths({
+    provider: 'docker',
+    agent: 'claude',
+  });
+  const envFileArgs = toEnvFileArgs(envFilePaths);
+  log.trace({ envFilePaths }, 'Claude container env files');
+
+  const effectiveDockerArgs = [...colorEnvArgs, ...envFileArgs, ...dockerArgs];
 
   const result = await runInDocker({
     dockerArgs: effectiveDockerArgs,

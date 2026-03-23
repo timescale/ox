@@ -3,6 +3,7 @@ import { file } from 'bun';
 import type { AuthEntry, OpencodeAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { AbortError } from '../utils/abort.ts';
+import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import { colorEnvArgs } from '../utils/shell.ts';
 import { getXdgData, getXdgState } from '../utils/xdg.ts';
 import { readCache, writeCache } from './cache';
@@ -258,7 +259,14 @@ export const runOpencodeInDocker = async ({
   const resolvedImage =
     dockerImage ?? (await ensureDockerImageForAgent('opencode', { signal }));
 
-  const effectiveDockerArgs = [...dockerArgs, ...colorEnvArgs];
+  const envFilePaths = await getExistingEnvFilePaths({
+    provider: 'docker',
+    agent: 'opencode',
+  });
+  const envFileArgs = toEnvFileArgs(envFilePaths);
+  log.trace({ envFilePaths }, 'OpenCode container env files');
+
+  const effectiveDockerArgs = [...dockerArgs, ...envFileArgs, ...colorEnvArgs];
 
   const result = await runInDocker({
     dockerArgs: effectiveDockerArgs,

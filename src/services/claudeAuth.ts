@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { stripVTControlCharacters } from 'node:util';
 import { $ } from 'bun';
 import { nanoid } from 'nanoid';
+import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import { baseConfig, captureClaudeCredentialsFromContainer } from './claude';
 import { ensureDockerImageForAgent } from './docker';
 import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
@@ -82,8 +83,16 @@ export async function startClaudeAuth(): Promise<ClaudeAuthProcess | null> {
   // can inject the .claude.json config file before claude /login starts.
   // This pre-populates hasCompletedOnboarding (skips theme selection, etc.)
   log.debug('Creating detached auth container');
+
+  const envFilePaths = await getExistingEnvFilePaths({
+    provider: 'docker',
+    agent: 'claude',
+  });
+  const envFileArgs = toEnvFileArgs(envFilePaths);
+  log.trace({ envFilePaths }, 'Claude auth container env files');
+
   const createResult =
-    await $`docker run -d -it --rm --entrypoint /.ox/signalEntrypoint.sh --name ${containerName} ${agentImage} claude /login`
+    await $`docker run -d -it --rm ${envFileArgs} --entrypoint /.ox/signalEntrypoint.sh --name ${containerName} ${agentImage} claude /login`
       .quiet()
       .nothrow();
   if (createResult.exitCode) {
