@@ -109,23 +109,19 @@ TOKEN=abc=def=ghi
     });
   });
 
-  test('strips matching surrounding quotes from values', () => {
+  test('preserves surrounding quotes to match Docker --env-file behavior', () => {
     const content = `
 DOUBLE="hello world"
 SINGLE='hello world'
-MISMATCHED="hello world'
-INNER=has "quotes" inside
 EMPTY_DOUBLE=""
 EMPTY_SINGLE=''
 `;
 
     expect(parseEnvFile(content)).toEqual({
-      DOUBLE: 'hello world',
-      SINGLE: 'hello world',
-      MISMATCHED: `"hello world'`,
-      INNER: 'has "quotes" inside',
-      EMPTY_DOUBLE: '',
-      EMPTY_SINGLE: '',
+      DOUBLE: '"hello world"',
+      SINGLE: "'hello world'",
+      EMPTY_DOUBLE: '""',
+      EMPTY_SINGLE: "''",
     });
   });
 });

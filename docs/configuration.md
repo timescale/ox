@@ -177,10 +177,10 @@ Ox uses the standard `.env` format:
 ```env
 # Comments start with #
 KEY=value
-QUOTED="value with spaces"
-SINGLE_QUOTED='also works'
+KEY_WITH_SPACES=value with spaces
 EMPTY_KEY=
-# No variable expansion - $VAR stays literal
+# Quotes are NOT stripped — they become part of the value (matches Docker --env-file)
+# No variable expansion — $VAR stays literal
 ```
 
 ### Example Use Cases

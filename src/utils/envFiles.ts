@@ -70,16 +70,7 @@ export function parseEnvFile(content: string): Record<string, string> {
       continue;
     }
 
-    let value = line.slice(separator + 1).trim();
-    // Strip matching surrounding quotes (single or double)
-    if (
-      value.length >= 2 &&
-      ((value[0] === '"' && value[value.length - 1] === '"') ||
-        (value[0] === "'" && value[value.length - 1] === "'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    parsed[key] = value;
+    parsed[key] = line.slice(separator + 1).trim();
   }
 
   return parsed;

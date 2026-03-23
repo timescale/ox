@@ -885,12 +885,21 @@ export class CloudSandboxProvider implements SandboxProvider {
     throwIfAborted(options.signal);
 
     onProgress?.('Starting cloud sandbox');
+    const shellEnvVars = await loadEnvVars({
+      provider: 'cloud',
+      agent: undefined,
+    });
+    log.trace(
+      { keys: Object.keys(shellEnvVars) },
+      'Loaded env vars for cloud shell',
+    );
     const sandbox = await client.createSandbox({
       region: region as 'ord' | 'ams',
       root: shellVolume.slug,
       timeout: '30m',
       memory: '2GiB',
       labels: { 'ox.managed': 'true' },
+      env: shellEnvVars,
     });
     throwIfAborted(options.signal);
 
