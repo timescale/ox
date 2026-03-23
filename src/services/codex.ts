@@ -8,6 +8,7 @@ import { file } from 'bun';
 import type { CodexAuthJson } from '../types/agentConfig';
 import { Deferred } from '../types/deferred';
 import { AbortError } from '../utils/abort.ts';
+import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import { colorEnvArgs } from '../utils/shell';
 import { readCache, writeCache } from './cache';
 import { readConfigValue } from './config';
@@ -246,7 +247,14 @@ export const runCodexInDocker = async ({
   const resolvedImage =
     dockerImage ?? (await ensureDockerImageForAgent('codex', { signal }));
 
-  const effectiveDockerArgs = [...colorEnvArgs, ...dockerArgs];
+  const envFilePaths = await getExistingEnvFilePaths({
+    provider: 'docker',
+    agent: 'codex',
+  });
+  const envFileArgs = toEnvFileArgs(envFilePaths);
+  log.trace({ envFilePaths }, 'Codex container env files');
+
+  const effectiveDockerArgs = [...colorEnvArgs, ...envFileArgs, ...dockerArgs];
 
   const result = await runInDocker({
     dockerArgs: effectiveDockerArgs,

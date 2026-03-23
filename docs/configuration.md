@@ -136,14 +136,58 @@ ox config reset --global # delete user config
 
 ## Environment Variables
 
-Place a `.ox/.env` file in your project root to pass environment variables into the sandbox:
+Ox supports hierarchical `.env` files that are automatically loaded into your sandbox containers. These files are organized by scope (user vs project), provider (docker vs cloud), and agent type. More specific files override less specific ones.
+
+### File Locations
+
+User-level files apply to all projects and are located in `~/.config/ox/`:
+
+- `.env` - all containers
+- `.env.agents` - all agent containers
+- `.env.docker` - all Docker containers
+- `.env.cloud` - all Cloud containers
+- `.env.docker.agents` - Docker agent containers
+- `.env.cloud.agents` - Cloud agent containers
+- `.env.claude` - Claude agent containers
+- `.env.opencode` - OpenCode agent containers
+- `.env.codex` - Codex agent containers
+- `.env.docker.claude` - Docker Claude containers
+- `.env.docker.opencode` - Docker OpenCode containers
+- `.env.docker.codex` - Docker Codex containers
+- `.env.cloud.claude` - Cloud Claude containers
+- `.env.cloud.opencode` - Cloud OpenCode containers
+- `.env.cloud.codex` - Cloud Codex containers
+
+Project-level files are located in the `.ox/` directory of your project and apply only to that project. They follow the same naming pattern as user-level files (e.g., `.ox/.env`, `.ox/.env.docker`).
+
+### Precedence
+
+Files are loaded in order of increasing specificity. If the same variable is defined in multiple files, the one with the highest precedence wins:
+
+1. **User-level files** (lowest)
+2. **Project-level files** (highest)
+
+Within each level, the precedence is:
+`generic` → `group-scoped (*.agents)` → `provider-specific` → `provider+group-scoped (*.provider.agents)` → `agent-specific` → `provider+agent-specific`
+
+### File Format
+
+Ox uses the standard `.env` format:
 
 ```env
-DATABASE_URL=postgres://localhost:5432/mydb
-API_KEY=your-key-here
+# Comments start with #
+KEY=value
+KEY_WITH_SPACES=value with spaces
+EMPTY_KEY=
+# Quotes are NOT stripped — they become part of the value (matches Docker --env-file)
+# No variable expansion — $VAR stays literal
 ```
 
-These variables are injected into the sandbox container at startup and are available to both the init script and the agent.
+### Example Use Cases
+
+- **Global API keys**: Set keys for all projects in `~/.config/ox/.env`.
+- **Docker-specific settings**: Use `.ox/.env.docker` for settings that only apply when running locally.
+- **Agent-specific variables**: Use `.ox/.env.claude` to pass environment variables only to Claude agent sessions.
 
 ## Build-Time vs Run-Time Setup
 

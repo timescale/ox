@@ -33,6 +33,7 @@ import {
   throwIfAborted,
 } from '../utils/abort.ts';
 import { toVolumeArgs } from '../utils/docker.ts';
+import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import {
   CLI_SUBPROCESS_OPTS,
   colorEnvArgs,
@@ -2230,14 +2231,6 @@ export async function startContainer(
     signal,
   } = options;
 
-  const oxEnvPath = '.ox/.env';
-  const oxEnvFile = Bun.file(oxEnvPath);
-
-  // Create empty .ox/.env if it doesn't exist
-  if (!(await oxEnvFile.exists())) {
-    await Bun.write(oxEnvPath, '');
-  }
-
   const containerName = `ox-${branchName}`;
 
   // Build env var arguments for docker run
@@ -2282,6 +2275,13 @@ export async function startContainer(
   for (const [key, value] of Object.entries(envVars ?? {})) {
     envArgs.push('-e', `${key}=${value}`);
   }
+
+  const envFilePaths = await getExistingEnvFilePaths({
+    provider: 'docker',
+    agent,
+  });
+  log.trace({ envFilePaths }, 'Using env files');
+  const envFileArgs = toEnvFileArgs(envFilePaths);
 
   // Read config for overlay mounts and init script
   const config = await readConfig();
@@ -2393,13 +2393,7 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
   try {
     const result = await runInDocker({
       containerName,
-      dockerArgs: [
-        ...hostEnvArgs,
-        '--env-file',
-        oxEnvPath,
-        ...envArgs,
-        ...volumeArgs,
-      ],
+      dockerArgs: [...hostEnvArgs, ...envFileArgs, ...envArgs, ...volumeArgs],
       cmdName: 'bash',
       cmdArgs: ['-c', startupScript],
       dockerImage,
@@ -2442,14 +2436,6 @@ export async function startShellContainer(
   options: StartShellContainerOptions,
 ): Promise<void> {
   const { repoInfo, mountDir, isGitRepo = true } = options;
-
-  const oxEnvPath = '.ox/.env';
-  const oxEnvFile = Bun.file(oxEnvPath);
-
-  // Create empty .ox/.env if it doesn't exist
-  if (!(await oxEnvFile.exists())) {
-    await Bun.write(oxEnvPath, '');
-  }
 
   const shellSuffix = nanoid(6).toLowerCase();
   const containerName = `ox-shell-${shellSuffix}`;
@@ -2543,10 +2529,17 @@ exec bash
     noGit: !isGitRepo || undefined,
   });
 
+  const shellEnvFilePaths = await getExistingEnvFilePaths({
+    provider: 'docker',
+    agent: undefined,
+  });
+  const shellEnvFileArgs = toEnvFileArgs(shellEnvFilePaths);
+  log.trace({ envFilePaths: shellEnvFilePaths }, 'Shell container env files');
+
   await runInDocker({
     containerName,
     interactive: true,
-    dockerArgs: [...hostEnvArgs, '--env-file', oxEnvPath, ...volumeArgs],
+    dockerArgs: [...hostEnvArgs, ...shellEnvFileArgs, ...volumeArgs],
     cmdName: 'bash',
     cmdArgs: ['-c', startupScript],
     files,

@@ -6,6 +6,7 @@ import type { Database } from 'bun:sqlite';
 import type { Sandbox } from '@deno/sandbox';
 import { runCloudSetupScreen } from '../../components/CloudSetup.tsx';
 import { throwIfAborted } from '../../utils/abort.ts';
+import { loadEnvVars } from '../../utils/envFiles.ts';
 import {
   enterSubprocessScreen,
   resetTerminal,
@@ -723,7 +724,15 @@ export class CloudSandboxProvider implements SandboxProvider {
     throwIfAborted(options.signal);
 
     // 2. Build env vars
-    const env: Record<string, string> = { ...options.envVars };
+    const fileEnvVars = await loadEnvVars({
+      provider: 'cloud',
+      agent: options.agent,
+    });
+    log.trace({ keys: Object.keys(fileEnvVars) }, 'Loaded env vars from files');
+    const env: Record<string, string> = {
+      ...fileEnvVars,
+      ...options.envVars,
+    };
 
     // 3. Boot sandbox from the session volume
     onProgress?.('Booting sandbox');
@@ -876,12 +885,21 @@ export class CloudSandboxProvider implements SandboxProvider {
     throwIfAborted(options.signal);
 
     onProgress?.('Starting cloud sandbox');
+    const shellEnvVars = await loadEnvVars({
+      provider: 'cloud',
+      agent: undefined,
+    });
+    log.trace(
+      { keys: Object.keys(shellEnvVars) },
+      'Loaded env vars for cloud shell',
+    );
     const sandbox = await client.createSandbox({
       region: region as 'ord' | 'ams',
       root: shellVolume.slug,
       timeout: '30m',
       memory: '2GiB',
       labels: { 'ox.managed': 'true' },
+      env: shellEnvVars,
     });
     throwIfAborted(options.signal);
 
@@ -984,6 +1002,11 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // 2. Boot new sandbox
     onProgress?.('Booting sandbox');
+    const fileEnvVars = await loadEnvVars({
+      provider: 'cloud',
+      agent: existing.agent as AgentType,
+    });
+    log.trace({ keys: Object.keys(fileEnvVars) }, 'Loaded env vars from files');
     let sandbox: ResolvedSandbox;
     try {
       sandbox = await client.createSandbox({
@@ -997,6 +1020,7 @@ export class CloudSandboxProvider implements SandboxProvider {
           'ox.agent': existing.agent,
           'ox.repo': existing.repo,
         },
+        env: fileEnvVars,
       });
     } catch (err) {
       if (createdNewVolume) {

@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { nanoid } from 'nanoid';
+import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import { resolveSandboxImage } from './docker';
 import { captureGhCredentialsFromContainer, checkGhCredentials } from './gh';
 import { log } from './logger';
@@ -54,11 +55,20 @@ export async function startContainerGhAuth(): Promise<GhAuthProcess | null> {
   const sandbox = await resolveSandboxImage();
   const containerName = `ox-gh-auth-${nanoid()}`;
 
+  const envFilePaths = await getExistingEnvFilePaths({
+    provider: 'docker',
+    agent: undefined,
+  });
+  const envFileArgs = toEnvFileArgs(envFilePaths);
+
+  log.trace({ envFilePaths }, 'GitHub auth container env files');
+
   const proc = Bun.spawn(
     [
       'docker',
       'run',
       '-i',
+      ...envFileArgs,
       '--name',
       containerName,
       sandbox.image,
