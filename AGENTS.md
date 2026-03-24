@@ -256,6 +256,10 @@ When making user-facing changes, update the relevant documentation:
 
 Cross-link related pages instead of duplicating information. Keep docs concise.
 
+## Plans and Specs
+
+Save implementation plans and design specs to `.opencode/plans/`.
+
 ## CLI Framework
 
 Uses `commander` for argument parsing. Commands are in `src/commands/`.

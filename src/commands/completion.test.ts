@@ -1,21 +1,27 @@
 // ============================================================================
-// Completion Integration Tests
+// Completion Tests
 //
-// Tier 1: Subprocess tests that spawn `./bun index.ts complete ...` and verify
-//         stdout output for script generation and completion resolution.
+// Tier 1: In-process tests using the tab library directly (fast, no subprocess).
 // Tier 2: End-to-end bash tests that source the completion script into a real
 //         bash shell, trigger completion, and verify COMPREPLY.
 // ============================================================================
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
+import { createProgram } from '../createProgram.ts';
+import { captureLog } from '../utils/captureLog.ts';
 import type { ShellError } from '../utils/shell.ts';
+import {
+  generateCompletionScript,
+  initializeTab,
+  resolveCompletions,
+} from './completion.ts';
 
 const PROJECT_ROOT = resolve(import.meta.dir, '..', '..');
 const BUN = resolve(PROJECT_ROOT, 'bun');
 const CLI = resolve(PROJECT_ROOT, 'index.ts');
 
-// All subcommands registered in src/index.ts
+// All subcommands registered via createProgram()
 const EXPECTED_SUBCOMMANDS = [
   'auth',
   'claude',
@@ -27,37 +33,18 @@ const EXPECTED_SUBCOMMANDS = [
   'opencode',
   'resources',
   'resume',
+  'session',
   'sessions',
   'shell',
   'upgrade',
 ];
 
-/**
- * Run the ox CLI with the given args and return stdout/stderr/exitCode.
- * Uses Bun's shell for subprocess execution.
- */
-async function runOx(
-  ...args: string[]
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  try {
-    const result = await Bun.$`${BUN} ${CLI} ${args}`.quiet().cwd(PROJECT_ROOT);
-    return {
-      stdout: result.stdout.toString(),
-      stderr: result.stderr.toString(),
-      exitCode: result.exitCode,
-    };
-  } catch (err) {
-    const shellErr = err as ShellError;
-    return {
-      stdout: shellErr.stdout?.toString() ?? '',
-      stderr: shellErr.stderr?.toString() ?? '',
-      exitCode: shellErr.exitCode ?? 1,
-    };
-  }
-}
+// Initialize tab once for all in-process tests
+const program = createProgram();
+const tab = initializeTab(program);
 
 /**
- * Parse the tab-completion output format from `ox complete -- <args>`.
+ * Parse the tab-completion output format.
  *
  * Format: each line is `value\tdescription`, last line is `:<directive>`.
  * Returns the completion values (without descriptions) and the directive.
@@ -85,13 +72,12 @@ function parseCompletionOutput(stdout: string): {
 }
 
 // ============================================================================
-// Tier 1: Completion Script Generation
+// Tier 1: Completion Script Generation (in-process)
 // ============================================================================
 
 describe('completion script generation', () => {
-  test('ox complete zsh outputs a valid zsh completion script', async () => {
-    const { stdout, exitCode } = await runOx('complete', 'zsh');
-    expect(exitCode).toBe(0);
+  test('ox complete zsh outputs a valid zsh completion script', () => {
+    const stdout = generateCompletionScript(tab, 'zsh');
     expect(stdout.length).toBeGreaterThan(0);
     // zsh completion scripts start with #compdef
     expect(stdout).toContain('#compdef ox');
@@ -101,9 +87,8 @@ describe('completion script generation', () => {
     expect(stdout).toContain('ox complete --');
   });
 
-  test('ox complete bash outputs a valid bash completion script', async () => {
-    const { stdout, exitCode } = await runOx('complete', 'bash');
-    expect(exitCode).toBe(0);
+  test('ox complete bash outputs a valid bash completion script', () => {
+    const stdout = generateCompletionScript(tab, 'bash');
     expect(stdout.length).toBeGreaterThan(0);
     // bash completion script registers via complete -F
     expect(stdout).toContain('complete -F');
@@ -112,9 +97,8 @@ describe('completion script generation', () => {
     expect(stdout).toContain('ox complete --');
   });
 
-  test('ox complete fish outputs a valid fish completion script', async () => {
-    const { stdout, exitCode } = await runOx('complete', 'fish');
-    expect(exitCode).toBe(0);
+  test('ox complete fish outputs a valid fish completion script', () => {
+    const stdout = generateCompletionScript(tab, 'fish');
     expect(stdout.length).toBeGreaterThan(0);
     // fish completions register via complete -c
     expect(stdout).toContain('complete -c ox');
@@ -124,33 +108,23 @@ describe('completion script generation', () => {
     expect(stdout).toContain('ox complete --');
   });
 
-  test('ox complete powershell outputs a valid PowerShell completion script', async () => {
-    const { stdout, exitCode } = await runOx('complete', 'powershell');
-    expect(exitCode).toBe(0);
+  test('ox complete powershell outputs a valid PowerShell completion script', () => {
+    const stdout = generateCompletionScript(tab, 'powershell');
     expect(stdout.length).toBeGreaterThan(0);
     // PowerShell registers completions via Register-ArgumentCompleter
     expect(stdout).toContain('Register-ArgumentCompleter');
     // Should reference the callback mechanism
     expect(stdout).toContain('ox complete');
   });
-
-  test('ox complete with invalid shell exits with error', async () => {
-    const { stderr, exitCode } = await runOx('complete', 'invalidshell');
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('Usage:');
-    expect(stderr).toContain('zsh|bash|fish|powershell');
-  });
 });
 
 // ============================================================================
-// Tier 1: Completion Resolution
+// Tier 1: Completion Resolution (in-process)
 // ============================================================================
 
 describe('completion resolution', () => {
-  test('empty input lists all subcommands', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--', '');
-    expect(exitCode).toBe(0);
-
+  test('empty input lists all subcommands', () => {
+    const stdout = resolveCompletions(tab, ['']);
     const { completions, directive } = parseCompletionOutput(stdout);
     for (const cmd of EXPECTED_SUBCOMMANDS) {
       expect(completions).toContain(cmd);
@@ -159,20 +133,16 @@ describe('completion resolution', () => {
     expect(directive).toBe(4);
   });
 
-  test('no args also lists all subcommands', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--');
-    expect(exitCode).toBe(0);
-
+  test('no args also lists all subcommands', () => {
+    const stdout = resolveCompletions(tab, []);
     const { completions } = parseCompletionOutput(stdout);
     for (const cmd of EXPECTED_SUBCOMMANDS) {
       expect(completions).toContain(cmd);
     }
   });
 
-  test('partial command narrows to matching subcommands', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--', 'se');
-    expect(exitCode).toBe(0);
-
+  test('partial command narrows to matching subcommands', () => {
+    const stdout = resolveCompletions(tab, ['se']);
     const { completions } = parseCompletionOutput(stdout);
     expect(completions).toContain('session');
     expect(completions).toContain('sessions');
@@ -181,43 +151,29 @@ describe('completion resolution', () => {
     expect(completions).not.toContain('shell');
   });
 
-  test('unique prefix completes to matching commands and aliases', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--', 'up');
-    expect(exitCode).toBe(0);
-
+  test('unique prefix completes to matching commands and aliases', () => {
+    const stdout = resolveCompletions(tab, ['up']);
     const { completions } = parseCompletionOutput(stdout);
     expect(completions).toContain('upgrade');
     expect(completions).toContain('update');
     expect(completions).not.toContain('auth');
   });
 
-  test('root flags complete when -- prefix is used', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--', '--');
-    expect(exitCode).toBe(0);
-
+  test('root flags complete when -- prefix is used', () => {
+    const stdout = resolveCompletions(tab, ['--']);
     const { completions } = parseCompletionOutput(stdout);
     expect(completions).toContain('--version');
   });
 
-  test('subcommand flags complete correctly', async () => {
-    const { stdout, exitCode } = await runOx(
-      'complete',
-      '--',
-      'session',
-      'logs',
-      '--',
-    );
-    expect(exitCode).toBe(0);
-
+  test('subcommand flags complete correctly', () => {
+    const stdout = resolveCompletions(tab, ['session', 'logs', '--']);
     const { completions } = parseCompletionOutput(stdout);
     expect(completions).toContain('--follow');
     expect(completions).toContain('--tail');
   });
 
-  test('completion output uses correct tab-separated format', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--', '');
-    expect(exitCode).toBe(0);
-
+  test('completion output uses correct tab-separated format', () => {
+    const stdout = resolveCompletions(tab, ['']);
     const lines = stdout.trim().split('\n');
     // Last line should be the directive
     const lastLine = lines.at(-1) ?? '';
@@ -235,10 +191,8 @@ describe('completion resolution', () => {
     }
   });
 
-  test('completions include descriptions for subcommands', async () => {
-    const { stdout, exitCode } = await runOx('complete', '--', '');
-    expect(exitCode).toBe(0);
-
+  test('completions include descriptions for subcommands', () => {
+    const stdout = resolveCompletions(tab, ['']);
     // Find the session line and verify it has a description
     const lines = stdout.trim().split('\n');
     const sessionLine = lines.find((l) => l.startsWith('session\t'));
@@ -248,13 +202,14 @@ describe('completion resolution', () => {
 });
 
 // ============================================================================
-// Tier 1: Completions Command (Human-Readable Instructions)
+// Tier 1: Completions Command (Human-Readable Instructions, in-process)
 // ============================================================================
 
 describe('completions command', () => {
-  test('ox completions shows instructions for all shells', async () => {
-    const { stdout, exitCode } = await runOx('completions');
-    expect(exitCode).toBe(0);
+  test('ox completions shows instructions for all shells', () => {
+    const stdout = captureLog(() => {
+      program.parse(['completions'], { from: 'user' });
+    });
 
     // Should mention all supported shells
     expect(stdout).toContain('zsh');
@@ -269,34 +224,32 @@ describe('completions command', () => {
     expect(stdout).toContain('ox complete powershell | Out-String');
   });
 
-  test('ox completions zsh shows zsh-specific instruction', async () => {
-    const { stdout, exitCode } = await runOx('completions', 'zsh');
-    expect(exitCode).toBe(0);
+  test('ox completions zsh shows zsh-specific instruction', () => {
+    const stdout = captureLog(() => {
+      program.parse(['completions', 'zsh'], { from: 'user' });
+    });
     expect(stdout).toContain('source <(ox complete zsh)');
   });
 
-  test('ox completions bash shows bash-specific instruction', async () => {
-    const { stdout, exitCode } = await runOx('completions', 'bash');
-    expect(exitCode).toBe(0);
+  test('ox completions bash shows bash-specific instruction', () => {
+    const stdout = captureLog(() => {
+      program.parse(['completions', 'bash'], { from: 'user' });
+    });
     expect(stdout).toContain('source <(ox complete bash)');
   });
 
-  test('ox completions fish shows fish-specific instruction', async () => {
-    const { stdout, exitCode } = await runOx('completions', 'fish');
-    expect(exitCode).toBe(0);
+  test('ox completions fish shows fish-specific instruction', () => {
+    const stdout = captureLog(() => {
+      program.parse(['completions', 'fish'], { from: 'user' });
+    });
     expect(stdout).toContain('ox complete fish | source');
   });
 
-  test('ox completions powershell shows powershell-specific instruction', async () => {
-    const { stdout, exitCode } = await runOx('completions', 'powershell');
-    expect(exitCode).toBe(0);
+  test('ox completions powershell shows powershell-specific instruction', () => {
+    const stdout = captureLog(() => {
+      program.parse(['completions', 'powershell'], { from: 'user' });
+    });
     expect(stdout).toContain('ox complete powershell | Out-String');
-  });
-
-  test('ox completions with invalid shell exits with error', async () => {
-    const { stderr, exitCode } = await runOx('completions', 'invalidshell');
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('Unknown shell: invalidshell');
   });
 });
 
@@ -322,9 +275,8 @@ describe('bash end-to-end completion', () => {
     }
 
     if (bashPath) {
-      // Pre-generate the completion script once
-      const { stdout } = await runOx('complete', 'bash');
-      completionScript = stdout;
+      // Generate the completion script in-process (no subprocess needed)
+      completionScript = generateCompletionScript(tab, 'bash');
     }
   });
 

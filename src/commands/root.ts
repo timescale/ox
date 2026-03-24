@@ -1,5 +1,5 @@
 // ============================================================================
-// Branch Action - Creates feature branch with isolated DB fork and agent
+// Root Command - Default action and branch creation
 // ============================================================================
 
 import { YAML } from 'bun';
@@ -15,8 +15,13 @@ import { ensureOpencodeAuth } from '../services/opencode';
 import type { RequestSudoFn } from '../services/portForwarding/sudo.ts';
 import type { SandboxProviderType } from '../services/sandbox';
 import { getDefaultProvider, getSandboxProvider } from '../services/sandbox';
+import {
+  isMultiWordPrompt,
+  resolvePromptInput,
+} from '../services/stdinPrompt.ts';
 import { printErr } from '../utils/shell.ts';
 import { configAction } from './config';
+import { runSessionsTui } from './sessions';
 
 interface BranchOptions {
   serviceId?: string;
@@ -285,6 +290,115 @@ export async function branchAction(
     }
     process.exit(0);
   }
+}
+
+/**
+ * Root command action — dispatches to TUI, branch action, or help
+ * based on prompt presence and flags.
+ */
+export async function rootAction(
+  program: Command,
+  prompt: string | undefined,
+  options: BranchOptions,
+): Promise<void> {
+  let resolved: Awaited<ReturnType<typeof resolvePromptInput>>;
+  try {
+    resolved = await resolvePromptInput(prompt);
+  } catch (err) {
+    console.error(`Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  log.debug(
+    { options, prompt: resolved.prompt, promptSource: resolved.source },
+    'Root ox command invoked',
+  );
+
+  // Validate mutually exclusive flags before any routing
+  validateBranchOptions(options);
+
+  if (resolved.prompt) {
+    // Guard against accidentally running with an invalid command as prompt
+    // Prompt must contain at least one space (more than one word)
+    if (!isMultiWordPrompt(resolved.prompt)) {
+      console.error(
+        `Error: Prompt must be more than one word. Did you mean to run a command?\n`,
+      );
+      program.help();
+      return;
+    }
+
+    // --interactive: launch full TUI with auto-submit
+    if (options.interactive) {
+      // Resolve mount for TUI path
+      const repoInfo = await tryGetRepoInfo();
+      const isGitRepo = repoInfo !== null;
+      if (!isGitRepo && !options.mount) {
+        options.mount = true;
+      }
+      const mountDir =
+        options.mount === true
+          ? process.cwd()
+          : typeof options.mount === 'string'
+            ? options.mount
+            : undefined;
+
+      // -i implies --agent-mode=interactive unless explicitly set
+      const agentMode = options.agentMode ?? 'interactive';
+
+      await runSessionsTui({
+        initialView: 'starting',
+        initialPrompt: resolved.prompt,
+        initialAgent: options.agent,
+        initialModel: options.model,
+        serviceId: options.serviceId,
+        dbFork: options.dbFork,
+        mountDir,
+        isGitRepo,
+        sandboxProvider: options.provider,
+        autoSubmitAgentMode: agentMode,
+      });
+      return;
+    }
+
+    // --follow or default (detached): use non-TUI flow
+    await branchAction(resolved.prompt, options);
+    return;
+  }
+
+  // No prompt
+  if (!process.stdin.isTTY) {
+    console.error('Error: prompt is required (stdin was redirected but empty)');
+    process.exit(1);
+  }
+
+  // Reject task-start-only flags when no prompt is given — these only
+  // make sense when starting a session, not when opening the TUI.
+  const taskOnlyFlags: [string, unknown][] = [
+    ['--follow', options.follow],
+    ['--agent-mode', options.agentMode],
+    [
+      '--output',
+      program.getOptionValueSource('output') !== 'default' && options.output,
+    ],
+    ['--mount', options.mount],
+  ];
+  const setFlags = taskOnlyFlags.filter(([, v]) => v).map(([name]) => name);
+  if (setFlags.length > 0) {
+    console.error(
+      `Error: ${setFlags.join(', ')} require a prompt. Usage: ox [options] "<prompt>"`,
+    );
+    process.exit(1);
+  }
+
+  // No prompt + TTY: launch TUI session manager
+  await runSessionsTui({
+    initialView: 'prompt',
+    initialAgent: options.agent,
+    initialModel: options.model,
+    serviceId: options.serviceId,
+    dbFork: options.dbFork,
+    sandboxProvider: options.provider,
+  });
 }
 
 /**
