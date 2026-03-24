@@ -7,8 +7,8 @@ import createTabFromCommander from '@bomb.sh/tab/commander';
 import { Command, type Command as CommandType } from 'commander';
 import { listSessions, openSessionDb } from '../services/sandbox/sessionDb.ts';
 
-type Shell = 'zsh' | 'bash' | 'fish' | 'powershell';
-const SHELLS: Shell[] = ['zsh', 'bash', 'fish', 'powershell'];
+export type Shell = 'zsh' | 'bash' | 'fish' | 'powershell';
+export const SHELLS: Shell[] = ['zsh', 'bash', 'fish', 'powershell'];
 
 // ============================================================================
 // Session name completion
@@ -196,6 +196,58 @@ function registerAllAliases(program: CommandType): void {
 }
 
 // ============================================================================
+// In-process helpers (used by tests to avoid subprocess overhead)
+// ============================================================================
+
+/**
+ * Capture all console.log output produced by `fn` and return it as a string.
+ */
+function captureLog(fn: () => void): string {
+  const lines: string[] = [];
+  const origLog = console.log;
+  console.log = (...a: unknown[]) => lines.push(a.join(' '));
+  try {
+    fn();
+  } finally {
+    console.log = origLog;
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Initialize the @bomb.sh/tab library with the commander program.
+ * Sets up command completions, session completions, and aliases.
+ * Returns the tab root command for direct use in tests.
+ */
+export function initializeTab(prog: CommandType): typeof t {
+  createTabFromCommander(prog);
+  registerSessionCompletions();
+  registerAllAliases(prog);
+  return t;
+}
+
+/**
+ * Resolve completions for the given args, returning the stdout output.
+ * Used by tests to avoid spawning a subprocess.
+ */
+export function resolveCompletions(tab: typeof t, args: string[]): string {
+  return captureLog(() => {
+    tab.completions = [];
+    tab.parse(args);
+  });
+}
+
+/**
+ * Generate a shell completion script, returning it as a string.
+ * Used by tests to avoid spawning a subprocess.
+ */
+export function generateCompletionScript(tab: typeof t, shell: Shell): string {
+  return captureLog(() => {
+    tab.setup('ox', 'ox', shell);
+  });
+}
+
+// ============================================================================
 // Completion handler
 // ============================================================================
 
@@ -211,23 +263,16 @@ export function handleCompletionRequest(program: CommandType): boolean {
     return false;
   }
 
-  // Initialize tab with commander program structure
-  createTabFromCommander(program);
-
-  // Register dynamic argument completions (before aliases, so aliases copy them)
-  registerSessionCompletions();
-
-  // Register command aliases (must be after argument handlers are set up)
-  registerAllAliases(program);
+  const tab = initializeTab(program);
 
   const shell = process.argv[3];
   if (shell === '--') {
     // Parse completion request (called by shell during tab completion)
     const args = process.argv.slice(4);
-    t.parse(args);
+    tab.parse(args);
   } else if (shell && SHELLS.includes(shell as Shell)) {
     // Generate shell completion script
-    t.setup('ox', 'ox', shell);
+    tab.setup('ox', 'ox', shell);
   } else {
     console.error(`Usage: ox complete <${SHELLS.join('|')}>`);
     console.error('       ox complete -- <args...>');
