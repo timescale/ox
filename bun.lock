@@ -6,7 +6,7 @@
       "name": "ox",
       "dependencies": {
         "@bomb.sh/tab": "^0.0.14",
-        "@deno/sandbox": "^0.13.1",
+        "@deno/sandbox": "^0.13.2",
         "@napi-rs/keyring": "^1.2.0",
         "@opentui/react": "^0.1.87",
         "build-strap": "^5.2.0",
@@ -42,7 +42,7 @@
     },
   },
   "patchedDependencies": {
-    "@deno/sandbox@0.13.1": "patches/@deno%2Fsandbox@0.13.1.patch",
+    "@deno/sandbox@0.13.2": "patches/@deno%2Fsandbox@0.13.2.patch",
     "@bomb.sh/tab@0.0.14": "patches/@bomb.sh%2Ftab@0.0.14.patch",
   },
   "packages": {
@@ -66,7 +66,7 @@
 
     "@bomb.sh/tab": ["@bomb.sh/tab@0.0.14", "", { "peerDependencies": { "cac": "^6.7.14", "citty": "^0.1.6 || ^0.2.0", "commander": "^13.1.0" }, "optionalPeers": ["cac", "citty", "commander"], "bin": { "tab": "dist/bin/cli.mjs" } }, "sha512-cHMk2LI430MVoX1unTt9oK1iZzQS4CYDz97MSxKLNErW69T43Z2QLFTpdS/3jVOIKrIADWfuxQ+nQNJkNV7E4w=="],
 
-    "@deno/sandbox": ["@deno/sandbox@0.13.1", "", { "dependencies": { "@deno/shim-deno": "~0.18.0", "ws": "^8.18.3", "zod": "^4.1.5" } }, "sha512-bN5DnY1qA0VBBT7OGF9aBQ8o+CYneu8XRCP37J8Ex7cfjujy7PQMxoj+3EeIYuva7agJ+d45O8o+urW6T/ZnIw=="],
+    "@deno/sandbox": ["@deno/sandbox@0.13.2", "", { "dependencies": { "@deno/shim-deno": "~0.18.0", "ws": "^8.18.3", "zod": "^4.1.5" } }, "sha512-hteIwQ/mqkJHLrxtcONSCntziOAEWZz0Q2m/Ps4E+HjimLaQxsqpBU0Xn6hin23yf2wOCls336PG9epbMliUOQ=="],
 
     "@deno/shim-deno": ["@deno/shim-deno@0.18.2", "", { "dependencies": { "@deno/shim-deno-test": "^0.5.0", "which": "^4.0.0" } }, "sha512-oQ0CVmOio63wlhwQF75zA4ioolPvOwAoK0yuzcS5bDC1JUvH3y1GS8xPh8EOpcoDQRU4FTG8OQfxhpR+c6DrzA=="],
 
