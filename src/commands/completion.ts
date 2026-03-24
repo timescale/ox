@@ -199,20 +199,7 @@ function registerAllAliases(program: CommandType): void {
 // In-process helpers (used by tests to avoid subprocess overhead)
 // ============================================================================
 
-/**
- * Capture all console.log output produced by `fn` and return it as a string.
- */
-function captureLog(fn: () => void): string {
-  const lines: string[] = [];
-  const origLog = console.log;
-  console.log = (...a: unknown[]) => lines.push(a.join(' '));
-  try {
-    fn();
-  } finally {
-    console.log = origLog;
-  }
-  return lines.join('\n');
-}
+import { captureLog } from '../utils/captureLog.ts';
 
 /**
  * Initialize the @bomb.sh/tab library with the commander program.

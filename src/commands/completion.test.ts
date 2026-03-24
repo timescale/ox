@@ -9,6 +9,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { createProgram } from '../createProgram.ts';
+import { captureLog } from '../utils/captureLog.ts';
 import type { ShellError } from '../utils/shell.ts';
 import {
   generateCompletionScript,
@@ -20,7 +21,7 @@ const PROJECT_ROOT = resolve(import.meta.dir, '..', '..');
 const BUN = resolve(PROJECT_ROOT, 'bun');
 const CLI = resolve(PROJECT_ROOT, 'index.ts');
 
-// All subcommands registered in src/index.ts
+// All subcommands registered via createProgram()
 const EXPECTED_SUBCOMMANDS = [
   'auth',
   'claude',
@@ -32,6 +33,7 @@ const EXPECTED_SUBCOMMANDS = [
   'opencode',
   'resources',
   'resume',
+  'session',
   'sessions',
   'shell',
   'upgrade',
@@ -67,21 +69,6 @@ function parseCompletionOutput(stdout: string): {
     .filter(Boolean);
 
   return { completions, directive };
-}
-
-/**
- * Capture all console.log output produced by `fn` and return it as a string.
- */
-function captureLog(fn: () => void): string {
-  const lines: string[] = [];
-  const origLog = console.log;
-  console.log = (...a: unknown[]) => lines.push(a.join(' '));
-  try {
-    fn();
-  } finally {
-    console.log = origLog;
-  }
-  return lines.join('\n');
 }
 
 // ============================================================================

@@ -26,7 +26,9 @@ import { upgradeCommand } from './commands/upgrade';
 /**
  * Build the commander program with all commands registered.
  * No side effects — no analytics, no process handlers, no parsing.
- * Returns a fresh Command instance each time (not the singleton).
+ *
+ * Returns a new root Command instance. Subcommands are shared singleton
+ * instances, so this should only be called once per process.
  */
 export function createProgram(): Command {
   const prog = new Command();

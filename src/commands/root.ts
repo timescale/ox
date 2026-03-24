@@ -330,7 +330,6 @@ export async function rootAction(
     // --interactive: launch full TUI with auto-submit
     if (options.interactive) {
       // Resolve mount for TUI path
-      const { tryGetRepoInfo } = await import('../services/git.ts');
       const repoInfo = await tryGetRepoInfo();
       const isGitRepo = repoInfo !== null;
       if (!isGitRepo && !options.mount) {
