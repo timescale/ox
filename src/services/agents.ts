@@ -6,6 +6,7 @@ import type { SelectOption } from '@opentui/core';
 import { useEffect, useState } from 'react';
 
 import { CODEX_MODELS } from './codexModels.generated.ts';
+
 export { CODEX_MODELS };
 
 import type { AgentType } from './config';
