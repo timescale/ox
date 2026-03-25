@@ -554,7 +554,7 @@ export function PromptScreen() {
       },
       {
         name: 'setup-db',
-        description: 'Configure the Tiger database service for this project',
+        description: 'Configure the database service for this project',
         onSelect: () => {
           setShowSlashCommands(false);
           setSlashQuery('');

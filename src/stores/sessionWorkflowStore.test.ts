@@ -96,7 +96,7 @@ describe('sessionWorkflowStore', () => {
     const config = {
       agent: 'claude' as const,
       model: 'claude-sonnet-4-20250514',
-      tigerServiceId: 'svc-456',
+      dbServiceId: 'svc-456',
     };
 
     setConfig(config);

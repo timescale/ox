@@ -452,12 +452,10 @@ export function ConfigWizard({
     ];
 
     const initialIndex =
-      config.tigerServiceId === null
+      config.dbServiceId === null
         ? 0
-        : config.tigerServiceId
-          ? serviceOptions.findIndex(
-              (opt) => opt.value === config.tigerServiceId,
-            )
+        : config.dbServiceId
+          ? serviceOptions.findIndex((opt) => opt.value === config.dbServiceId)
           : 0;
 
     return (
@@ -469,7 +467,7 @@ export function ConfigWizard({
         initialIndex={initialIndex >= 0 ? initialIndex : 0}
         showBack
         onSelect={(value) => {
-          setConfig((c) => (c ? { ...c, tigerServiceId: value } : c));
+          setConfig((c) => (c ? { ...c, dbServiceId: value } : c));
           nextStep();
         }}
         onCancel={handleCancel}
@@ -751,10 +749,10 @@ export async function configAction(): Promise<void> {
       `  Sandbox: ${config.sandboxProvider === 'cloud' ? 'Cloud' : 'Docker (local)'}`,
     );
 
-    if (config.tigerServiceId === null) {
+    if (config.dbServiceId === null) {
       console.log('  Database: (None) - forks will be skipped by default');
-    } else if (config.tigerServiceId) {
-      console.log(`  Database: ${config.tigerServiceId}`);
+    } else if (config.dbServiceId) {
+      console.log(`  Database: ${config.dbServiceId}`);
     }
 
     console.log(`  Agent: ${config.agent}`);

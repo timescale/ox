@@ -15,7 +15,7 @@ import { Loading } from './Loading.tsx';
 import { Selector } from './Selector.tsx';
 
 export type SetupDbResult =
-  | { type: 'completed'; tigerServiceId: string | null }
+  | { type: 'completed'; dbServiceId: string | null }
   | { type: 'cancelled' }
   | { type: 'unavailable' };
 
@@ -38,7 +38,7 @@ export function SetupDb({ onComplete }: SetupDbProps) {
         readConfig(),
       ]);
       setTigerAvailable(available);
-      setCurrentServiceId(config.tigerServiceId ?? undefined);
+      setCurrentServiceId(config.dbServiceId ?? undefined);
 
       if (available) {
         try {
@@ -63,12 +63,12 @@ export function SetupDb({ onComplete }: SetupDbProps) {
   };
 
   const handleSelect = async (value: string | null) => {
-    const tigerServiceId = value === '__null__' ? null : value;
+    const dbServiceId = value === '__null__' ? null : value;
 
     // Persist to project config (creates .ox/config.yml if needed)
-    await projectConfig.writeValue('tigerServiceId', tigerServiceId);
+    await projectConfig.writeValue('dbServiceId', dbServiceId);
 
-    onComplete({ type: 'completed', tigerServiceId });
+    onComplete({ type: 'completed', dbServiceId });
   };
 
   const serviceOptions: SelectOption[] = useMemo(

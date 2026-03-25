@@ -222,7 +222,7 @@ ox config set --global themeName dracula
 Remove a configuration value.
 
 ```bash
-ox config unset tigerServiceId
+ox config unset dbServiceId
 ox config unset --global model
 ```
 

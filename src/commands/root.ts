@@ -123,7 +123,7 @@ export async function branchAction(
   const config = await readConfig();
 
   // Step 4: Determine effective values from options or config
-  const effectiveServiceId = options.serviceId ?? config.tigerServiceId;
+  const effectiveServiceId = options.serviceId ?? config.dbServiceId;
   const effectiveAgent: AgentType = options.agent ?? config.agent ?? 'opencode';
   const effectiveModel: string | undefined =
     options.model ?? config.agentModels?.[effectiveAgent] ?? config.model;

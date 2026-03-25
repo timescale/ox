@@ -63,7 +63,8 @@ See [Port Forwarding](sandbox-providers.md#port-forwarding) for details.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `tigerServiceId` | `string\|null` | -- | Timescale Tiger service ID for database forking. Set to `null` to explicitly disable DB forking. |
+| `dbServiceProvider` | `string\|null` | -- | Database service provider: `tiger` or `ghost`. Set to `null` to explicitly disable DB provider. |
+| `dbServiceId` | `string\|null` | -- | Database service/instance ID for database forking. Set to `null` to explicitly disable DB forking. |
 
 ### Appearance
 
@@ -111,7 +112,7 @@ Use `--global` to write to user config instead of project config.
 Remove a config value:
 
 ```bash
-ox config unset tigerServiceId
+ox config unset dbServiceId
 ox config unset --global model
 ```
 
@@ -211,7 +212,7 @@ agent: claude
 model: sonnet
 agentMode: async
 sandboxProvider: docker
-tigerServiceId: null
+dbServiceId: null
 themeName: tokyonight
 overlayMounts:
   - node_modules

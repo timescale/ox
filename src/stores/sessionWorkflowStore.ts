@@ -390,7 +390,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           dbFork: doFork,
           config: currentConfig,
         } = get();
-        const effectiveServiceId = svcId ?? currentConfig?.tigerServiceId;
+        const effectiveServiceId = svcId ?? currentConfig?.dbServiceId;
         let forkResult: ForkResult | null = null;
         if (!isPlan && doFork && effectiveServiceId) {
           updateView((v) =>
@@ -795,7 +795,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         useToastStore
           .getState()
           .show(
-            'Tiger CLI is not installed — cannot configure database service.',
+            'Database CLI is not available — cannot configure database service.',
             'error',
           );
         useRouterStore.getState().goToPrompt(resumeSession);
@@ -809,9 +809,9 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
       });
 
       const label =
-        result.tigerServiceId === null
+        result.dbServiceId === null
           ? 'Database service set to (None).'
-          : `Database service set to ${result.tigerServiceId}.`;
+          : `Database service set to ${result.dbServiceId}.`;
       useToastStore.getState().show(label, 'success');
       useRouterStore.getState().goToPrompt(resumeSession);
     },
