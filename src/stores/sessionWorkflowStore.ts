@@ -129,6 +129,20 @@ export interface SessionWorkflowState {
   ) => void;
 }
 
+export function getSetupDbCompletionMessage(
+  result: Extract<SetupDbResult, { type: 'completed' }>,
+): string {
+  if (result.dbServiceProvider === null) {
+    return 'Database provider set to (None).';
+  }
+
+  if (result.dbServiceId === null) {
+    return `Database provider set to ${result.dbServiceProvider} (no service selected).`;
+  }
+
+  return `Database provider set to ${result.dbServiceProvider} - ${result.dbServiceId}.`;
+}
+
 // ============================================================================
 // Store
 // ============================================================================
@@ -796,7 +810,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         useToastStore
           .getState()
           .show(
-            'Database CLI is not available — cannot configure database service.',
+            'Tiger CLI is not available — cannot configure the Tiger database provider.',
             'error',
           );
         useRouterStore.getState().goToPrompt(resumeSession);
@@ -809,11 +823,9 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         set({ config: mergedConfig });
       });
 
-      const label =
-        result.dbServiceId === null
-          ? 'Database service set to (None).'
-          : `Database service set to ${result.dbServiceId}.`;
-      useToastStore.getState().show(label, 'success');
+      useToastStore
+        .getState()
+        .show(getSetupDbCompletionMessage(result), 'success');
       useRouterStore.getState().goToPrompt(resumeSession);
     },
 

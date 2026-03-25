@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { SandboxProvider } from '../services/sandbox/types.ts';
-import { useSessionWorkflowStore } from './sessionWorkflowStore.ts';
+import {
+  getSetupDbCompletionMessage,
+  useSessionWorkflowStore,
+} from './sessionWorkflowStore.ts';
 
 // Minimal mock provider for testing synchronous state management
 const mockProvider: SandboxProvider = {
@@ -21,6 +24,28 @@ const mockProvider: SandboxProvider = {
   readFile: async () => null,
   writeFile: async () => {},
 };
+
+describe('getSetupDbCompletionMessage', () => {
+  test('describes clearing the database provider', () => {
+    expect(
+      getSetupDbCompletionMessage({
+        type: 'completed',
+        dbServiceProvider: null,
+        dbServiceId: null,
+      }),
+    ).toBe('Database provider set to (None).');
+  });
+
+  test('includes the provider and selected database id', () => {
+    expect(
+      getSetupDbCompletionMessage({
+        type: 'completed',
+        dbServiceProvider: 'ghost',
+        dbServiceId: 'db_123',
+      }),
+    ).toBe('Database provider set to ghost - db_123.');
+  });
+});
 
 describe('sessionWorkflowStore', () => {
   afterEach(() => {
