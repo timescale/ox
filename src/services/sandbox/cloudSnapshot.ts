@@ -5,11 +5,12 @@
 import { useBackgroundTaskStore } from '../../stores/backgroundTaskStore.ts';
 import { throwIfAborted } from '../../utils/abort.ts';
 import { BuildError } from '../buildError.ts';
-import type { AgentType, OxConfig } from '../config.ts';
+import type { AgentType, DbServiceProvider, OxConfig } from '../config.ts';
 import {
   computeProjectSetupHash,
   getAgentInstallScript,
   getAgentVersion,
+  getDbProviderInstallScript,
 } from '../docker.ts';
 import { log } from '../logger.ts';
 import { computeCloudBaseHash, getCloudBaseSteps } from './cloudBaseSteps.ts';
@@ -65,15 +66,24 @@ export function getProjectSetupSnapshotSlug(
  */
 export function getAgentSnapshotSlug(
   agent: AgentType,
-  setupHash?: string,
+  parentHash?: string,
   config: Pick<OxConfig, 'dockerInSandbox'> = {},
 ): string {
-  const hash = (setupHash ?? computeCloudBaseHash(config)).slice(0, 6);
+  const hash = (parentHash ?? computeCloudBaseHash(config)).slice(0, 6);
   const agentVer = getAgentVersion(agent)
     .replace(/[^a-z0-9-]/g, '-')
     .slice(0, 6);
   // e.g. "ox-a1b2c3-claude-2-1-72" — fit within 32 chars
   return `ox-${hash}-${agent}-${agentVer}`.slice(0, 32).replace(/-+$/, '');
+}
+
+export function getDbProviderSnapshotSlug(
+  provider: DbServiceProvider,
+  parentHash?: string,
+  config: Pick<OxConfig, 'dockerInSandbox'> = {},
+): string {
+  const hash = (parentHash ?? computeCloudBaseHash(config)).slice(0, 6);
+  return `oxd-${hash}-${provider}`.slice(0, 32).replace(/-+$/, '');
 }
 
 /**
@@ -567,10 +577,225 @@ export async function ensureProjectSetupCloudSnapshot(options: {
   }
 }
 
+export async function ensureDbProviderCloudSnapshot(options: {
+  token: string;
+  region: string;
+  provider: DbServiceProvider;
+  baseSnapshotSlug: string;
+  parentHash?: string;
+  config?: Pick<OxConfig, 'dockerInSandbox'>;
+  force?: boolean;
+  onProgress?: (progress: SnapshotBuildProgress) => void;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const {
+    token,
+    region,
+    provider,
+    baseSnapshotSlug,
+    parentHash,
+    config = {},
+    force,
+    onProgress,
+    signal,
+  } = options;
+  throwIfAborted(signal);
+  const client = new DenoApiClient(token);
+  const snapshotSlug = getDbProviderSnapshotSlug(provider, parentHash, config);
+
+  onProgress?.({ type: 'checking' });
+  if (force) {
+    try {
+      const existing = await client.getSnapshot(snapshotSlug);
+      if (existing) {
+        log.info(
+          { snapshotSlug },
+          'Force rebuild: deleting existing db provider snapshot',
+        );
+        await client.deleteSnapshot(existing.id);
+      }
+    } catch {
+      // Snapshot doesn't exist, nothing to delete
+    }
+  } else {
+    try {
+      const existing = await client.getSnapshot(snapshotSlug);
+      if (existing) {
+        const bootable = await isSnapshotBootable(token, snapshotSlug);
+        if (bootable) {
+          onProgress?.({ type: 'exists', snapshotSlug });
+          return snapshotSlug;
+        }
+        log.warn(
+          { snapshotSlug },
+          'DB provider snapshot exists but is not bootable — deleting and rebuilding',
+        );
+        try {
+          await client.deleteSnapshot(existing.id);
+        } catch (err) {
+          log.debug(
+            { err },
+            'Failed to delete non-bootable db provider snapshot',
+          );
+        }
+      }
+    } catch (err) {
+      log.debug({ err }, 'Failed to check db provider snapshot');
+    }
+  }
+
+  const buildVolumeSlug = denoSlug('oxdb');
+  onProgress?.({
+    type: 'creating-volume',
+    message: `Creating volume for ${provider} db provider`,
+  });
+
+  const volume = await client.createVolume({
+    slug: buildVolumeSlug,
+    region,
+    capacity: '10GiB',
+    from: baseSnapshotSlug,
+  });
+
+  let sandbox: ResolvedSandbox | null = null;
+  let snapshotCreated = false;
+  let buildSandboxId: string | undefined;
+
+  try {
+    throwIfAborted(signal);
+    onProgress?.({
+      type: 'booting-sandbox',
+      message: `Booting sandbox to install ${provider}`,
+    });
+
+    sandbox = await client.createSandbox({
+      region: region as 'ord' | 'ams',
+      root: volume.slug,
+      timeout: '30m',
+      memory: '2GiB',
+    });
+    throwIfAborted(signal);
+    buildSandboxId = sandbox.resolvedId || sandbox.id;
+    log.debug(
+      { sandboxId: buildSandboxId, provider },
+      'DB provider build sandbox created',
+    );
+
+    onProgress?.({
+      type: 'installing',
+      message: `Installing ${provider} db provider`,
+      detail: 'This may take a minute',
+    });
+
+    const dbScript = getDbProviderInstallScript(provider);
+    await sandboxExec(
+      sandbox,
+      `cat > /tmp/install-db.sh << 'INSTALL_EOF'\n${dbScript}\nINSTALL_EOF\nbash /tmp/install-db.sh`,
+      { label: `Install ${provider} db provider` },
+    );
+    throwIfAborted(signal);
+
+    await sandboxExec(sandbox, 'rm -f /tmp/install-db.sh', {
+      label: 'Clean up temp db install script',
+    });
+    throwIfAborted(signal);
+
+    onProgress?.({
+      type: 'snapshotting',
+      message: 'Detaching volume',
+    });
+    log.debug(
+      { sandboxId: buildSandboxId },
+      'Stopping db provider build sandbox',
+    );
+    try {
+      await sandbox.close();
+    } catch {
+      // ignore close errors
+    }
+    if (buildSandboxId) {
+      await client.killAndWaitForDetach(buildSandboxId);
+    }
+    throwIfAborted(signal);
+    sandbox = null;
+
+    onProgress?.({
+      type: 'snapshotting',
+      message: `Creating ${provider} db provider snapshot`,
+    });
+    try {
+      await client.snapshotVolumeWithRetry(volume.id, { slug: snapshotSlug });
+    } catch (err) {
+      log.error(
+        { err, volumeId: volume.id, snapshotSlug },
+        'Failed to snapshot db provider build volume',
+      );
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+    snapshotCreated = true;
+
+    onProgress?.({ type: 'done', snapshotSlug });
+    return snapshotSlug;
+  } finally {
+    const aborted = signal?.aborted === true;
+    const needsCleanup = !snapshotCreated || sandbox !== null;
+    if (needsCleanup) {
+      onProgress?.({
+        type: 'cleaning-up',
+        message: 'Cleaning up db provider build resources',
+      });
+    }
+    if (sandbox) {
+      const buildSandbox = sandbox;
+      const cleanup = async () => {
+        try {
+          await buildSandbox.close();
+        } catch {
+          // ignore close errors
+        }
+        if (buildSandboxId) {
+          try {
+            await client.killSandbox(buildSandboxId);
+          } catch (err) {
+            log.debug(
+              { err },
+              'Failed to kill db provider build sandbox in cleanup',
+            );
+          }
+        }
+      };
+      if (aborted) {
+        enqueueCleanupTask('Killing db provider build sandbox', cleanup);
+      } else {
+        await cleanup();
+      }
+    }
+    if (!snapshotCreated) {
+      const cleanup = async () => {
+        try {
+          await client.deleteVolume(volume.id);
+        } catch (err) {
+          log.debug({ err }, 'Failed to delete db provider build volume');
+        }
+      };
+      if (aborted) {
+        enqueueCleanupTask('Deleting db provider build volume', cleanup);
+      } else {
+        await cleanup();
+      }
+    } else {
+      log.debug(
+        { volumeId: volume.id, slug: volume.slug },
+        'Leaving db provider build volume intact to avoid disrupting snapshot finalization',
+      );
+    }
+  }
+}
+
 /**
  * Ensure an agent-specific overlay cloud snapshot exists.
  *
- * Boots a sandbox from the base snapshot, installs the agent + tiger CLI,
+ * Boots a sandbox from the base snapshot, installs the agent,
  * kills the sandbox, and snapshots the resulting volume.
  *
  * Returns the agent overlay snapshot slug.
@@ -580,9 +805,8 @@ export async function ensureAgentCloudSnapshot(options: {
   region: string;
   agent: AgentType;
   baseSnapshotSlug: string;
-  /** If a project setup layer is active, its hash. Ensures the agent overlay
-   *  slug changes when the setup layer changes, triggering a rebuild. */
-  setupHash?: string;
+  /** Parent layer hash used to derive the snapshot slug. */
+  parentHash?: string;
   config?: Pick<OxConfig, 'dockerInSandbox'>;
   force?: boolean;
   onProgress?: (progress: SnapshotBuildProgress) => void;
@@ -600,7 +824,7 @@ export async function ensureAgentCloudSnapshot(options: {
   } = options;
   throwIfAborted(signal);
   const client = new DenoApiClient(token);
-  const snapshotSlug = getAgentSnapshotSlug(agent, options.setupHash, config);
+  const snapshotSlug = getAgentSnapshotSlug(agent, options.parentHash, config);
 
   // 1. Check if agent overlay snapshot already exists AND is bootable
   onProgress?.({ type: 'checking' });
@@ -699,20 +923,7 @@ export async function ensureAgentCloudSnapshot(options: {
     );
     throwIfAborted(signal);
 
-    // 5. Install Tiger CLI
-    onProgress?.({
-      type: 'installing',
-      message: 'Installing Tiger CLI',
-    });
-    const tigerScript = getAgentInstallScript('tiger');
-    await sandboxExec(
-      sandbox,
-      `cat > /tmp/install-tiger.sh << 'INSTALL_EOF'\n${tigerScript}\nINSTALL_EOF\nbash /tmp/install-tiger.sh`,
-      { label: 'Install Tiger CLI' },
-    );
-    throwIfAborted(signal);
-
-    // 6. Add agent-specific bin dirs to PATH
+    // 5. Add agent-specific bin dirs to PATH
     // The base already has ~/.local/bin. Agents like opencode install to
     // ~/.opencode/bin, codex installs to ~/.local/bin (already covered).
     if (agent === 'opencode') {
@@ -730,16 +941,12 @@ export async function ensureAgentCloudSnapshot(options: {
     throwIfAborted(signal);
 
     // Clean up temp files
-    await sandboxExec(
-      sandbox,
-      'rm -f /tmp/install-agent.sh /tmp/install-tiger.sh',
-      {
-        label: 'Clean up temp install scripts',
-      },
-    );
+    await sandboxExec(sandbox, 'rm -f /tmp/install-agent.sh', {
+      label: 'Clean up temp install scripts',
+    });
     throwIfAborted(signal);
 
-    // 7. Kill sandbox and wait for volume detachment
+    // 6. Kill sandbox and wait for volume detachment
     onProgress?.({
       type: 'snapshotting',
       message: 'Detaching volume',
@@ -756,7 +963,7 @@ export async function ensureAgentCloudSnapshot(options: {
     throwIfAborted(signal);
     sandbox = null;
 
-    // 8. Snapshot the volume (retries on VOLUME_IS_MOUNTED)
+    // 7. Snapshot the volume (retries on VOLUME_IS_MOUNTED)
     onProgress?.({
       type: 'snapshotting',
       message: `Creating ${agent} agent snapshot`,

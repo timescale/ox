@@ -7,6 +7,7 @@ import {
   attachToContainer,
   type OxSession as DockerSession,
   getSession as dockerGetSession,
+  ensureDbProviderLayer,
   ensureDockerImage,
   ensureDockerImageForAgent,
   ensureDockerSandbox,
@@ -160,12 +161,36 @@ export class DockerSandboxProvider implements SandboxProvider {
 
     // Chain through project setup layer if configured
     const config = await readConfig();
+    let effectiveBaseImage = baseImage;
     if (config.projectSetupLayer) {
-      return ensureProjectSetupLayer(baseImage, config.projectSetupLayer, {
-        onProgress: options?.onProgress,
-        force: options?.force,
-        signal: options?.signal,
-      });
+      effectiveBaseImage = await ensureProjectSetupLayer(
+        effectiveBaseImage,
+        config.projectSetupLayer,
+        {
+          onProgress: options?.onProgress,
+          force: options?.force,
+          signal: options?.signal,
+        },
+      );
+    }
+
+    if (
+      config.dbServiceProvider === 'tiger' ||
+      config.dbServiceProvider === 'ghost'
+    ) {
+      effectiveBaseImage = await ensureDbProviderLayer(
+        effectiveBaseImage,
+        config.dbServiceProvider,
+        {
+          onProgress: options?.onProgress,
+          force: options?.force,
+          signal: options?.signal,
+        },
+      );
+    }
+
+    if (effectiveBaseImage !== baseImage) {
+      return effectiveBaseImage;
     }
 
     return baseImage;

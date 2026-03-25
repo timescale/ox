@@ -13,6 +13,9 @@ import INSTALL_CLAUDE from '../../sandbox/agents/install-claude.sh' with {
 import INSTALL_CODEX from '../../sandbox/agents/install-codex.sh' with {
   type: 'text',
 };
+import INSTALL_GHOST from '../../sandbox/agents/install-ghost.sh' with {
+  type: 'text',
+};
 import INSTALL_OPENCODE from '../../sandbox/agents/install-opencode.sh' with {
   type: 'text',
 };
@@ -49,12 +52,14 @@ import { getClaudeConfigFiles, hasValidClaudeFileCredentials } from './claude';
 import { getCodexConfigFiles, hasValidCodexFileCredentials } from './codex';
 import {
   type AgentType,
+  type DbServiceProvider,
   type OxConfig,
   projectConfigDir,
   readConfig,
 } from './config';
 import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
 import { getGhConfigFiles } from './gh';
+import { getGhostConfigFiles } from './ghost';
 import type { RepoInfo } from './git';
 import { log } from './logger';
 import {
@@ -67,13 +72,21 @@ import type { AgentMode, AttachOptions } from './sandbox/types';
 export const getCredentialFiles = async (
   homeDir = CONTAINER_HOME,
 ): Promise<VirtualFile[]> => {
-  const [claudeFiles, opencodeFiles, codexFiles, ghFiles] = await Promise.all([
-    getClaudeConfigFiles(),
-    getOpencodeConfigFiles(),
-    getCodexConfigFiles(),
-    getGhConfigFiles(),
-  ]);
-  const files = [...claudeFiles, ...opencodeFiles, ...codexFiles, ...ghFiles];
+  const [claudeFiles, opencodeFiles, codexFiles, ghFiles, ghostFiles] =
+    await Promise.all([
+      getClaudeConfigFiles(),
+      getOpencodeConfigFiles(),
+      getCodexConfigFiles(),
+      getGhConfigFiles(),
+      getGhostConfigFiles(),
+    ]);
+  const files = [
+    ...claudeFiles,
+    ...opencodeFiles,
+    ...codexFiles,
+    ...ghFiles,
+    ...ghostFiles,
+  ];
   // Rewrite paths if a different home directory was requested
   if (homeDir !== CONTAINER_HOME) {
     return files.map((f) => ({
@@ -323,6 +336,7 @@ export function extractTagHash(imageRef: string): string {
   if (tagPart.startsWith('md5-')) return tagPart.slice(4);
   if (tagPart.startsWith('dkr-')) return tagPart.slice(4);
   if (tagPart.startsWith('psl-')) return tagPart.slice(4);
+  if (tagPart.startsWith('db-')) return tagPart.slice(3);
   if (tagPart.startsWith('a-')) return tagPart.slice(2);
   return tagPart;
 }
@@ -570,11 +584,15 @@ async function ensureRootScriptLayer(
 // ============================================================================
 
 /** Map of agent type to embedded install script content */
-const AGENT_INSTALL_SCRIPTS: Record<string, string> = {
+const AGENT_INSTALL_SCRIPTS: Record<AgentType, string> = {
   claude: INSTALL_CLAUDE,
   opencode: INSTALL_OPENCODE,
   codex: INSTALL_CODEX,
+};
+
+const DB_PROVIDER_INSTALL_SCRIPTS: Record<DbServiceProvider, string> = {
   tiger: INSTALL_TIGER,
+  ghost: INSTALL_GHOST,
 };
 
 /** Get the pinned version for an agent from sandbox/versions.json */
@@ -590,7 +608,7 @@ export function getAgentVersion(agent: AgentType): string {
 }
 
 /** Get the embedded install script content for an agent */
-export function getAgentInstallScript(agent: AgentType | 'tiger'): string {
+export function getAgentInstallScript(agent: AgentType): string {
   const script = AGENT_INSTALL_SCRIPTS[agent];
   if (!script) {
     throw new Error(`No install script for agent: ${agent}`);
@@ -598,9 +616,19 @@ export function getAgentInstallScript(agent: AgentType | 'tiger'): string {
   return script;
 }
 
+export function getDbProviderInstallScript(
+  provider: DbServiceProvider,
+): string {
+  const script = DB_PROVIDER_INSTALL_SCRIPTS[provider];
+  if (!script) {
+    throw new Error(`No install script for db provider: ${provider}`);
+  }
+  return script;
+}
+
 /**
  * Compute a content hash for the agent overlay layer.
- * Combines the parent hash, agent name, version, and install scripts
+ * Combines the parent hash, agent name, version, and install script
  * so the layer rebuilds when any of these change.
  */
 export function computeAgentOverlayHash(
@@ -612,7 +640,17 @@ export function computeAgentOverlayHash(
   hasher.update(agent);
   hasher.update(getAgentVersion(agent));
   hasher.update(getAgentInstallScript(agent));
-  hasher.update(getAgentInstallScript('tiger'));
+  return hasher.digest('hex').slice(0, 12);
+}
+
+export function computeDbProviderHash(
+  parentHash: string,
+  provider: DbServiceProvider,
+): string {
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(parentHash);
+  hasher.update(provider);
+  hasher.update(getDbProviderInstallScript(provider));
   return hasher.digest('hex').slice(0, 12);
 }
 
@@ -628,6 +666,16 @@ export function getAgentOverlayTag(
   const parentLayerHash = extractLayerHash(baseImage);
   const layerHash = computeAgentOverlayHash(parentHash, agent);
   return `${DOCKER_IMAGE_NAME}:a-${agent}-${parentLayerHash.slice(0, 6)}-${layerHash}`;
+}
+
+export function getDbProviderTag(
+  baseImage: string,
+  provider: DbServiceProvider,
+): string {
+  const parentHash = extractTagHash(baseImage);
+  const parentLayerHash = extractLayerHash(baseImage);
+  const layerHash = computeDbProviderHash(parentHash, provider);
+  return `${DOCKER_IMAGE_NAME}:db-${provider}-${parentLayerHash.slice(0, 6)}-${layerHash}`;
 }
 
 /**
@@ -753,28 +801,19 @@ export async function ensureAgentOverlay(
 
     // 2. Write install scripts into the container
     const agentScript = getAgentInstallScript(agent);
-    const tigerScript = getAgentInstallScript('tiger');
     await writeFileToContainer(
       containerName,
       '/tmp/install-agent.sh',
       agentScript,
     );
     throwIfAborted(options?.signal);
-    await writeFileToContainer(
-      containerName,
-      '/tmp/install-tiger.sh',
-      tigerScript,
-    );
-    throwIfAborted(options?.signal);
 
-    // 3. Execute install scripts as the ox user
+    // 3. Execute install script as the ox user
     await $`docker exec ${containerName} bash /tmp/install-agent.sh ${version}`.quiet();
-    throwIfAborted(options?.signal);
-    await $`docker exec ${containerName} bash /tmp/install-tiger.sh`.quiet();
     throwIfAborted(options?.signal);
 
     // 4. Clean up temp files and commit
-    await $`docker exec ${containerName} rm -f /tmp/install-agent.sh /tmp/install-tiger.sh`.quiet();
+    await $`docker exec ${containerName} rm -f /tmp/install-agent.sh`.quiet();
     throwIfAborted(options?.signal);
     await $`docker commit ${containerName} ${overlayTag}`.quiet();
     invalidateImageExistsCache(overlayTag);
@@ -789,6 +828,78 @@ export async function ensureAgentOverlay(
     log.error({ err, overlayTag, agent }, 'Failed to build agent overlay');
     throw new Error(
       `Failed to build ${agent} overlay image: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    if (keepContainer) {
+      useBackgroundTaskStore
+        .getState()
+        .enqueue(`Removing build container ${containerName}`, async () => {
+          await $`docker rm -f ${containerName}`.quiet().nothrow();
+        });
+    } else {
+      await $`docker rm -f ${containerName}`.quiet().nothrow();
+    }
+  }
+}
+
+export async function ensureDbProviderLayer(
+  baseImage: string,
+  provider: DbServiceProvider,
+  options?: {
+    onProgress?: (progress: ImageBuildProgress) => void;
+    force?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<string> {
+  throwIfAborted(options?.signal);
+  const layerTag = getDbProviderTag(baseImage, provider);
+
+  if (!options?.force && (await imageExists(layerTag))) {
+    log.debug(`${provider} db provider layer image already exists`);
+    return layerTag;
+  }
+
+  log.info(
+    { layerTag, baseImage, provider },
+    'Building db provider layer image locally',
+  );
+  options?.onProgress?.({
+    type: 'building',
+    message: `Installing ${provider} db provider`,
+  });
+
+  const containerName = `ox-db-${provider}-${nanoid(6).toLowerCase()}`;
+  let keepContainer = false;
+
+  try {
+    await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+    throwIfAborted(options?.signal);
+
+    const dbScript = getDbProviderInstallScript(provider);
+    await writeFileToContainer(containerName, '/tmp/install-db.sh', dbScript);
+    throwIfAborted(options?.signal);
+
+    await $`docker exec ${containerName} bash /tmp/install-db.sh`.quiet();
+    throwIfAborted(options?.signal);
+
+    await $`docker exec ${containerName} rm -f /tmp/install-db.sh`.quiet();
+    throwIfAborted(options?.signal);
+    await $`docker commit ${containerName} ${layerTag}`.quiet();
+    invalidateImageExistsCache(layerTag);
+
+    log.info(
+      { layerTag, provider },
+      'DB provider layer image built successfully',
+    );
+    return layerTag;
+  } catch (err) {
+    if (isAbortError(err)) {
+      keepContainer = true;
+      throw err;
+    }
+    log.error({ err, layerTag, provider }, 'Failed to build db provider layer');
+    throw new Error(
+      `Failed to build ${provider} db provider layer: ${err instanceof Error ? err.message : String(err)}`,
     );
   } finally {
     if (keepContainer) {
@@ -1441,6 +1552,17 @@ export async function ensureDockerImageForAgent(
       effectiveBase = await ensureProjectSetupLayer(
         effectiveBase,
         config.projectSetupLayer,
+        coalesced,
+      );
+    }
+
+    if (
+      config.dbServiceProvider === 'tiger' ||
+      config.dbServiceProvider === 'ghost'
+    ) {
+      effectiveBase = await ensureDbProviderLayer(
+        effectiveBase,
+        config.dbServiceProvider,
         coalesced,
       );
     }

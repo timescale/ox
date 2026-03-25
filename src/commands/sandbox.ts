@@ -263,6 +263,7 @@ export const sandboxCommand = new Command('sandbox')
               const region = config.cloudRegion ?? 'ord';
               const {
                 ensureCloudSnapshot,
+                ensureDbProviderCloudSnapshot,
                 ensureProjectSetupCloudSnapshot,
                 ensureAgentCloudSnapshot,
               } = await import('../services/sandbox/cloudSnapshot.ts');
@@ -280,7 +281,7 @@ export const sandboxCommand = new Command('sandbox')
 
               // 2. Build project setup layer (if needed)
               let effectiveBaseSlug = baseSlug;
-              let setupHash: string | undefined;
+              let parentHash: string | undefined;
               const cloudSetupScript = config.projectSetupLayer;
               if (cloudSetupScript && (options.project || options.agent)) {
                 effectiveBaseSlug = await runStep(
@@ -296,7 +297,30 @@ export const sandboxCommand = new Command('sandbox')
                       onProgress,
                     }),
                 );
-                setupHash = effectiveBaseSlug.replace('oxl-', '');
+                parentHash = effectiveBaseSlug.replace('oxl-', '');
+              }
+
+              if (
+                (options.project || options.agent) &&
+                (config.dbServiceProvider === 'tiger' ||
+                  config.dbServiceProvider === 'ghost')
+              ) {
+                const provider = config.dbServiceProvider;
+                effectiveBaseSlug = await runStep(
+                  `DB provider (${provider}) snapshot`,
+                  (onProgress) =>
+                    ensureDbProviderCloudSnapshot({
+                      token,
+                      region,
+                      provider,
+                      baseSnapshotSlug: effectiveBaseSlug,
+                      parentHash,
+                      config,
+                      force,
+                      onProgress,
+                    }),
+                );
+                parentHash = effectiveBaseSlug.replace('oxd-', '');
               }
 
               // 3. Build agent overlay (if requested)
@@ -310,7 +334,7 @@ export const sandboxCommand = new Command('sandbox')
                       region,
                       agent: options.agent as AgentType,
                       baseSnapshotSlug: effectiveBaseSlug,
-                      setupHash,
+                      parentHash,
                       config,
                       force,
                       onProgress,
@@ -321,6 +345,7 @@ export const sandboxCommand = new Command('sandbox')
               // --- Docker build path ---
               const {
                 ensureDockerImage,
+                ensureDbProviderLayer,
                 ensureDockerSandboxSetupLayer,
                 ensureProjectSetupLayer,
                 ensureAgentOverlay,
@@ -357,6 +382,22 @@ export const sandboxCommand = new Command('sandbox')
                       onProgress,
                       force,
                       stream: true,
+                    }),
+                );
+              }
+
+              if (
+                (options.project || options.agent) &&
+                (config.dbServiceProvider === 'tiger' ||
+                  config.dbServiceProvider === 'ghost')
+              ) {
+                const provider = config.dbServiceProvider;
+                effectiveBase = await runStep(
+                  `DB provider (${provider}) layer`,
+                  (onProgress) =>
+                    ensureDbProviderLayer(effectiveBase, provider, {
+                      onProgress,
+                      force,
                     }),
                 );
               }

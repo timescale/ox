@@ -11,6 +11,7 @@ import {
 import {
   getAgentSnapshotSlug,
   getBaseSnapshotSlug,
+  getDbProviderSnapshotSlug,
   getProjectSetupSnapshotSlug,
 } from './cloudSnapshot.ts';
 
@@ -204,5 +205,47 @@ describe('getAgentSnapshotSlug', () => {
       'a-very-long-setup-hash-string',
     );
     expect(slug.length).toBeLessThanOrEqual(32);
+  });
+});
+
+// ============================================================================
+// getDbProviderSnapshotSlug
+// ============================================================================
+
+describe('getDbProviderSnapshotSlug', () => {
+  const providers = ['ghost', 'tiger'] as const;
+
+  for (const provider of providers) {
+    test(`${provider}: is at most 32 characters`, () => {
+      const slug = getDbProviderSnapshotSlug(provider);
+      expect(slug.length).toBeLessThanOrEqual(32);
+    });
+
+    test(`${provider}: contains provider name`, () => {
+      const slug = getDbProviderSnapshotSlug(provider);
+      expect(slug).toContain(provider);
+    });
+
+    test(`${provider}: contains base hash prefix when no parent hash provided`, () => {
+      const slug = getDbProviderSnapshotSlug(provider);
+      expect(slug).toContain(computeCloudBaseHash().slice(0, 6));
+    });
+
+    test(`${provider}: does not end with a hyphen`, () => {
+      const slug = getDbProviderSnapshotSlug(provider);
+      expect(slug).not.toMatch(/-$/);
+    });
+  }
+
+  test('different providers produce different slugs', () => {
+    expect(getDbProviderSnapshotSlug('ghost')).not.toBe(
+      getDbProviderSnapshotSlug('tiger'),
+    );
+  });
+
+  test('uses parent hash when provided', () => {
+    const slug1 = getDbProviderSnapshotSlug('ghost');
+    const slug2 = getDbProviderSnapshotSlug('ghost', 'custom-parent-hash');
+    expect(slug1).not.toBe(slug2);
   });
 });

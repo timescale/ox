@@ -34,6 +34,7 @@ import { CloudConnectionPool } from './cloudConnectionPool.ts';
 import {
   ensureAgentCloudSnapshot,
   ensureCloudSnapshot,
+  ensureDbProviderCloudSnapshot,
   ensureProjectSetupCloudSnapshot,
 } from './cloudSnapshot.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
@@ -658,7 +659,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // 2. If projectSetupLayer is configured, ensure setup layer snapshot
     let effectiveBaseSlug = baseSlug;
-    let setupHash: string | undefined;
+    let parentHash: string | undefined;
     if (config.projectSetupLayer) {
       effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
         token,
@@ -669,8 +670,25 @@ export class CloudSandboxProvider implements SandboxProvider {
         onProgress: mapProgress,
         signal: options?.signal,
       });
-      // Extract the setup hash for use in agent slug computation
-      setupHash = effectiveBaseSlug.replace('oxl-', '');
+      parentHash = effectiveBaseSlug.replace('oxl-', '');
+    }
+
+    if (
+      config.dbServiceProvider === 'tiger' ||
+      config.dbServiceProvider === 'ghost'
+    ) {
+      effectiveBaseSlug = await ensureDbProviderCloudSnapshot({
+        token,
+        region,
+        provider: config.dbServiceProvider,
+        baseSnapshotSlug: effectiveBaseSlug,
+        parentHash,
+        config,
+        force: options?.force,
+        onProgress: mapProgress,
+        signal: options?.signal,
+      });
+      parentHash = effectiveBaseSlug.replace('oxd-', '');
     }
 
     // 3. If agent specified, ensure agent overlay snapshot exists
@@ -680,7 +698,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         region,
         agent: options.agent,
         baseSnapshotSlug: effectiveBaseSlug,
-        setupHash,
+        parentHash,
         config,
         force: options?.force,
         onProgress: mapProgress,
