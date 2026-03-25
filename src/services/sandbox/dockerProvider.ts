@@ -223,6 +223,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       model: options.model,
       interactive: options.interactive,
       envVars: options.envVars,
+      pgpassContent: options.pgpassContent,
       mountDir: options.mountDir,
       isGitRepo: options.isGitRepo,
       agentArgs: options.agentArgs,

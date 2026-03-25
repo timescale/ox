@@ -467,6 +467,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           model,
           interactive: isInteractive,
           envVars: forkResult?.envVars,
+          pgpassContent: forkResult?.pgpassContent,
           mountDir,
           isGitRepo: inGitRepo,
           agentArgs,

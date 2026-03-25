@@ -244,6 +244,7 @@ export async function branchAction(
     model: effectiveModel,
     interactive: isInteractiveAgent,
     envVars: forkResult?.envVars,
+    pgpassContent: forkResult?.pgpassContent,
     mountDir,
     isGitRepo,
     agentMode: effectiveAgentMode,

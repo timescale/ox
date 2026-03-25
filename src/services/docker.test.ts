@@ -3,6 +3,7 @@ import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import {
+  appendOptionalPgpassFile,
   buildDockerSandboxRootInitScript,
   buildOxLabels,
   computeAgentOverlayHash,
@@ -20,6 +21,23 @@ import {
   resolveDockerSandboxPrivilege,
   resolveSandboxImage,
 } from './docker';
+
+describe('appendOptionalPgpassFile', () => {
+  test('appends a .pgpass virtual file when content is provided', () => {
+    expect(
+      appendOptionalPgpassFile([], '/sandbox/home', 'pgpass-line'),
+    ).toEqual([{ path: '/sandbox/home/.pgpass', value: 'pgpass-line' }]);
+  });
+
+  test('leaves files unchanged when no .pgpass content is provided', () => {
+    expect(
+      appendOptionalPgpassFile(
+        [{ path: '/sandbox/home/.claude.json', value: 'claude-creds' }],
+        '/sandbox/home',
+      ),
+    ).toEqual([{ path: '/sandbox/home/.claude.json', value: 'claude-creds' }]);
+  });
+});
 
 describe('formatCpuPercent', () => {
   test('formats values under 10 with one decimal place', () => {

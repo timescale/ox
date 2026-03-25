@@ -71,6 +71,7 @@ import type { AgentMode, AttachOptions } from './sandbox/types';
 
 export const getCredentialFiles = async (
   homeDir = CONTAINER_HOME,
+  pgpassContent?: string,
 ): Promise<VirtualFile[]> => {
   const [claudeFiles, opencodeFiles, codexFiles, ghFiles, ghostFiles] =
     await Promise.all([
@@ -89,13 +90,35 @@ export const getCredentialFiles = async (
   ];
   // Rewrite paths if a different home directory was requested
   if (homeDir !== CONTAINER_HOME) {
-    return files.map((f) => ({
-      ...f,
-      path: f.path.replace(CONTAINER_HOME, homeDir),
-    }));
+    return appendOptionalPgpassFile(
+      files.map((f) => ({
+        ...f,
+        path: f.path.replace(CONTAINER_HOME, homeDir),
+      })),
+      homeDir,
+      pgpassContent,
+    );
   }
-  return files;
+  return appendOptionalPgpassFile(files, homeDir, pgpassContent);
 };
+
+export function appendOptionalPgpassFile(
+  files: VirtualFile[],
+  homeDir = CONTAINER_HOME,
+  pgpassContent?: string,
+): VirtualFile[] {
+  if (!pgpassContent) {
+    return files;
+  }
+
+  return [
+    ...files,
+    {
+      path: `${homeDir}/.pgpass`,
+      value: pgpassContent,
+    },
+  ];
+}
 
 // ============================================================================
 // Container Labels
@@ -1595,6 +1618,7 @@ export interface StartContainerOptions {
   model?: string;
   interactive: boolean;
   envVars?: Record<string, string>;
+  pgpassContent?: string;
   /** If set, mount this local directory into the container instead of git clone */
   mountDir?: string;
   /** Whether running from a git repository (affects git/gh operations and PR instructions) */
@@ -2351,6 +2375,7 @@ export async function startContainer(
     agentMode,
     dockerImage,
     signal,
+    pgpassContent,
   } = options;
 
   const containerName = `ox-${branchName}`;
@@ -2415,7 +2440,7 @@ export async function startContainer(
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
-  const files = await getCredentialFiles();
+  const files = await getCredentialFiles(CONTAINER_HOME, pgpassContent);
 
   // Resolve mount directory to absolute path if provided
   const absoluteMountDir = mountDir ? resolve(mountDir) : undefined;

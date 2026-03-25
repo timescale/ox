@@ -60,6 +60,7 @@ export interface CreateSandboxOptions {
   model?: string;
   interactive: boolean;
   envVars?: Record<string, string>;
+  pgpassContent?: string;
   mountDir?: string; // Docker-only: local dir mount
   isGitRepo?: boolean;
   agentArgs?: string[];

@@ -162,12 +162,15 @@ async function runCloudLifecycleScripts(
  * using the SDK's filesystem API. Resolves the default user's $HOME first
  * so paths are correct for the sandbox environment.
  */
-async function injectCredentials(sandbox: Sandbox): Promise<void> {
+async function injectCredentials(
+  sandbox: Sandbox,
+  pgpassContent?: string,
+): Promise<void> {
   const homeResult = await sandboxExec(sandbox, 'echo $HOME', {
     capture: true,
   });
   const home = homeResult.trim();
-  const credFiles = await getCredentialFiles(home);
+  const credFiles = await getCredentialFiles(home, pgpassContent);
   for (const file of credFiles) {
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
     await sandbox.fs.mkdir(dir, { recursive: true });
@@ -259,7 +262,7 @@ async function provisionSandbox(
     // Inject credential files
     onProgress?.('Setting up credentials');
     await logToSandbox(sandbox, 'Setting up credentials...');
-    await injectCredentials(sandbox);
+    await injectCredentials(sandbox, options.pgpassContent);
 
     // Clone repo and create branch
     if (options.repoInfo && options.isGitRepo !== false) {
