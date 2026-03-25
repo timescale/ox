@@ -82,7 +82,12 @@ export function getDbProviderSnapshotSlug(
   parentHash?: string,
   config: Pick<OxConfig, 'dockerInSandbox'> = {},
 ): string {
-  const hash = (parentHash ?? computeCloudBaseHash(config)).slice(0, 6);
+  const parent = parentHash ?? computeCloudBaseHash(config);
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(parent);
+  hasher.update(provider);
+  hasher.update(getDbProviderInstallScript(provider));
+  const hash = hasher.digest('hex').slice(0, 12);
   return `oxd-${hash}-${provider}`.slice(0, 32).replace(/-+$/, '');
 }
 

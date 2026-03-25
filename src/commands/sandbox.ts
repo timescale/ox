@@ -301,7 +301,7 @@ export const sandboxCommand = new Command('sandbox')
               }
 
               if (
-                (options.project || options.agent) &&
+                options.agent &&
                 (config.dbServiceProvider === 'tiger' ||
                   config.dbServiceProvider === 'ghost')
               ) {
@@ -387,7 +387,7 @@ export const sandboxCommand = new Command('sandbox')
               }
 
               if (
-                (options.project || options.agent) &&
+                options.agent &&
                 (config.dbServiceProvider === 'tiger' ||
                   config.dbServiceProvider === 'ghost')
               ) {

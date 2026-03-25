@@ -226,9 +226,9 @@ describe('getDbProviderSnapshotSlug', () => {
       expect(slug).toContain(provider);
     });
 
-    test(`${provider}: contains base hash prefix when no parent hash provided`, () => {
+    test(`${provider}: produces a deterministic content-addressed slug`, () => {
       const slug = getDbProviderSnapshotSlug(provider);
-      expect(slug).toContain(computeCloudBaseHash().slice(0, 6));
+      expect(slug).toMatch(/^oxd-[a-f0-9]+-/);
     });
 
     test(`${provider}: does not end with a hyphen`, () => {
