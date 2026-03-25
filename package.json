@@ -8,6 +8,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "test": "./bun test",
+    "test:e2e": "./bun test ./e2e-tests/",
+    "test:all": "./bun test ./src/ ./e2e-tests/",
     "check": "./bun i --silent && ./bun run typecheck && ./bun run lint --write && ./bun run test --only-failures",
     "update-codex-models": "./bun scripts/codex/update-models.ts",
     "pilotty": "pilotty"

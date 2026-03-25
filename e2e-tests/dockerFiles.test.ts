@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFileFromContainer, writeFileToContainer } from './dockerFiles';
+import {
+  readFileFromContainer,
+  writeFileToContainer,
+} from '../src/services/dockerFiles';
 
 // These tests require a running Docker daemon.
 // They spin up a lightweight alpine container for the duration of the suite.

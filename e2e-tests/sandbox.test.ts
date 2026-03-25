@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { ShellError } from '../utils/shell.ts';
+import type { ShellError } from '../src/utils/shell.ts';
 
-const PROJECT_ROOT = resolve(import.meta.dir, '..', '..');
+const PROJECT_ROOT = resolve(import.meta.dir, '..');
 const BUN = resolve(PROJECT_ROOT, 'bun');
 const CLI = resolve(PROJECT_ROOT, 'index.ts');
 

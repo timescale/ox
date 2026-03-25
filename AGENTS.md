@@ -19,8 +19,14 @@ Always use `./bun` wrapper script (auto-installs pinned Bun version):
 # Linting and formatting (auto-fix)
 ./bun run lint --write
 
-# Run tests
+# Run unit tests (fast, no external dependencies)
 ./bun test
+
+# Run e2e / integration tests only (may need Docker, OS keychain, etc.)
+./bun run test:e2e
+
+# Run all tests (unit + e2e)
+./bun run test:all
 
 # Run a single test file
 ./bun test src/path/to/file.test.ts
@@ -28,7 +34,7 @@ Always use `./bun` wrapper script (auto-installs pinned Bun version):
 # Run tests matching a pattern
 ./bun test --test-name-pattern "pattern"
 
-# Shorthand for all checks (typecheck, lint auto-fix, tests)
+# Shorthand for all checks (typecheck, lint auto-fix, unit tests)
 ./bun run check
 
 # Build standalone binary
@@ -144,7 +150,7 @@ await proc.exited;
 
 ## Testing
 
-Use Bun's built-in test runner. Tests are colocated with source files using `.test.ts` suffix.
+Use Bun's built-in test runner. Unit tests are colocated with source files in `src/` using `.test.ts` suffix.
 
 ```typescript
 import { test, expect, describe } from 'bun:test';
@@ -156,10 +162,17 @@ describe('featureName', () => {
 });
 ```
 
+### Unit vs E2E Tests
+
+- **Unit tests** (`src/**/*.test.ts`): Fast, no external dependencies. Run by default with `./bun test`.
+- **E2E tests** (`e2e-tests/*.test.ts`): Slower tests that require external services (Docker, OS keychain) or spawn subprocesses. Run with `./bun run test:e2e`. Excluded from `./bun test` and `./bun run check`.
+
+Place new tests in `e2e-tests/` if they spawn subprocesses, require Docker, hit the OS keychain, or are otherwise slow/environment-dependent.
+
 ### Test Guidelines
 
 - **Run tests after changes**: Always run `./bun test` after modifying code
-- **Colocate tests**: Place `foo.test.ts` next to `foo.ts`
+- **Colocate unit tests**: Place `foo.test.ts` next to `foo.ts` in `src/`
 - **Export for testability**: If a function needs testing, export it
 - **Use descriptive names**: Test names should describe expected behavior
 - **Test edge cases**: Include tests for error conditions and boundary cases
@@ -176,6 +189,7 @@ ox/
 │   ├── components/         # React TUI components (@opentui/react)
 │   ├── services/           # Business logic
 │   └── types/              # Type declarations
+├── e2e-tests/              # Slow / integration tests (Docker, keychain, subprocesses)
 ├── sandbox/
 │   └── Dockerfile          # Agent container image
 └── .ox/                # Local config (gitignored)

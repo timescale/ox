@@ -17,4 +17,4 @@ jobs:
       - name: Run Type Check
         run: ./bun run typecheck
       - name: Run Tests
-        run: ./bun test
+        run: ./bun test:all
