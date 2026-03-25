@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type OxConfig, projectConfig, readConfig, userConfig } from './config';
+import {
+  migrateConfig,
+  type OxConfig,
+  projectConfig,
+  readConfig,
+  userConfig,
+} from './config';
 
 describe('projectConfig', () => {
   const testConfigDir = '.ox-test';
@@ -51,7 +57,7 @@ describe('projectConfig', () => {
       await Bun.write(
         '.ox/config.yml',
         `
-tigerServiceId: svc-123
+dbServiceId: svc-123
 agent: claude
 model: sonnet
 `,
@@ -59,7 +65,7 @@ model: sonnet
 
       const config = await projectConfig.read();
       expect(config).toEqual({
-        tigerServiceId: 'svc-123',
+        dbServiceId: 'svc-123',
         agent: 'claude',
         model: 'sonnet',
       });
@@ -80,19 +86,19 @@ agent: opencode
       });
     });
 
-    test('reads config with null tigerServiceId', async () => {
+    test('reads config with null dbServiceId', async () => {
       await mkdir('.ox', { recursive: true });
       await Bun.write(
         '.ox/config.yml',
         `
-tigerServiceId: null
+dbServiceId: null
 agent: claude
 `,
       );
 
       const config = await projectConfig.read();
       expect(config).toEqual({
-        tigerServiceId: null,
+        dbServiceId: null,
         agent: 'claude',
       });
     });
@@ -123,7 +129,7 @@ agent: claude
   describe('write', () => {
     test('writes config with all fields', async () => {
       const config: OxConfig = {
-        tigerServiceId: 'svc-456',
+        dbServiceId: 'svc-456',
         agent: 'opencode',
         model: 'gpt-4',
       };
@@ -131,7 +137,7 @@ agent: claude
       await projectConfig.write(config);
 
       const content = await Bun.file('.ox/config.yml').text();
-      expect(content).toContain('tigerServiceId: svc-456');
+      expect(content).toContain('dbServiceId: svc-456');
       expect(content).toContain('agent: opencode');
       expect(content).toContain('model: gpt-4');
     });
@@ -147,16 +153,16 @@ agent: claude
       expect(fileExists).toBe(true);
     });
 
-    test('writes config with null tigerServiceId', async () => {
+    test('writes config with null dbServiceId', async () => {
       const config: OxConfig = {
-        tigerServiceId: null,
+        dbServiceId: null,
         agent: 'claude',
       };
 
       await projectConfig.write(config);
 
       const content = await Bun.file('.ox/config.yml').text();
-      expect(content).toContain('tigerServiceId: null');
+      expect(content).toContain('dbServiceId: null');
     });
 
     test('overwrites existing config', async () => {
@@ -220,7 +226,7 @@ agent: claude
   describe('roundtrip', () => {
     test('config can be written and read back', async () => {
       const original: OxConfig = {
-        tigerServiceId: 'svc-roundtrip',
+        dbServiceId: 'svc-roundtrip',
         agent: 'claude',
         model: 'opus',
       };
@@ -240,7 +246,7 @@ agent: claude
       const readBack = await projectConfig.read();
 
       expect(readBack?.agent).toBe('opencode');
-      expect(readBack?.tigerServiceId).toBeUndefined();
+      expect(readBack?.dbServiceId).toBeUndefined();
       expect(readBack?.model).toBeUndefined();
     });
 
@@ -527,13 +533,13 @@ describe('readConfig (merged config)', () => {
       themeName: 'nord',
       agent: 'claude',
       model: 'opus',
-      tigerServiceId: 'user-svc',
+      dbServiceId: 'user-svc',
     });
 
     await projectConfig.write({
       agent: 'opencode',
       model: 'gpt-4',
-      tigerServiceId: 'project-svc',
+      dbServiceId: 'project-svc',
     });
 
     const config = await readConfig();
@@ -541,7 +547,7 @@ describe('readConfig (merged config)', () => {
       themeName: 'nord', // only in user config
       agent: 'opencode', // project override
       model: 'gpt-4', // project override
-      tigerServiceId: 'project-svc', // project override
+      dbServiceId: 'project-svc', // project override
     });
   });
 
@@ -562,18 +568,18 @@ describe('readConfig (merged config)', () => {
 
   test('null values in project config override user config', async () => {
     await userConfig.write({
-      tigerServiceId: 'user-svc',
+      dbServiceId: 'user-svc',
       agent: 'claude',
     });
 
-    // Project explicitly sets tigerServiceId to null (no DB fork)
+    // Project explicitly sets dbServiceId to null (no DB fork)
     await projectConfig.write({
-      tigerServiceId: null,
+      dbServiceId: null,
       agent: 'opencode',
     });
 
     const config = await readConfig();
-    expect(config?.tigerServiceId).toBeNull(); // project override with null
+    expect(config?.dbServiceId).toBeNull(); // project override with null
     expect(config?.agent).toBe('opencode');
   });
 
@@ -640,6 +646,39 @@ describe('readConfig (merged config)', () => {
     const config = await readConfig();
     expect(config.agent).toBe('opencode'); // project override
     expect(config.rootInitScript).toBe('apt-get install -y git'); // from user
+  });
+});
+
+describe('migrateConfig', () => {
+  test('migrates tigerServiceId to dbServiceId and dbServiceProvider', () => {
+    const config: Record<string, unknown> = { tigerServiceId: 'svc-123' };
+    migrateConfig(config);
+    expect(config).toEqual({
+      dbServiceId: 'svc-123',
+      dbServiceProvider: 'tiger',
+    });
+  });
+
+  test('migrates tigerServiceId: null to dbServiceId: null (dbServiceProvider stays undefined)', () => {
+    const config: Record<string, unknown> = { tigerServiceId: null };
+    migrateConfig(config);
+    expect(config).toEqual({ dbServiceId: null });
+  });
+
+  test('does not overwrite existing dbServiceId when both keys exist', () => {
+    const config: Record<string, unknown> = {
+      tigerServiceId: 'svc-old',
+      dbServiceId: 'svc-new',
+    };
+    migrateConfig(config);
+    // dbServiceId should be preserved, tigerServiceId deleted
+    expect(config).toEqual({ dbServiceId: 'svc-new' });
+  });
+
+  test('no-ops when neither key exists', () => {
+    const config: Record<string, unknown> = { agent: 'claude' };
+    migrateConfig(config);
+    expect(config).toEqual({ agent: 'claude' });
   });
 });
 

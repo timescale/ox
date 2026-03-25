@@ -12,15 +12,22 @@ import envPaths from 'env-paths';
 
 export type AgentType = 'claude' | 'opencode' | 'codex';
 
+export type DbServiceProvider = 'tiger' | 'ghost';
+
 /**
  * Ox configuration - all keys are valid at both user and project level.
  * User config provides defaults, project config can override any value.
  */
 export interface OxConfig {
-  // Tiger service ID to use as the default parent for database forks
+  // Database service provider: 'tiger' or 'ghost'
+  // null = explicitly "none" (no DB provider)
+  // undefined = not set
+  dbServiceProvider?: DbServiceProvider | null;
+
+  // Database service/instance ID to use as the default parent for forks
   // null = explicitly "none" (skip DB fork by default)
   // undefined = not set
-  tigerServiceId?: string | null;
+  dbServiceId?: string | null;
 
   // Default agent to use (claude or opencode)
   agent?: AgentType;
@@ -142,7 +149,8 @@ export type ConfigValueType =
 
 /** Type metadata for each config key, used for validation and parsing in CLI */
 export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
-  tigerServiceId: 'string|null',
+  dbServiceProvider: 'string|null',
+  dbServiceId: 'string|null',
   agent: 'string',
   model: 'string',
   themeName: 'string',
@@ -386,6 +394,20 @@ export const userConfig = createConfigStore<OxConfig>({
 // ============================================================================
 
 /**
+ * Migrate legacy config keys in-place.
+ * - tigerServiceId → dbServiceId + dbServiceProvider: 'tiger'
+ */
+export function migrateConfig(config: Record<string, unknown>): void {
+  if ('tigerServiceId' in config && !('dbServiceId' in config)) {
+    config.dbServiceId = config.tigerServiceId;
+    if (config.tigerServiceId !== null && config.tigerServiceId !== undefined) {
+      config.dbServiceProvider = 'tiger';
+    }
+  }
+  delete config.tigerServiceId;
+}
+
+/**
  * Read the effective/merged config.
  *
  * Config values are merged with project config taking precedence over user config.
@@ -400,10 +422,13 @@ export async function readConfig(): Promise<OxConfig> {
     projectConfig.read(),
   ]);
 
-  return {
+  const merged: Record<string, unknown> = {
     ...user,
     ...project,
   };
+  migrateConfig(merged);
+
+  return merged as OxConfig;
 }
 
 /**
