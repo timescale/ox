@@ -26,6 +26,7 @@ import {
   type AgentType,
   CONFIG_KEYS,
   type ConfigValueType,
+  type DbServiceProvider,
   type OxConfig,
   parseConfigValue,
   projectConfig,
@@ -34,6 +35,15 @@ import {
 } from '../services/config';
 import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
 import { type GhAuthProcess, startContainerGhAuth } from '../services/ghAuth';
+import {
+  checkGhostCredentials,
+  type GhostDatabase,
+  listGhostDatabases,
+} from '../services/ghost';
+import {
+  type GhostAuthProcess,
+  startContainerGhostAuth,
+} from '../services/ghostAuth';
 import {
   checkOpencodeCredentials,
   ensureOpencodeAuth,
@@ -66,12 +76,79 @@ type Step =
   | 'sandbox-provider'
   | 'cloud-region'
   | 'cloud-setup'
-  | 'service'
   | 'agent'
   | 'model'
+  | 'db-provider'
+  | 'db-auth'
+  | 'service'
   | 'agent-auth-check'
   | 'gh-auth-check'
   | 'gh-auth';
+
+export function getConfigWizardSteps(
+  config:
+    | Pick<OxConfig, 'sandboxProvider' | 'dbServiceProvider'>
+    | null
+    | undefined,
+): Step[] {
+  return [
+    'docker',
+    'sandbox-provider',
+    ...(config?.sandboxProvider === 'cloud'
+      ? (['cloud-region', 'cloud-setup'] as const)
+      : []),
+    'agent',
+    'model',
+    'db-provider',
+    ...(config?.dbServiceProvider ? (['service'] as const) : []),
+    'agent-auth-check',
+    'gh-auth-check',
+  ];
+}
+
+function getAdjacentStep(steps: Step[], step: Step, dir = 1): Step {
+  const index = steps.indexOf(step);
+  return steps[index + dir] || 'docker';
+}
+
+export function applyDbProviderSelection(
+  config: OxConfig | null | undefined,
+  provider: DbServiceProvider | null,
+): OxConfig | null {
+  if (!config) return null;
+  if (provider === null) {
+    return {
+      ...config,
+      dbServiceProvider: null,
+      dbServiceId: null,
+    };
+  }
+
+  return {
+    ...config,
+    dbServiceProvider: provider,
+    dbServiceId:
+      config.dbServiceProvider === provider ? config.dbServiceId : undefined,
+  };
+}
+
+export function formatDatabaseSummary(
+  config: Pick<OxConfig, 'dbServiceProvider' | 'dbServiceId'>,
+): string {
+  if (!config.dbServiceProvider) {
+    return 'Database: (None) - forks will be skipped by default';
+  }
+
+  if (config.dbServiceId === null) {
+    return `Database: ${config.dbServiceProvider} (no service selected)`;
+  }
+
+  if (config.dbServiceId) {
+    return `Database: ${config.dbServiceProvider} - ${config.dbServiceId}`;
+  }
+
+  return `Database: ${config.dbServiceProvider} (no service selected)`;
+}
 
 export interface ConfigWizardProps {
   onComplete: (result: ConfigWizardResult) => void;
@@ -86,44 +163,33 @@ export function ConfigWizard({
 }: ConfigWizardProps) {
   // Create all promises immediately (only once via useMemo)
   const configPromise = useMemo(() => projectConfig.read(), []);
-  const tigerAvailablePromise = useMemo(() => isTigerAvailable(), []);
 
   const [step, setStep] = useState<Step>(skipToStep ?? 'docker');
   const [config, setConfig] = useState<OxConfig | null>(initialConfig ?? null);
 
   // Async data - null means still loading
-  const [tigerAvailable, setTigerAvailable] = useState<boolean | null>(null);
   const [services, setServices] = useState<TigerService[] | null>(null);
+  const [ghostDatabases, setGhostDatabases] = useState<GhostDatabase[] | null>(
+    null,
+  );
   const [modelRefreshKey, setModelRefreshKey] = useState(0);
   const modelsMap = useAgentModels(modelRefreshKey);
+
+  const [ghostAuthProcess, setGhostAuthProcess] =
+    useState<GhostAuthProcess | null>(null);
 
   // GitHub auth state
   const [ghAuthProcess, setGhAuthProcess] = useState<GhAuthProcess | null>(
     null,
   );
 
-  const steps = useMemo((): Step[] => {
-    const list: Step[] = [
-      'docker',
-      'sandbox-provider',
-      ...(config?.sandboxProvider === 'cloud'
-        ? (['cloud-region', 'cloud-setup'] as const)
-        : []),
-      'agent',
-      'model',
-      ...(tigerAvailable ? (['service'] as const) : []),
-      'agent-auth-check',
-      'gh-auth-check',
-    ];
-    return list;
-  }, [config?.sandboxProvider, tigerAvailable]);
+  const steps = useMemo(() => getConfigWizardSteps(config), [config]);
 
   const nextStep = useCallback(
-    (dir = 1) => {
-      setStep((s) => {
-        const i = steps.indexOf(s);
-        return steps[i + dir] || 'docker';
-      });
+    (dir = 1, fromStep?: Step) => {
+      setStep((currentStep) =>
+        getAdjacentStep(steps, fromStep ?? currentStep, dir),
+      );
     },
     [steps],
   );
@@ -132,6 +198,10 @@ export function ConfigWizard({
   const stepNumber = (logicalStep: Step): number => {
     return steps.indexOf(logicalStep) + 1;
   };
+
+  const skipDatabaseServiceStep = useCallback(() => {
+    setStep(getAdjacentStep(steps, 'service'));
+  }, [steps]);
 
   // Load data from promises
   useEffect(() => {
@@ -149,25 +219,146 @@ export function ConfigWizard({
       );
   }, [configPromise, initialConfig, onComplete]);
 
-  // Check tiger availability, then load services only if available
-  useEffect(() => {
-    tigerAvailablePromise
-      .then(async (available) => {
-        setTigerAvailable(available);
-        if (!available) return;
-        setServices(await listServices());
-      })
-      .catch(() => {
-        setTigerAvailable(false);
-      });
-  }, [tigerAvailablePromise]);
-
   // Force refresh models when resuming at the model step (after adding a provider)
   useEffect(() => {
     if (skipToStep === 'model') {
       setModelRefreshKey((k) => k + 1);
     }
   }, [skipToStep]);
+
+  // Handle provider-specific DB auth / availability checks
+  useEffect(() => {
+    if (step !== 'db-auth' || !config?.dbServiceProvider || ghostAuthProcess) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadTigerServices = async () => {
+      setServices(null);
+      const tigerAvailable = await isTigerAvailable();
+      if (cancelled) return;
+
+      if (!tigerAvailable) {
+        setConfig((currentConfig) =>
+          currentConfig
+            ? { ...currentConfig, dbServiceId: null }
+            : currentConfig,
+        );
+        skipDatabaseServiceStep();
+        return;
+      }
+
+      const availableServices = await listServices();
+      if (cancelled) return;
+      setServices(availableServices);
+      setStep('service');
+    };
+
+    const loadGhostDatabases = async () => {
+      setGhostDatabases(null);
+      const hasGhostCredentials = await checkGhostCredentials();
+      if (cancelled) return;
+
+      if (hasGhostCredentials) {
+        const databases = await listGhostDatabases();
+        if (cancelled) return;
+        setGhostDatabases(databases);
+        setStep('service');
+        return;
+      }
+
+      const authProcess = await startContainerGhostAuth();
+      if (cancelled) {
+        authProcess?.cancel();
+        return;
+      }
+
+      if (!authProcess) {
+        setConfig((currentConfig) =>
+          currentConfig
+            ? { ...currentConfig, dbServiceId: null }
+            : currentConfig,
+        );
+        skipDatabaseServiceStep();
+        return;
+      }
+
+      setGhostAuthProcess(authProcess);
+    };
+
+    if (config.dbServiceProvider === 'tiger') {
+      loadTigerServices().catch(() => {
+        if (cancelled) return;
+        setConfig((currentConfig) =>
+          currentConfig
+            ? { ...currentConfig, dbServiceId: null }
+            : currentConfig,
+        );
+        skipDatabaseServiceStep();
+      });
+      return;
+    }
+
+    loadGhostDatabases().catch(() => {
+      if (cancelled) return;
+      setConfig((currentConfig) =>
+        currentConfig ? { ...currentConfig, dbServiceId: null } : currentConfig,
+      );
+      skipDatabaseServiceStep();
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    step,
+    config?.dbServiceProvider,
+    ghostAuthProcess,
+    skipDatabaseServiceStep,
+  ]);
+
+  // Handle Ghost device flow completion
+  useEffect(() => {
+    if (
+      step !== 'db-auth' ||
+      config?.dbServiceProvider !== 'ghost' ||
+      !ghostAuthProcess
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    ghostAuthProcess.waitForCompletion().then(async (success) => {
+      if (cancelled) return;
+      setGhostAuthProcess(null);
+
+      if (!success) {
+        setConfig((currentConfig) =>
+          currentConfig
+            ? { ...currentConfig, dbServiceId: null }
+            : currentConfig,
+        );
+        skipDatabaseServiceStep();
+        return;
+      }
+
+      const databases = await listGhostDatabases();
+      if (cancelled) return;
+      setGhostDatabases(databases);
+      setStep('service');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    step,
+    config?.dbServiceProvider,
+    ghostAuthProcess,
+    skipDatabaseServiceStep,
+  ]);
 
   // Handle Agent auth check step - verify credentials or trigger login
   useEffect(() => {
@@ -287,6 +478,7 @@ export function ConfigWizard({
   }, [step, ghAuthProcess, config, onComplete]);
 
   const handleCancel = () => {
+    ghostAuthProcess?.cancel();
     ghAuthProcess?.cancel();
     onComplete({ type: 'cancelled' });
   };
@@ -431,25 +623,142 @@ export function ConfigWizard({
     );
   }
 
+  // ---- Step: Database Provider Selection ----
+  if (step === 'db-provider') {
+    const providerOptions: SelectOption[] = [
+      {
+        name: 'Tiger',
+        description: 'Timescale Tiger database service',
+        value: 'tiger',
+      },
+      {
+        name: 'Ghost',
+        description: 'Ghost database service (ghost.build)',
+        value: 'ghost',
+      },
+      {
+        name: '(None)',
+        description: 'No database provider - skip database forks',
+        value: '__none__',
+      },
+    ];
+
+    const initialIndex =
+      config?.dbServiceProvider === 'tiger'
+        ? 0
+        : config?.dbServiceProvider === 'ghost'
+          ? 1
+          : 2;
+
+    return (
+      <Selector
+        key="db-provider"
+        title={`Step ${stepNumber('db-provider')}/${steps.length}: Database Provider`}
+        description="Choose the default database provider for forks."
+        options={providerOptions}
+        initialIndex={initialIndex}
+        showBack
+        onSelect={(value) => {
+          const selectedProvider =
+            value === '__none__' ? null : (value as DbServiceProvider);
+
+          ghostAuthProcess?.cancel();
+          setGhostAuthProcess(null);
+          setServices(null);
+          setGhostDatabases(null);
+          setConfig((currentConfig) =>
+            applyDbProviderSelection(currentConfig, selectedProvider),
+          );
+
+          if (selectedProvider === null) {
+            setStep('agent-auth-check');
+            return;
+          }
+
+          setStep('db-auth');
+        }}
+        onCancel={handleCancel}
+        onBack={() => nextStep(-1)}
+      />
+    );
+  }
+
+  // ---- Step: Database Provider Auth / Availability ----
+  if (step === 'db-auth') {
+    if (ghostAuthProcess) {
+      return (
+        <GhAuth
+          code={ghostAuthProcess.code}
+          url={ghostAuthProcess.url}
+          onCancel={() => {
+            ghostAuthProcess.cancel();
+            setGhostAuthProcess(null);
+            setConfig((currentConfig) =>
+              currentConfig
+                ? { ...currentConfig, dbServiceId: null }
+                : currentConfig,
+            );
+            skipDatabaseServiceStep();
+          }}
+        />
+      );
+    }
+
+    const providerName =
+      config?.dbServiceProvider === 'ghost' ? 'Ghost' : 'Tiger';
+    const message =
+      config?.dbServiceProvider === 'ghost'
+        ? 'Checking Ghost authentication'
+        : 'Checking Tiger availability';
+
+    return (
+      <Loading
+        title={`Step ${stepNumber('db-provider')}/${steps.length}: ${providerName} Setup`}
+        message={message}
+        onCancel={handleCancel}
+      />
+    );
+  }
+
   // ---- Step: Service Selection ----
   if (step === 'service') {
-    // Need config and services
-    if (config === null || services === null) {
+    if (config === null || !config.dbServiceProvider) {
       return <Loading title="Loading services" onCancel={handleCancel} />;
     }
 
-    const serviceOptions: SelectOption[] = [
-      {
-        name: '(None)',
-        description: "This project doesn't need database forks",
-        value: '__null__',
-      },
-      ...services.map((svc: TigerService) => ({
-        name: svc.name,
-        description: `${svc.service_id} - ${svc.metadata.environment}, ${svc.region_code}, ${svc.status}${svc.paused ? ' (PAUSED)' : ''}`,
-        value: svc.service_id,
-      })),
-    ];
+    const isGhostProvider = config.dbServiceProvider === 'ghost';
+    if (isGhostProvider ? ghostDatabases === null : services === null) {
+      return <Loading title="Loading services" onCancel={handleCancel} />;
+    }
+
+    const availableGhostDatabases = ghostDatabases ?? [];
+    const availableServices = services ?? [];
+
+    const serviceOptions: SelectOption[] = isGhostProvider
+      ? [
+          {
+            name: '(None)',
+            description: "This project doesn't need database forks",
+            value: '__null__',
+          },
+          ...availableGhostDatabases.map((database: GhostDatabase) => ({
+            name: database.name,
+            description: `${database.id} - ${database.status}${database.region ? `, ${database.region}` : ''}${database.paused ? ' (PAUSED)' : ''}`,
+            value: database.id,
+          })),
+        ]
+      : [
+          {
+            name: '(None)',
+            description: "This project doesn't need database forks",
+            value: '__null__',
+          },
+          ...availableServices.map((svc: TigerService) => ({
+            name: svc.name,
+            description: `${svc.service_id} - ${svc.metadata.environment}, ${svc.region_code}, ${svc.status}${svc.paused ? ' (PAUSED)' : ''}`,
+            value: svc.service_id,
+          })),
+        ];
 
     const initialIndex =
       config.dbServiceId === null
@@ -461,13 +770,19 @@ export function ConfigWizard({
     return (
       <Selector
         key="service"
-        title={`Step ${stepNumber('service')}/${steps.length}: Database Service`}
-        description="Select a Tiger service to use as the default parent for database forks."
+        title={`Step ${stepNumber('service')}/${steps.length}: ${isGhostProvider ? 'Ghost Database' : 'Database Service'}`}
+        description={
+          isGhostProvider
+            ? 'Select a Ghost database to use as the default parent for forks.'
+            : 'Select a Tiger service to use as the default parent for database forks.'
+        }
         options={serviceOptions}
         initialIndex={initialIndex >= 0 ? initialIndex : 0}
         showBack
         onSelect={(value) => {
-          setConfig((c) => (c ? { ...c, dbServiceId: value } : c));
+          setConfig((c) =>
+            c ? { ...c, dbServiceId: value === '__null__' ? null : value } : c,
+          );
           nextStep();
         }}
         onCancel={handleCancel}
@@ -749,11 +1064,7 @@ export async function configAction(): Promise<void> {
       `  Sandbox: ${config.sandboxProvider === 'cloud' ? 'Cloud' : 'Docker (local)'}`,
     );
 
-    if (config.dbServiceId === null) {
-      console.log('  Database: (None) - forks will be skipped by default');
-    } else if (config.dbServiceId) {
-      console.log(`  Database: ${config.dbServiceId}`);
-    }
+    console.log(`  ${formatDatabaseSummary(config)}`);
 
     console.log(`  Agent: ${config.agent}`);
     if (config.model) {
