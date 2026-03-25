@@ -163,7 +163,12 @@ export async function branchAction(
   } else {
     log.info('Forking database (this may take a few minutes)...');
     printErr('Forking database (this may take a few minutes)...');
-    forkResult = await forkDatabase(branchName, effectiveServiceId);
+    forkResult = await forkDatabase(
+      branchName,
+      effectiveServiceId,
+      undefined,
+      config.dbServiceProvider,
+    );
     log.info({ name: forkResult.name }, 'Database fork created');
     printErr(`  Database fork created: ${forkResult.name}`);
   }

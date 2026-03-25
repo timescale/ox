@@ -4,12 +4,16 @@
 
 import { raceAbort, throwIfAborted } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
+import type { DbServiceProvider } from './config';
+import { readFileFromContainer } from './dockerFiles';
+import { runGhostInDocker } from './ghost';
 import { log } from './logger';
 
 export interface ForkResult {
   service_id: string;
   name: string;
   envVars: Record<string, string>; // PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
+  pgpassContent?: string;
 }
 
 export function parseEnvOutput(output: string): Record<string, string> {
@@ -25,7 +29,26 @@ export function parseEnvOutput(output: string): Record<string, string> {
   return envVars;
 }
 
-export async function forkDatabase(
+/**
+ * Parse a PostgreSQL connection string into individual PG env vars.
+ * Handles `postgresql://user:pass@host:port/db` format.
+ */
+export function parseConnectionString(connStr: string): Record<string, string> {
+  const url = new URL(connStr);
+  return {
+    PGHOST: url.hostname,
+    PGPORT: url.port || '5432',
+    PGDATABASE: url.pathname.replace(/^\//, ''),
+    PGUSER: decodeURIComponent(url.username),
+    PGPASSWORD: decodeURIComponent(url.password),
+  };
+}
+
+// ============================================================================
+// Tiger Fork
+// ============================================================================
+
+async function forkDatabaseTiger(
   branchName: string,
   serviceId?: string | null,
   signal?: AbortSignal,
@@ -105,4 +128,91 @@ export async function forkDatabase(
     name: metadata.name,
     envVars,
   };
+}
+
+// ============================================================================
+// Ghost Fork
+// ============================================================================
+
+async function forkDatabaseGhost(
+  branchName: string,
+  serviceId?: string | null,
+  signal?: AbortSignal,
+): Promise<ForkResult> {
+  if (!serviceId) {
+    throw new Error('Ghost fork requires a service ID (dbServiceId)');
+  }
+
+  // Step 1: Fork the database
+  throwIfAborted(signal);
+  log.info({ serviceId, branchName }, 'Creating Ghost database fork');
+  const forkProc = await runGhostInDocker({
+    cmdArgs: ['fork', serviceId, '--name', branchName, '--json'],
+    shouldThrow: true,
+    quiet: true,
+    signal,
+  });
+  await forkProc.exited;
+  const forkOutput = forkProc.text().trim();
+  log.debug({ forkOutput }, 'Ghost fork output');
+  const forkMetadata = JSON.parse(forkOutput);
+
+  const forkId: string = forkMetadata.id;
+  const forkName: string = forkMetadata.name ?? branchName;
+
+  // Step 2: Get the connection string
+  throwIfAborted(signal);
+  log.info({ forkId }, 'Getting Ghost fork connection string');
+  const connectProc = await runGhostInDocker({
+    cmdArgs: ['connect', forkId],
+    shouldThrow: true,
+    quiet: true,
+    signal,
+  });
+  await connectProc.exited;
+  const connectionString = connectProc.text().trim();
+  log.debug('Ghost connect output received');
+
+  // Step 3: Parse connection string into PG env vars
+  const envVars = parseConnectionString(connectionString);
+  envVars.DATABASE_URL = connectionString;
+
+  // Step 4: Try to capture .pgpass from the connect container
+  let pgpassContent: string | undefined;
+  try {
+    const { containerId } = connectProc;
+    if (containerId) {
+      pgpassContent = await readFileFromContainer(
+        containerId,
+        `${process.env.HOME ?? '/root'}/.pgpass`,
+      );
+    }
+  } catch {
+    log.debug('Could not capture .pgpass from Ghost container (non-critical)');
+  }
+
+  return {
+    service_id: forkId,
+    name: forkName,
+    envVars,
+    pgpassContent,
+  };
+}
+
+// ============================================================================
+// Dispatch
+// ============================================================================
+
+export async function forkDatabase(
+  branchName: string,
+  serviceId?: string | null,
+  signal?: AbortSignal,
+  provider?: DbServiceProvider | null,
+): Promise<ForkResult> {
+  switch (provider) {
+    case 'ghost':
+      return forkDatabaseGhost(branchName, serviceId, signal);
+    default:
+      return forkDatabaseTiger(branchName, serviceId, signal);
+  }
 }

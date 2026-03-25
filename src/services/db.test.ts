@@ -1,5 +1,40 @@
 import { describe, expect, test } from 'bun:test';
-import { parseEnvOutput } from './db';
+import { parseConnectionString, parseEnvOutput } from './db';
+
+describe('parseConnectionString', () => {
+  test('parses standard postgresql:// URL', () => {
+    const result = parseConnectionString(
+      'postgresql://user:pass@host.example.com:5432/mydb',
+    );
+    expect(result).toEqual({
+      PGUSER: 'user',
+      PGPASSWORD: 'pass',
+      PGHOST: 'host.example.com',
+      PGPORT: '5432',
+      PGDATABASE: 'mydb',
+    });
+  });
+
+  test('parses URL with encoded special characters in password', () => {
+    const result = parseConnectionString(
+      'postgresql://user:p%40ss%23word@host:5432/db',
+    );
+    expect(result.PGPASSWORD).toBe('p@ss#word');
+    expect(result.PGUSER).toBe('user');
+  });
+
+  test('uses default port when missing', () => {
+    const result = parseConnectionString('postgresql://user:pass@host/mydb');
+    expect(result.PGPORT).toBe('5432');
+  });
+
+  test('handles non-standard port', () => {
+    const result = parseConnectionString(
+      'postgresql://user:pass@host:15432/mydb',
+    );
+    expect(result.PGPORT).toBe('15432');
+  });
+});
 
 describe('parseEnvOutput', () => {
   test('parses standard env output', () => {

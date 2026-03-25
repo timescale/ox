@@ -400,6 +400,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
             branchName,
             effectiveServiceId,
             signal,
+            currentConfig?.dbServiceProvider,
           );
         }
 
