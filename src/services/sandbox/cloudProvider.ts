@@ -23,6 +23,7 @@ import type { AgentType, OxConfig } from '../config.ts';
 import { readConfig } from '../config.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
+import { isStrictPermissionFile } from '../dockerFiles.ts';
 import { log } from '../logger.ts';
 import {
   getPortUrls,
@@ -175,6 +176,9 @@ async function injectCredentials(
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
     await sandbox.fs.mkdir(dir, { recursive: true });
     await sandbox.fs.writeTextFile(file.path, file.value);
+    if (isStrictPermissionFile(file.path)) {
+      await sandboxExec(sandbox, `chmod 600 ${shellEscape(file.path)}`);
+    }
   }
 }
 

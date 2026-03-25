@@ -414,7 +414,7 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
   return cmd
     .option(
       '-s, --service-id <id>',
-      'Database service ID to fork (defaults to .ox config or tiger default)',
+      'Database service/instance ID to fork (defaults to configured DB provider)',
     )
     .option('--no-db-fork', 'Skip the database fork step')
     .option(

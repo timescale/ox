@@ -5,7 +5,7 @@
 import { raceAbort, throwIfAborted } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import type { DbServiceProvider } from './config';
-import { readFileFromContainer } from './dockerFiles';
+import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { runGhostInDocker } from './ghost';
 import { log } from './logger';
 
@@ -184,7 +184,7 @@ async function forkDatabaseGhost(
     if (containerId) {
       pgpassContent = await readFileFromContainer(
         containerId,
-        `${process.env.HOME ?? '/root'}/.pgpass`,
+        `${CONTAINER_HOME}/.pgpass`,
       );
     }
   } catch {

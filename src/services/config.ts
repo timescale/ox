@@ -307,7 +307,9 @@ function createConfigStore<T extends object>(
       return {} as T;
     }
 
-    return parsed as T;
+    const migrated = { ...(parsed as Record<string, unknown>) };
+    migrateConfig(migrated);
+    return migrated as T;
   };
 
   const readValue = async <K extends keyof T>(
@@ -426,7 +428,6 @@ export async function readConfig(): Promise<OxConfig> {
     ...user,
     ...project,
   };
-  migrateConfig(merged);
 
   return merged as OxConfig;
 }

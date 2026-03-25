@@ -633,6 +633,37 @@ describe('readConfig (merged config)', () => {
     expect(config.rootInitScript).toBe('apt-get install -y build-essential'); // project override
   });
 
+  test('migrates legacy tigerServiceId in each config before merge so project overrides win', async () => {
+    await userConfig.write({
+      dbServiceProvider: 'ghost',
+      dbServiceId: 'ghost-user',
+    });
+
+    await mkdir('.ox', { recursive: true });
+    await Bun.write(
+      '.ox/config.yml',
+      'tigerServiceId: svc-project-legacy\nagent: claude\n',
+    );
+
+    const config = await readConfig();
+
+    expect(config.dbServiceProvider).toBe('tiger');
+    expect(config.dbServiceId).toBe('svc-project-legacy');
+    expect(config.agent).toBe('claude');
+  });
+
+  test('projectConfig.read migrates legacy tigerServiceId', async () => {
+    await mkdir('.ox', { recursive: true });
+    await Bun.write('.ox/config.yml', 'tigerServiceId: svc-project-legacy\n');
+
+    const config = await projectConfig.read();
+
+    expect(config).toEqual({
+      dbServiceProvider: 'tiger',
+      dbServiceId: 'svc-project-legacy',
+    });
+  });
+
   test('user rootInitScript used when project does not set it', async () => {
     await userConfig.write({
       agent: 'claude',
