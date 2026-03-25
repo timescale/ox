@@ -252,6 +252,7 @@ interface RunGhostInDockerOptions extends RunInDockerOptionsBase {
    * credentials (e.g. `ox ghost login`).
    */
   saveCredentials?: boolean;
+  removeContainerOnExit?: boolean;
 }
 
 export const runGhostInDocker = async ({
@@ -263,6 +264,7 @@ export const runGhostInDocker = async ({
   files = [],
   mountCwd,
   saveCredentials = false,
+  removeContainerOnExit = true,
   signal,
   quiet,
 }: RunGhostInDockerOptions): Promise<
@@ -318,7 +320,7 @@ export const runGhostInDocker = async ({
       .finally(async () => {
         // Skip explicit removal if aborted — the abort handler already
         // force-removed the container via `docker rm -f`.
-        if (signal?.aborted) return;
+        if (signal?.aborted || !removeContainerOnExit) return;
         await result.rm().catch((err) => {
           log.error({ err }, 'Failed to remove container');
         });

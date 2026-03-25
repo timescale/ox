@@ -151,52 +151,62 @@ async function forkDatabaseGhost(
     shouldThrow: true,
     quiet: true,
     signal,
+    removeContainerOnExit: false,
   });
-  await forkProc.exited;
-  const forkOutput = forkProc.text().trim();
-  log.debug({ forkOutput }, 'Ghost fork output');
-  const forkMetadata = JSON.parse(forkOutput);
 
-  const forkId: string = forkMetadata.id;
-  const forkName: string = forkMetadata.name ?? branchName;
-
-  // Step 2: Get the connection string
-  throwIfAborted(signal);
-  log.info({ forkId }, 'Getting Ghost fork connection string');
-  const connectProc = await runGhostInDocker({
-    cmdArgs: ['connect', forkId],
-    shouldThrow: true,
-    quiet: true,
-    signal,
-  });
-  await connectProc.exited;
-  const connectionString = connectProc.text().trim();
-  log.debug('Ghost connect output received');
-
-  // Step 3: Parse connection string into PG env vars
-  const envVars = parseConnectionString(connectionString);
-  envVars.DATABASE_URL = connectionString;
-
-  // Step 4: Try to capture .pgpass from the connect container
-  let pgpassContent: string | undefined;
   try {
-    const { containerId } = connectProc;
-    if (containerId) {
-      pgpassContent = await readFileFromContainer(
-        containerId,
-        `${CONTAINER_HOME}/.pgpass`,
+    await forkProc.exited;
+    const forkOutput = forkProc.text().trim();
+    log.debug({ forkOutput }, 'Ghost fork output');
+    const forkMetadata = JSON.parse(forkOutput);
+
+    const forkId: string = forkMetadata.id;
+    const forkName: string = forkMetadata.name ?? branchName;
+
+    // Step 2: Get the connection string
+    throwIfAborted(signal);
+    log.info({ forkId }, 'Getting Ghost fork connection string');
+    const connectProc = await runGhostInDocker({
+      cmdArgs: ['connect', forkId],
+      shouldThrow: true,
+      quiet: true,
+      signal,
+    });
+    await connectProc.exited;
+    const connectionString = connectProc.text().trim();
+    log.debug('Ghost connect output received');
+
+    // Step 3: Parse connection string into PG env vars
+    const envVars = parseConnectionString(connectionString);
+    envVars.DATABASE_URL = connectionString;
+
+    // Step 4: Try to capture .pgpass from the fork container
+    let pgpassContent: string | undefined;
+    try {
+      const { containerId } = forkProc;
+      if (containerId) {
+        pgpassContent = await readFileFromContainer(
+          containerId,
+          `${CONTAINER_HOME}/.pgpass`,
+        );
+      }
+    } catch {
+      log.debug(
+        'Could not capture .pgpass from Ghost container (non-critical)',
       );
     }
-  } catch {
-    log.debug('Could not capture .pgpass from Ghost container (non-critical)');
-  }
 
-  return {
-    service_id: forkId,
-    name: forkName,
-    envVars,
-    pgpassContent,
-  };
+    return {
+      service_id: forkId,
+      name: forkName,
+      envVars,
+      pgpassContent,
+    };
+  } finally {
+    await forkProc.rm(false).catch(() => {
+      log.debug('Failed to remove Ghost fork container during cleanup');
+    });
+  }
 }
 
 // ============================================================================

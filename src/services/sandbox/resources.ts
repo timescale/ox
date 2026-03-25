@@ -142,8 +142,8 @@ const OX_VOLUME_PREFIXES = [
  *
  * Rules:
  * - `ox-base-*` → "Base Snapshot": `current` if matches getBaseSnapshotSlug(), else `old`
- * - `oxd-*` → "DB Provider Snapshot": `current` if in currentDbProviderSlugs, else `old`
- * - `ox-*` (not `ox-base-*`) → "Agent Snapshot": `current` if in currentAgentSlugs, else `old`
+ * - `oxd-*` → "DB Provider Snapshot": `current` if in currentDbProviderSlugs, else `unknown`
+ * - `ox-*` (not `ox-base-*`) → "Agent Snapshot": `current` if in currentAgentSlugs, else `unknown`
  * - `oxn-*` → "Session Snapshot": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
  * - Other prefixes → null (not an Ox resource, skip)

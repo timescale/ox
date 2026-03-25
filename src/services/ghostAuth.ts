@@ -25,6 +25,20 @@ export interface GhostAuthProcess {
   cancel: () => void;
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function cancelReader(reader: {
+  cancel: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await reader.cancel();
+  } catch {
+    // Ignore cancellation errors during cleanup
+  }
+}
+
 /**
  * Start ghost login in a Docker container and parse the device code.
  * Returns a handle to wait for completion or cancel.
@@ -81,7 +95,6 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
   let stderrBuffer = '';
   let stdoutBuffer = '';
 
-  // Read stderr for the device code
   const stderrReader = proc.stderr?.getReader();
   const stdoutReader = proc.stdout?.getReader();
 
@@ -90,39 +103,52 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
     return null;
   }
 
-  // Read until we have the device code (with timeout)
   const startTime = Date.now();
   const TIMEOUT_MS = 10000;
-
-  // Read both streams concurrently to find the code
   const hasDeviceCode = () => {
     const combined = stderrBuffer + stdoutBuffer;
     return combined.includes('one-time code:') && combined.includes('http');
   };
 
-  // Read stderr in background
   const stderrReadLoop = (async () => {
-    while (Date.now() - startTime < TIMEOUT_MS && !hasDeviceCode()) {
-      const { done, value } = await stderrReader.read();
-      if (done) break;
-      stderrBuffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await stderrReader.read();
+        if (done) break;
+        stderrBuffer += decoder.decode(value, { stream: true });
+      }
+    } catch {
+      // Ignore - reader may be cancelled during cleanup
+    } finally {
+      try {
+        stderrReader.releaseLock();
+      } catch {
+        // Ignore release errors during cleanup
+      }
     }
   })();
 
-  // Read stdout in background
   const stdoutReadLoop = (async () => {
-    while (Date.now() - startTime < TIMEOUT_MS && !hasDeviceCode()) {
-      const { done, value } = await stdoutReader.read();
-      if (done) break;
-      stdoutBuffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await stdoutReader.read();
+        if (done) break;
+        stdoutBuffer += decoder.decode(value, { stream: true });
+      }
+    } catch {
+      // Ignore - reader may be cancelled during cleanup
+    } finally {
+      try {
+        stdoutReader.releaseLock();
+      } catch {
+        // Ignore release errors during cleanup
+      }
     }
   })();
 
-  // Wait for either stream to find the code or timeout
-  await Promise.race([
-    Promise.all([stderrReadLoop, stdoutReadLoop]),
-    new Promise<void>((resolve) => setTimeout(resolve, TIMEOUT_MS)),
-  ]);
+  while (Date.now() - startTime < TIMEOUT_MS && !hasDeviceCode()) {
+    await sleep(25);
+  }
 
   // Parse the device code and URL from combined output
   const combined = stderrBuffer + stdoutBuffer;
@@ -134,49 +160,22 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
   const url = urlMatch?.[1] ?? '';
 
   if (!code || !url) {
-    // Failed to parse
-    stderrReader.releaseLock();
-    stdoutReader.releaseLock();
+    await Promise.allSettled([
+      cancelReader(stderrReader),
+      cancelReader(stdoutReader),
+      stderrReadLoop,
+      stdoutReadLoop,
+    ]);
     cleanup();
     return null;
   }
-
-  // Continue draining stderr in background (don't await)
-  // This prevents the process from blocking on write
-  const stderrDrainPromise = (async () => {
-    try {
-      while (true) {
-        const { done } = await stderrReader.read();
-        if (done) break;
-      }
-    } catch {
-      // Ignore - process may have been killed
-    } finally {
-      stderrReader.releaseLock();
-    }
-  })();
-
-  // Continue draining stdout in background
-  const stdoutDrainPromise = (async () => {
-    try {
-      while (true) {
-        const { done } = await stdoutReader.read();
-        if (done) break;
-      }
-    } catch {
-      // Ignore - process may have been killed
-    } finally {
-      stdoutReader.releaseLock();
-    }
-  })();
 
   return {
     code,
     url,
     waitForCompletion: async () => {
       const exitCode = await proc.exited;
-      // Wait for streams to finish draining
-      await Promise.all([stderrDrainPromise, stdoutDrainPromise]);
+      await Promise.allSettled([stderrReadLoop, stdoutReadLoop]);
 
       if (exitCode !== 0) {
         cleanup();

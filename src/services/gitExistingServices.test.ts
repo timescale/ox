@@ -2,9 +2,12 @@ import { describe, expect, mock, test } from 'bun:test';
 
 const listGhostDatabases = mock(async () => [{ name: 'existing-ghost-db' }]);
 
-mock.module('./ghost.ts', () => ({
+mock.module('./ghost', () => ({
   getGhostConfigFiles: mock(async () => []),
   listGhostDatabases,
+  runGhostInDocker: mock(async () => {
+    throw new Error('runGhostInDocker should not be called in this test');
+  }),
 }));
 
 describe('getExistingServices', () => {
