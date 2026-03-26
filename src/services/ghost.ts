@@ -3,6 +3,11 @@ import { join } from 'node:path';
 import { Deferred } from '../types/deferred';
 import { AbortError } from '../utils/abort.ts';
 import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
+import {
+  ensureDbProviderLayer,
+  ensureDockerImage,
+  resolveSandboxImage,
+} from './docker';
 import { CONTAINER_HOME, readFileFromContainer } from './dockerFiles';
 import { getOxSecret, getSecret, setOxSecret } from './keyring';
 import { log } from './logger';
@@ -255,6 +260,14 @@ interface RunGhostInDockerOptions extends RunInDockerOptionsBase {
   removeContainerOnExit?: boolean;
 }
 
+export async function resolveGhostDockerImage(): Promise<string> {
+  const sandbox = await resolveSandboxImage();
+  const baseImage = sandbox.needsBuild
+    ? await ensureDockerImage()
+    : sandbox.image;
+  return ensureDbProviderLayer(baseImage, 'ghost');
+}
+
 export const runGhostInDocker = async ({
   dockerArgs = [],
   cmdArgs = [],
@@ -271,6 +284,7 @@ export const runGhostInDocker = async ({
   RunInDockerResult & { credsCaptured: Promise<boolean> }
 > => {
   const configFiles = await getGhostConfigFiles({ saveCredentials });
+  const resolvedDockerImage = dockerImage ?? (await resolveGhostDockerImage());
 
   const envFilePaths = await getExistingEnvFilePaths({
     provider: 'docker',
@@ -283,7 +297,7 @@ export const runGhostInDocker = async ({
     dockerArgs: [...envFileArgs, ...dockerArgs],
     cmdArgs,
     cmdName: 'ghost',
-    dockerImage,
+    dockerImage: resolvedDockerImage,
     interactive,
     shouldThrow,
     files: [...configFiles, ...files],

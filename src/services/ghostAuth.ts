@@ -4,10 +4,10 @@
 
 import { nanoid } from 'nanoid';
 import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
-import { resolveSandboxImage } from './docker';
 import {
   captureGhostCredentialsFromContainer,
   checkGhostCredentials,
+  resolveGhostDockerImage,
 } from './ghost';
 import { log } from './logger';
 
@@ -49,7 +49,7 @@ async function cancelReader(reader: {
  * are captured from the stopped container via `docker cp`.
  */
 export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null> {
-  const sandbox = await resolveSandboxImage();
+  const ghostImage = await resolveGhostDockerImage();
   const containerName = `ox-ghost-auth-${nanoid()}`;
 
   const envFilePaths = await getExistingEnvFilePaths({
@@ -68,7 +68,7 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
       ...envFileArgs,
       '--name',
       containerName,
-      sandbox.image,
+      ghostImage,
       'ghost',
       'login',
       '--headless',
