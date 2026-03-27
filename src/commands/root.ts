@@ -5,6 +5,7 @@
 import { YAML } from 'bun';
 import { type Command, Option } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
+import { ensureGhostAuth } from '../components/GhostAuth.tsx';
 import { ensureClaudeAuth } from '../services/claude';
 import { ensureCodexAuth } from '../services/codex';
 import { type AgentType, projectConfig, readConfig } from '../services/config';
@@ -127,6 +128,14 @@ export async function branchAction(
   const effectiveAgent: AgentType = options.agent ?? config.agent ?? 'opencode';
   const effectiveModel: string | undefined =
     options.model ?? config.agentModels?.[effectiveAgent] ?? config.model;
+
+  if (
+    options.dbFork &&
+    effectiveServiceId &&
+    config.dbServiceProvider === 'ghost'
+  ) {
+    await ensureGhostAuth();
+  }
 
   // Step 4b: Ensure sandbox image (including agent overlay) is ready
   printErr('Ensuring sandbox image...');

@@ -13,6 +13,7 @@ import { CopyOnSelect } from '../components/CopyOnSelect.tsx';
 import { DockerSetup } from '../components/DockerSetup.tsx';
 import { FeedbackModal } from '../components/FeedbackModal.tsx';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
+import { ensureGhostAuth } from '../components/GhostAuth.tsx';
 import { GlobalToast } from '../components/GlobalToast.tsx';
 import { PromptScreen } from '../components/PromptScreen.tsx';
 
@@ -119,6 +120,27 @@ export async function handleNeedsGhAuth(
     nextModel: model,
     nextMountDir: result.ghAuthInfo.mountDir,
     nextAutoSubmitAgentMode: result.ghAuthInfo.mode,
+  };
+}
+
+export async function handleNeedsGhostAuth(
+  result: SessionsResult,
+): Promise<GhAuthRetryState | null> {
+  if (result.type !== 'needs-ghost-auth' || !result.ghostAuthInfo) {
+    return null;
+  }
+
+  const { agent, model, prompt } = result.ghostAuthInfo;
+
+  await ensureGhostAuth();
+
+  return {
+    nextView: 'starting',
+    nextPrompt: prompt,
+    nextAgent: agent,
+    nextModel: model,
+    nextMountDir: result.ghostAuthInfo.mountDir,
+    nextAutoSubmitAgentMode: result.ghostAuthInfo.mode,
   };
 }
 
@@ -781,6 +803,32 @@ export async function runSessionsTui({
 
         // Clear stale cached GH auth state for the next TUI iteration.
         useReadinessStore.getState().resetGhAuth();
+      } catch (err) {
+        console.error(
+          `\nError: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    }
+
+    if (result.type === 'needs-ghost-auth' && result.ghostAuthInfo) {
+      try {
+        console.log('\nGhost credentials are missing or expired.');
+        console.log('Starting Ghost login...\n');
+
+        const retry = await handleNeedsGhostAuth(result);
+        if (!retry) continue;
+
+        const { nextAgent: agent, nextModel: model } = retry;
+
+        nextView = retry.nextView;
+        nextPrompt = retry.nextPrompt;
+        nextAgent = agent;
+        nextModel = model;
+        nextMountDir = retry.nextMountDir;
+        nextAutoSubmitAgentMode = retry.nextAutoSubmitAgentMode;
+
+        console.log('\nGhost login successful. Resuming...\n');
       } catch (err) {
         console.error(
           `\nError: ${err instanceof Error ? err.message : String(err)}`,

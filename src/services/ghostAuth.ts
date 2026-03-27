@@ -107,7 +107,7 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
   const TIMEOUT_MS = 10000;
   const hasDeviceCode = () => {
     const combined = stderrBuffer + stdoutBuffer;
-    return combined.includes('one-time code:') && combined.includes('http');
+    return combined.includes('enter code:') && combined.includes('http');
   };
 
   const stderrReadLoop = (async () => {
@@ -150,16 +150,21 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
     await sleep(25);
   }
 
-  // Parse the device code and URL from combined output
+  // Parse the device code and URL from combined output.
+  // Ghost CLI outputs:
+  //   To authenticate, visit: https://github.com/login/device
+  //   and enter code: XXXX-XXXX
   const combined = stderrBuffer + stdoutBuffer;
-  const codeMatch = combined.match(
-    /one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i,
-  );
+  const codeMatch = combined.match(/enter code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i);
   const code = codeMatch?.[1] ?? '';
   const urlMatch = combined.match(/(https:\/\/github\.com\/login\/device)/i);
   const url = urlMatch?.[1] ?? '';
 
   if (!code || !url) {
+    log.warn(
+      { combined: combined.trim() },
+      'Failed to parse Ghost device code from login output',
+    );
     await Promise.allSettled([
       cancelReader(stderrReader),
       cancelReader(stdoutReader),

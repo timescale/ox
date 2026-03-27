@@ -22,6 +22,7 @@ import { forkDatabase } from '../services/db.ts';
 import { getDenoToken } from '../services/deno.ts';
 import { ensureDockerImage } from '../services/docker.ts';
 import { checkGhCredentials } from '../services/gh.ts';
+import { checkGhostCredentials } from '../services/ghost.ts';
 import { generateBranchName } from '../services/git.ts';
 import { log } from '../services/logger.ts';
 import type { RequestSudoFn } from '../services/portForwarding/sudo.ts';
@@ -451,6 +452,27 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           config: currentConfig,
         } = get();
         const effectiveServiceId = svcId ?? currentConfig?.dbServiceId;
+
+        if (
+          !isPlan &&
+          doFork &&
+          effectiveServiceId &&
+          currentConfig?.dbServiceProvider === 'ghost'
+        ) {
+          const hasGhostAuth = await checkGhostCredentials(signal);
+          if (!hasGhostAuth) {
+            useRouterStore.getState().needsGhostAuth({
+              agent,
+              model,
+              prompt,
+              mode,
+              mountDir,
+              isGitRepo: inGitRepo,
+            });
+            return;
+          }
+        }
+
         const forkResult = await attemptDatabaseFork({
           isPlan,
           dbFork: doFork,
