@@ -167,12 +167,15 @@ async function runCloudLifecycleScripts(
 async function injectCredentials(
   sandbox: Sandbox,
   pgpassContent?: string,
+  dbForkProvider?: OxSession['dbForkProvider'],
 ): Promise<void> {
   const homeResult = await sandboxExec(sandbox, 'echo $HOME', {
     capture: true,
   });
   const home = homeResult.trim();
-  const credFiles = await getCredentialFiles(home, pgpassContent);
+  const credFiles = await getCredentialFiles(home, pgpassContent, {
+    includeGhostCredentials: dbForkProvider === 'ghost',
+  });
   for (const file of credFiles) {
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
     await sandbox.fs.mkdir(dir, { recursive: true });
@@ -267,7 +270,11 @@ async function provisionSandbox(
     // Inject credential files
     onProgress?.('Setting up credentials');
     await logToSandbox(sandbox, 'Setting up credentials...');
-    await injectCredentials(sandbox, options.pgpassContent);
+    await injectCredentials(
+      sandbox,
+      options.pgpassContent,
+      options.dbForkProvider,
+    );
 
     // Clone repo and create branch
     if (options.repoInfo && options.isGitRepo !== false) {
@@ -340,7 +347,11 @@ async function provisionResume(
   client: DenoApiClient,
   sessionId: string,
   volumeSlug: string,
-  options: ResumeSandboxOptions & { agent: AgentType; existingModel?: string },
+  options: ResumeSandboxOptions & {
+    agent: AgentType;
+    existingModel?: string;
+    existingDbForkProvider?: OxSession['dbForkProvider'];
+  },
 ): Promise<void> {
   const { onProgress } = options;
 
@@ -350,7 +361,7 @@ async function provisionResume(
     // Inject fresh credentials
     onProgress?.('Setting up credentials');
     await logToSandbox(sandbox, 'Setting up credentials...');
-    await injectCredentials(sandbox);
+    await injectCredentials(sandbox, undefined, options.existingDbForkProvider);
 
     const config = await readConfig();
     await runCloudLifecycleScripts(
@@ -1113,6 +1124,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       ...options,
       agent: existing.agent as AgentType,
       existingModel: existing.model,
+      existingDbForkProvider: existing.dbForkProvider,
     };
 
     if (isInteractive) {

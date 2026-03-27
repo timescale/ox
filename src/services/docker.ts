@@ -72,14 +72,16 @@ import type { AgentMode, AttachOptions } from './sandbox/types';
 export const getCredentialFiles = async (
   homeDir = CONTAINER_HOME,
   pgpassContent?: string,
+  options?: { includeGhostCredentials?: boolean },
 ): Promise<VirtualFile[]> => {
+  const includeGhostCredentials = options?.includeGhostCredentials ?? false;
   const [claudeFiles, opencodeFiles, codexFiles, ghFiles, ghostFiles] =
     await Promise.all([
       getClaudeConfigFiles(),
       getOpencodeConfigFiles(),
       getCodexConfigFiles(),
       getGhConfigFiles(),
-      getGhostConfigFiles(),
+      includeGhostCredentials ? getGhostConfigFiles() : Promise.resolve([]),
     ]);
   const files = [
     ...claudeFiles,
@@ -2209,7 +2211,9 @@ export async function resumeSession(
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
-  const files = await getCredentialFiles();
+  const files = await getCredentialFiles(undefined, undefined, {
+    includeGhostCredentials: containerLabels['ox.db-fork-provider'] === 'ghost',
+  });
 
   // Resolve mount directory to absolute path if provided
   const absoluteMountDir = options.mountDir
@@ -2263,6 +2267,8 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
     mount: absoluteMountDir,
     resumedFrom: container.Name.replace(/^\//, ''),
     resumeImage,
+    dbForkProvider: containerLabels['ox.db-fork-provider'] as DbServiceProvider,
+    dbForkServiceId: containerLabels['ox.db-fork-service-id'],
     agentMode:
       options.agentMode ??
       ((containerLabels['ox.agent-mode'] as AgentMode) ||
@@ -2391,6 +2397,7 @@ export async function startContainer(
     dockerImage,
     signal,
     pgpassContent,
+    dbForkProvider,
   } = options;
 
   const containerName = `ox-${branchName}`;
@@ -2455,7 +2462,9 @@ export async function startContainer(
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
-  const files = await getCredentialFiles(CONTAINER_HOME, pgpassContent);
+  const files = await getCredentialFiles(CONTAINER_HOME, pgpassContent, {
+    includeGhostCredentials: dbForkProvider === 'ghost',
+  });
 
   // Resolve mount directory to absolute path if provided
   const absoluteMountDir = mountDir ? resolve(mountDir) : undefined;

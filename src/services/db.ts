@@ -73,6 +73,15 @@ export function parseGhostPgpassLine(
   };
 }
 
+export function getFirstUsablePgpassLine(pgpassContent: string): string | null {
+  return (
+    pgpassContent
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0 && !line.startsWith('#')) ?? null
+  );
+}
+
 export function ensureGhostCommandSucceeded({
   command,
   exitCode,
@@ -113,7 +122,7 @@ export async function deleteDatabaseFork(
   }
 
   try {
-    await Bun.$`tiger service delete ${serviceId} --confirm`.quiet();
+    await Bun.$`tiger svc delete ${serviceId} --confirm`.quiet();
   } catch (err) {
     throw formatShellError(err as ShellError);
   }
@@ -264,7 +273,13 @@ async function forkDatabaseGhost(
     }
 
     // Step 3: Parse PG env vars directly from Ghost .pgpass
-    const envVars = parseGhostPgpassLine(pgpassContent);
+    const pgpassLine = getFirstUsablePgpassLine(pgpassContent);
+    if (!pgpassLine) {
+      throw new Error(
+        'Ghost .pgpass did not contain any usable credential line',
+      );
+    }
+    const envVars = parseGhostPgpassLine(pgpassLine);
 
     return {
       service_id: forkId,

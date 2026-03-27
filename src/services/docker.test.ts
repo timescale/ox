@@ -162,6 +162,18 @@ describe('buildOxLabels', () => {
     expect(labels['ox.resumed-from']).toBe('ox-old-session');
     expect(labels['ox.resume-image']).toBe('ox-resume:abc123');
   });
+
+  test('includes db fork labels when provided', () => {
+    const labels = buildOxLabels({
+      name: 'test',
+      branch: 'main',
+      agent: 'opencode',
+      dbForkProvider: 'ghost',
+      dbForkServiceId: 'fork-123',
+    });
+    expect(labels['ox.db-fork-provider']).toBe('ghost');
+    expect(labels['ox.db-fork-service-id']).toBe('fork-123');
+  });
 });
 
 describe('extractTagHash', () => {
