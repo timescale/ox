@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import type { SandboxProvider } from '../services/sandbox/types.ts';
 import {
+  attemptDatabaseFork,
   getSetupDbCompletionMessage,
   useSessionWorkflowStore,
 } from './sessionWorkflowStore.ts';
@@ -44,6 +45,56 @@ describe('getSetupDbCompletionMessage', () => {
         dbServiceId: 'db_123',
       }),
     ).toBe('Database provider set to ghost - db_123.');
+  });
+});
+
+describe('attemptDatabaseFork', () => {
+  test('returns null and warns when the fork fails', async () => {
+    const showToast = mock(() => {});
+    const fork = mock(async () => {
+      throw new Error('ghost exited with code 1');
+    });
+
+    const result = await attemptDatabaseFork({
+      isPlan: false,
+      dbFork: true,
+      branchName: 'test-branch',
+      effectiveServiceId: 'svc-123',
+      dbServiceProvider: 'ghost',
+      signal: undefined,
+      setStep: () => {},
+      showToast,
+      fork,
+    });
+
+    expect(result).toBeNull();
+    expect(showToast).toHaveBeenCalledWith(
+      'Database fork failed: ghost exited with code 1. Continuing without a forked database.',
+      'error',
+    );
+  });
+
+  test('skips for plan mode and does not call fork', async () => {
+    const fork = mock(async () => ({
+      service_id: 'fork-1',
+      name: 'x',
+      envVars: {},
+    }));
+
+    const result = await attemptDatabaseFork({
+      isPlan: true,
+      dbFork: true,
+      branchName: 'test-branch',
+      effectiveServiceId: 'svc-123',
+      dbServiceProvider: 'ghost',
+      signal: undefined,
+      setStep: () => {},
+      showToast: () => {},
+      fork,
+    });
+
+    expect(result).toBeNull();
+    expect(fork).not.toHaveBeenCalled();
   });
 });
 

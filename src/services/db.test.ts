@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  ensureGhostCommandSucceeded,
   parseConnectionString,
   parseEnvOutput,
   parseGhostPgpassLine,
@@ -200,5 +201,29 @@ describe('parseGhostPgpassLine', () => {
     expect(() => parseGhostPgpassLine('host:5432:db:user')).toThrow(
       'Invalid Ghost .pgpass line',
     );
+  });
+});
+
+describe('ensureGhostCommandSucceeded', () => {
+  test('returns output when ghost command succeeds', () => {
+    expect(
+      ensureGhostCommandSucceeded({
+        command: 'ghost fork',
+        exitCode: 0,
+        output: '{"id":"fork-123"}',
+        errorOutput: '',
+      }),
+    ).toBe('{"id":"fork-123"}');
+  });
+
+  test('throws with stderr when ghost command fails', () => {
+    expect(() =>
+      ensureGhostCommandSucceeded({
+        command: 'ghost fork',
+        exitCode: 1,
+        output: '',
+        errorOutput: 'database not found',
+      }),
+    ).toThrow('ghost fork failed: database not found');
   });
 });

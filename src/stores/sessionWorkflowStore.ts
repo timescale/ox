@@ -143,6 +143,52 @@ export function getSetupDbCompletionMessage(
   return `Database provider set to ${result.dbServiceProvider} - ${result.dbServiceId}.`;
 }
 
+export async function attemptDatabaseFork({
+  isPlan,
+  dbFork,
+  branchName,
+  effectiveServiceId,
+  dbServiceProvider,
+  signal,
+  setStep,
+  showToast,
+  fork = forkDatabase,
+}: {
+  isPlan: boolean;
+  dbFork: boolean;
+  branchName: string;
+  effectiveServiceId?: string | null;
+  dbServiceProvider?: OxConfig['dbServiceProvider'];
+  signal?: AbortSignal;
+  setStep: (step: string) => void;
+  showToast: (message: string, type: 'success' | 'error' | 'info') => void;
+  fork?: typeof forkDatabase;
+}): Promise<ForkResult | null> {
+  if (isPlan || !dbFork || !effectiveServiceId) {
+    return null;
+  }
+
+  setStep('Forking database');
+  try {
+    return await fork(
+      branchName,
+      effectiveServiceId,
+      signal,
+      dbServiceProvider,
+    );
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw err;
+    }
+    log.error({ err }, 'Database fork failed; continuing without a fork');
+    showToast(
+      `Database fork failed: ${err instanceof Error ? err.message : String(err)}. Continuing without a forked database.`,
+      'error',
+    );
+    return null;
+  }
+}
+
 // ============================================================================
 // Store
 // ============================================================================
@@ -405,18 +451,18 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           config: currentConfig,
         } = get();
         const effectiveServiceId = svcId ?? currentConfig?.dbServiceId;
-        let forkResult: ForkResult | null = null;
-        if (!isPlan && doFork && effectiveServiceId) {
-          updateView((v) =>
-            v.type === 'starting' ? { ...v, step: 'Forking database' } : v,
-          );
-          forkResult = await forkDatabase(
-            branchName,
-            effectiveServiceId,
-            signal,
-            currentConfig?.dbServiceProvider,
-          );
-        }
+        const forkResult = await attemptDatabaseFork({
+          isPlan,
+          dbFork: doFork,
+          branchName,
+          effectiveServiceId,
+          dbServiceProvider: currentConfig?.dbServiceProvider,
+          signal,
+          setStep: (step) =>
+            updateView((v) => (v.type === 'starting' ? { ...v, step } : v)),
+          showToast: (message, type) =>
+            useToastStore.getState().show(message, type),
+        });
 
         // Only check GitHub credentials if in a git repo
         // Use cached result from readiness store if available

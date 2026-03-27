@@ -73,6 +73,25 @@ export function parseGhostPgpassLine(
   };
 }
 
+export function ensureGhostCommandSucceeded({
+  command,
+  exitCode,
+  output,
+  errorOutput,
+}: {
+  command: string;
+  exitCode: number;
+  output: string;
+  errorOutput: string;
+}): string {
+  if (exitCode === 0) {
+    return output;
+  }
+
+  const detail = errorOutput.trim() || output.trim() || `exit code ${exitCode}`;
+  throw new Error(`${command} failed: ${detail}`);
+}
+
 export async function deleteDatabaseFork(
   provider: DbServiceProvider,
   serviceId: string,
@@ -80,10 +99,16 @@ export async function deleteDatabaseFork(
   if (provider === 'ghost') {
     const proc = await runGhostInDocker({
       cmdArgs: ['delete', serviceId, '--confirm'],
-      shouldThrow: true,
+      shouldThrow: false,
       quiet: true,
     });
-    await proc.exited;
+    const exitCode = await proc.exited;
+    ensureGhostCommandSucceeded({
+      command: 'ghost delete',
+      exitCode,
+      output: proc.text(),
+      errorOutput: proc.errorText(),
+    });
     return;
   }
 
@@ -198,15 +223,20 @@ async function forkDatabaseGhost(
   log.info({ serviceId, branchName }, 'Creating Ghost database fork');
   const forkProc = await runGhostInDocker({
     cmdArgs: ['fork', serviceId, '--name', branchName, '--json'],
-    shouldThrow: true,
+    shouldThrow: false,
     quiet: true,
     signal,
     removeContainerOnExit: false,
   });
 
   try {
-    await forkProc.exited;
-    const forkOutput = forkProc.text().trim();
+    const forkExitCode = await forkProc.exited;
+    const forkOutput = ensureGhostCommandSucceeded({
+      command: 'ghost fork',
+      exitCode: forkExitCode,
+      output: forkProc.text().trim(),
+      errorOutput: forkProc.errorText().trim(),
+    });
     log.debug({ forkOutput }, 'Ghost fork output');
     const forkMetadata = JSON.parse(forkOutput);
 
