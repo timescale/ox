@@ -49,6 +49,7 @@ export interface ReadinessState {
   opencodeAuth: CheckStatus | 'invalid';
   codexAuth: CheckStatus | 'invalid';
   ghAuth: CheckStatus | 'invalid';
+  ghostAuth: CheckStatus | 'invalid';
 
   // Track which model was used for each agent credential check
   claudeAuthModel: string | undefined;
@@ -76,6 +77,10 @@ export interface ReadinessState {
   resetAgentAuth: (agent: 'claude' | 'opencode' | 'codex') => void;
   /** Reset GitHub auth state so the next check runs fresh. */
   resetGhAuth: () => void;
+  /** Reset Ghost auth state so the next check runs fresh. */
+  resetGhostAuth: () => void;
+  /** Check Ghost credentials (only when dbServiceProvider is 'ghost'). */
+  checkGhostAuth: () => void;
 }
 
 // ============================================================================
@@ -91,6 +96,8 @@ const initialState: Omit<
   | 'reset'
   | 'resetAgentAuth'
   | 'resetGhAuth'
+  | 'resetGhostAuth'
+  | 'checkGhostAuth'
 > = {
   dockerInstalled: 'unknown',
   dockerStatus: null,
@@ -108,6 +115,7 @@ const initialState: Omit<
   opencodeAuth: 'unknown',
   codexAuth: 'unknown',
   ghAuth: 'unknown',
+  ghostAuth: 'unknown',
   claudeAuthModel: undefined,
   opencodeAuthModel: undefined,
   codexAuthModel: undefined,
@@ -166,6 +174,36 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
 
   resetGhAuth: () => {
     set({ ghAuth: 'unknown' });
+  },
+
+  resetGhostAuth: () => {
+    set({ ghostAuth: 'unknown' });
+  },
+
+  checkGhostAuth: () => {
+    const state = useReadinessStore.getState();
+    // Don't re-check if already checking or resolved
+    if (state.ghostAuth === 'checking') return;
+    if (state.ghostAuth === 'ready' || state.ghostAuth === 'invalid') return;
+    // Don't check if sandbox base image isn't ready yet (need Docker)
+    if (state.sandboxBaseImage !== 'ready') return;
+
+    set({ ghostAuth: 'checking' });
+
+    (async () => {
+      try {
+        const signal = getShutdownSignal();
+        const { checkGhostCredentials } = await import('../services/ghost.ts');
+        const ok = await checkGhostCredentials(signal);
+        set({ ghostAuth: ok ? 'ready' : 'invalid' });
+      } catch (err) {
+        if (isAbortError(err)) {
+          set({ ghostAuth: 'unknown' });
+          return;
+        }
+        set({ ghostAuth: 'error' });
+      }
+    })();
   },
 
   runChecks: async () => {
@@ -314,6 +352,17 @@ export const useReadinessStore = create<ReadinessState>()((set) => ({
       }
 
       set({ ghAuth: ghOk ? 'ready' : 'invalid' });
+
+      // Check Ghost credentials eagerly when the project uses Ghost as DB provider.
+      // This runs in the background so the result is cached by the time the
+      // user submits their prompt — avoiding a blocking auth check at session start.
+      const { readConfig: readMergedConfig } = await import(
+        '../services/config.ts'
+      );
+      const config = await readMergedConfig();
+      if (config.dbServiceProvider === 'ghost' && config.dbServiceId) {
+        useReadinessStore.getState().checkGhostAuth();
+      }
     } finally {
       checksRunning = false;
     }

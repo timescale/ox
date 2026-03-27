@@ -829,6 +829,9 @@ export async function runSessionsTui({
         nextAutoSubmitAgentMode = retry.nextAutoSubmitAgentMode;
 
         console.log('\nGhost login successful. Resuming...\n');
+
+        // Clear stale cached Ghost auth state for the next TUI iteration.
+        useReadinessStore.getState().resetGhostAuth();
       } catch (err) {
         console.error(
           `\nError: ${err instanceof Error ? err.message : String(err)}`,

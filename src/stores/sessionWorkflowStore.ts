@@ -459,7 +459,13 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           effectiveServiceId &&
           currentConfig?.dbServiceProvider === 'ghost'
         ) {
-          const hasGhostAuth = await checkGhostCredentials(signal);
+          const cachedGhostAuth = useReadinessStore.getState().ghostAuth;
+          const hasGhostAuth =
+            cachedGhostAuth === 'ready'
+              ? true
+              : cachedGhostAuth === 'invalid'
+                ? false
+                : await checkGhostCredentials(signal);
           if (!hasGhostAuth) {
             useRouterStore.getState().needsGhostAuth({
               agent,
