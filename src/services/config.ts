@@ -14,6 +14,11 @@ export type AgentType = 'claude' | 'opencode' | 'codex';
 
 export type DbServiceProvider = 'tiger' | 'ghost';
 
+/** Type guard: true when the value is a known database provider. */
+export function isDbProvider(value: unknown): value is DbServiceProvider {
+  return value === 'tiger' || value === 'ghost';
+}
+
 /**
  * Ox configuration - all keys are valid at both user and project level.
  * User config provides defaults, project config can override any value.
@@ -400,13 +405,21 @@ export const userConfig = createConfigStore<OxConfig>({
  * - tigerServiceId → dbServiceId + dbServiceProvider: 'tiger'
  */
 export function migrateConfig(config: Record<string, unknown>): void {
-  if ('tigerServiceId' in config && !('dbServiceId' in config)) {
-    config.dbServiceId = config.tigerServiceId;
-    if (config.tigerServiceId !== null && config.tigerServiceId !== undefined) {
+  if ('tigerServiceId' in config) {
+    if (!('dbServiceId' in config)) {
+      config.dbServiceId = config.tigerServiceId;
+    }
+    // If we have a non-null dbServiceId (migrated or pre-existing) but no
+    // provider, default to 'tiger' since the legacy key was Tiger-specific.
+    if (
+      config.dbServiceId != null &&
+      config.dbServiceId !== undefined &&
+      !('dbServiceProvider' in config)
+    ) {
       config.dbServiceProvider = 'tiger';
     }
+    delete config.tigerServiceId;
   }
-  delete config.tigerServiceId;
 }
 
 /**

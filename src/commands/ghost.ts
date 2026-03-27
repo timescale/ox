@@ -28,7 +28,10 @@ export const ghostCommand = new Command('ghost')
         mountCwd: options.mount,
         saveCredentials: true,
       });
-      process.exit(await proc.exited);
+      const exitCode = await proc.exited;
+      // Wait for credential capture to finish before exiting
+      await proc.credsCaptured;
+      process.exit(exitCode);
     } catch (err) {
       log.error({ err }, 'Error executing ghost command');
       process.exit((err as ShellError).exitCode || 1);

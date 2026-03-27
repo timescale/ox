@@ -47,12 +47,22 @@ export function parseConnectionString(connStr: string): Record<string, string> {
 export function parseGhostPgpassLine(
   pgpassLine: string,
 ): Record<string, string> {
-  const parts = pgpassLine.trim().split(':');
-  if (parts.length !== 5) {
-    throw new Error('Invalid Ghost .pgpass line');
+  // .pgpass fields are colon-separated. Passwords may contain colons,
+  // so we split on the first 4 colons and treat the remainder as the password.
+  const trimmed = pgpassLine.trim();
+  const fields: string[] = [];
+  let rest = trimmed;
+  for (let i = 0; i < 4; i++) {
+    const idx = rest.indexOf(':');
+    if (idx === -1) {
+      throw new Error('Invalid Ghost .pgpass line');
+    }
+    fields.push(rest.slice(0, idx));
+    rest = rest.slice(idx + 1);
   }
+  const [PGHOST, PGPORT, PGDATABASE, PGUSER] = fields;
+  const PGPASSWORD = rest; // everything after the 4th colon
 
-  const [PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD] = parts;
   if (
     !PGHOST ||
     !PGPORT ||
@@ -252,41 +262,53 @@ async function forkDatabaseGhost(
     const forkId: string = forkMetadata.id;
     const forkName: string = forkMetadata.name ?? branchName;
 
-    // Step 2: Capture .pgpass from the fork container
-    let pgpassContent: string | undefined;
+    // Step 2: Capture .pgpass from the fork container.
+    // Wrap post-fork steps so we can clean up the cloud fork on failure.
     try {
-      const { containerId } = forkProc;
-      if (containerId) {
-        pgpassContent = await readFileFromContainer(
-          containerId,
-          `${CONTAINER_HOME}/.pgpass`,
+      let pgpassContent: string | undefined;
+      try {
+        const { containerId } = forkProc;
+        if (containerId) {
+          pgpassContent = await readFileFromContainer(
+            containerId,
+            `${CONTAINER_HOME}/.pgpass`,
+          );
+        }
+      } catch {
+        log.debug(
+          'Could not capture .pgpass from Ghost container (non-critical)',
         );
       }
-    } catch {
-      log.debug(
-        'Could not capture .pgpass from Ghost container (non-critical)',
-      );
-    }
 
-    if (!pgpassContent) {
-      throw new Error('Ghost fork did not produce .pgpass credentials');
-    }
+      if (!pgpassContent) {
+        throw new Error('Ghost fork did not produce .pgpass credentials');
+      }
 
-    // Step 3: Parse PG env vars directly from Ghost .pgpass
-    const pgpassLine = getFirstUsablePgpassLine(pgpassContent);
-    if (!pgpassLine) {
-      throw new Error(
-        'Ghost .pgpass did not contain any usable credential line',
-      );
-    }
-    const envVars = parseGhostPgpassLine(pgpassLine);
+      // Step 3: Parse PG env vars directly from Ghost .pgpass
+      const pgpassLine = getFirstUsablePgpassLine(pgpassContent);
+      if (!pgpassLine) {
+        throw new Error(
+          'Ghost .pgpass did not contain any usable credential line',
+        );
+      }
+      const envVars = parseGhostPgpassLine(pgpassLine);
 
-    return {
-      service_id: forkId,
-      name: forkName,
-      envVars,
-      pgpassContent,
-    };
+      return {
+        service_id: forkId,
+        name: forkName,
+        envVars,
+        pgpassContent,
+      };
+    } catch (err) {
+      // Clean up the orphaned cloud fork before re-throwing
+      await deleteDatabaseFork('ghost', forkId).catch((cleanupErr) => {
+        log.warn(
+          { cleanupErr, forkId },
+          'Failed to clean up orphaned Ghost fork',
+        );
+      });
+      throw err;
+    }
   } finally {
     await forkProc.rm(false).catch(() => {
       log.debug('Failed to remove Ghost fork container during cleanup');

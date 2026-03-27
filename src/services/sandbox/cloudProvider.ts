@@ -20,7 +20,7 @@ import {
   wrapWithPrompt,
 } from '../agentCommand.ts';
 import type { AgentType, OxConfig } from '../config.ts';
-import { readConfig } from '../config.ts';
+import { isDbProvider, readConfig } from '../config.ts';
 import { deleteDatabaseFork } from '../db.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
@@ -692,10 +692,7 @@ export class CloudSandboxProvider implements SandboxProvider {
       parentHash = effectiveBaseSlug.replace('oxl-', '');
     }
 
-    if (
-      config.dbServiceProvider === 'tiger' ||
-      config.dbServiceProvider === 'ghost'
-    ) {
+    if (isDbProvider(config.dbServiceProvider)) {
       effectiveBaseSlug = await ensureDbProviderCloudSnapshot({
         token,
         region,

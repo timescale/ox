@@ -9,7 +9,7 @@
 import BASE_DOCKERFILE from '../../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
-import { type AgentType, readConfig } from '../config.ts';
+import { type AgentType, isDbProvider, readConfig } from '../config.ts';
 import { getDenoToken } from '../deno.ts';
 import {
   computeDockerfileHash,
@@ -652,10 +652,7 @@ async function discoverCloudResources(
     }
   }
 
-  if (
-    config.dbServiceProvider === 'tiger' ||
-    config.dbServiceProvider === 'ghost'
-  ) {
+  if (isDbProvider(config.dbServiceProvider)) {
     const dbProviderSlug = getDbProviderSnapshotSlug(
       config.dbServiceProvider,
       effectiveParentHash,
@@ -795,10 +792,7 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     effectiveBase = setupTag;
   }
 
-  if (
-    config.dbServiceProvider === 'tiger' ||
-    config.dbServiceProvider === 'ghost'
-  ) {
+  if (isDbProvider(config.dbServiceProvider)) {
     const dbProviderTag = getDbProviderTag(
       effectiveBase,
       config.dbServiceProvider,

@@ -176,6 +176,10 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
     return null;
   }
 
+  // Guard flag to prevent cancel() from removing the container while
+  // credential capture (docker cp) is in progress.
+  let capturing = false;
+
   return {
     code,
     url,
@@ -200,19 +204,36 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
       }
 
       // Capture credentials from the stopped container
+      capturing = true;
       const captured =
         await captureGhostCredentialsFromContainer(containerName);
+      capturing = false;
       log.debug({ captured }, 'Ghost auth: credential capture result');
       if (!captured) {
         log.debug('Failed to capture Ghost credentials from auth container');
       }
       cleanup();
 
+      // Trust successful credential capture — skip the expensive
+      // verification container when we know credentials were saved.
+      if (captured) {
+        invalidateGhostCredsCache();
+        return true;
+      }
+
+      // Capture failed but login succeeded — run a live check as fallback
       invalidateGhostCredsCache();
       const valid = await checkGhostCredentials();
       log.debug({ valid }, 'Ghost auth: post-login credential check');
       return valid;
     },
-    cancel: cleanup,
+    cancel: () => {
+      if (capturing) {
+        // Only kill the process — let waitForCompletion handle container cleanup
+        proc.kill();
+      } else {
+        cleanup();
+      }
+    },
   };
 }

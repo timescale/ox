@@ -2,7 +2,7 @@
 // Docker Sandbox Provider - Adapts existing Docker functions to SandboxProvider
 // ============================================================================
 
-import { type AgentType, readConfig } from '../config.ts';
+import { type AgentType, isDbProvider, readConfig } from '../config.ts';
 import { deleteDatabaseFork } from '../db.ts';
 import {
   attachToContainer,
@@ -177,10 +177,7 @@ export class DockerSandboxProvider implements SandboxProvider {
       );
     }
 
-    if (
-      config.dbServiceProvider === 'tiger' ||
-      config.dbServiceProvider === 'ghost'
-    ) {
+    if (isDbProvider(config.dbServiceProvider)) {
       effectiveBaseImage = await ensureDbProviderLayer(
         effectiveBaseImage,
         config.dbServiceProvider,

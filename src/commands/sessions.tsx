@@ -511,6 +511,7 @@ export async function runSessionsTui({
   const MAX_AUTH_RETRIES = 3;
   let consecutiveAgentAuthRetries = 0;
   let consecutiveGhAuthRetries = 0;
+  let consecutiveGhostAuthRetries = 0;
 
   while (true) {
     const deferredResult = new Deferred<SessionsResult>();
@@ -564,6 +565,9 @@ export async function runSessionsTui({
     }
     if (result.type !== 'needs-gh-auth') {
       consecutiveGhAuthRetries = 0;
+    }
+    if (result.type !== 'needs-ghost-auth') {
+      consecutiveGhostAuthRetries = 0;
     }
 
     // Quit exits the loop
@@ -812,6 +816,14 @@ export async function runSessionsTui({
     }
 
     if (result.type === 'needs-ghost-auth' && result.ghostAuthInfo) {
+      consecutiveGhostAuthRetries++;
+      if (consecutiveGhostAuthRetries > MAX_AUTH_RETRIES) {
+        console.error(
+          `\nError: Ghost authentication failed after ${MAX_AUTH_RETRIES} attempts. Exiting.`,
+        );
+        process.exit(1);
+      }
+
       try {
         console.log('\nGhost credentials are missing or expired.');
         console.log('Starting Ghost login...\n');

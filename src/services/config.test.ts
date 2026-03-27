@@ -702,8 +702,26 @@ describe('migrateConfig', () => {
       dbServiceId: 'svc-new',
     };
     migrateConfig(config);
-    // dbServiceId should be preserved, tigerServiceId deleted
-    expect(config).toEqual({ dbServiceId: 'svc-new' });
+    // dbServiceId should be preserved, tigerServiceId deleted,
+    // and dbServiceProvider defaults to 'tiger' since the legacy key was Tiger-specific
+    expect(config).toEqual({
+      dbServiceId: 'svc-new',
+      dbServiceProvider: 'tiger',
+    });
+  });
+
+  test('does not overwrite existing dbServiceProvider when both keys exist', () => {
+    const config: Record<string, unknown> = {
+      tigerServiceId: 'svc-old',
+      dbServiceId: 'svc-new',
+      dbServiceProvider: 'ghost',
+    };
+    migrateConfig(config);
+    // dbServiceProvider should be preserved since it was already set
+    expect(config).toEqual({
+      dbServiceId: 'svc-new',
+      dbServiceProvider: 'ghost',
+    });
   });
 
   test('no-ops when neither key exists', () => {

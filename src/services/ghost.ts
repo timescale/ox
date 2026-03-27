@@ -333,7 +333,9 @@ export const runGhostInDocker = async ({
 
   const deferredCredsCaptured = new Deferred<boolean>();
   const { containerId } = result;
-  if (containerId) {
+  if (!containerId) {
+    deferredCredsCaptured.resolve(false);
+  } else {
     result.exited
       .then(async (code) => {
         if (code) {

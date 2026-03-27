@@ -198,6 +198,25 @@ describe('parseGhostPgpassLine', () => {
     });
   });
 
+  test('handles passwords containing colons', () => {
+    expect(
+      parseGhostPgpassLine('host.example.com:5432:mydb:admin:pass:with:colons'),
+    ).toEqual({
+      PGHOST: 'host.example.com',
+      PGPORT: '5432',
+      PGDATABASE: 'mydb',
+      PGUSER: 'admin',
+      PGPASSWORD: 'pass:with:colons',
+      DATABASE_URL:
+        'postgresql://admin:pass%3Awith%3Acolons@host.example.com:5432/mydb',
+    });
+  });
+
+  test('handles empty password', () => {
+    const result = parseGhostPgpassLine('host:5432:db:user:');
+    expect(result.PGPASSWORD).toBe('');
+  });
+
   test('rejects malformed .pgpass lines', () => {
     expect(() => parseGhostPgpassLine('host:5432:db:user')).toThrow(
       'Invalid Ghost .pgpass line',

@@ -1,5 +1,5 @@
 import { Command, Option } from 'commander';
-import type { AgentType } from '../services/config.ts';
+import { type AgentType, isDbProvider } from '../services/config.ts';
 import { getGhcrAgentTag, getGhcrBaseTag } from '../services/docker';
 import {
   getAgentSnapshotSlug,
@@ -300,11 +300,7 @@ export const sandboxCommand = new Command('sandbox')
                 parentHash = effectiveBaseSlug.replace('oxl-', '');
               }
 
-              if (
-                options.agent &&
-                (config.dbServiceProvider === 'tiger' ||
-                  config.dbServiceProvider === 'ghost')
-              ) {
+              if (options.agent && isDbProvider(config.dbServiceProvider)) {
                 const provider = config.dbServiceProvider;
                 effectiveBaseSlug = await runStep(
                   `DB provider (${provider}) snapshot`,
@@ -386,11 +382,7 @@ export const sandboxCommand = new Command('sandbox')
                 );
               }
 
-              if (
-                options.agent &&
-                (config.dbServiceProvider === 'tiger' ||
-                  config.dbServiceProvider === 'ghost')
-              ) {
+              if (options.agent && isDbProvider(config.dbServiceProvider)) {
                 const provider = config.dbServiceProvider;
                 effectiveBase = await runStep(
                   `DB provider (${provider}) layer`,

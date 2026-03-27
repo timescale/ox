@@ -53,6 +53,7 @@ import { getCodexConfigFiles, hasValidCodexFileCredentials } from './codex';
 import {
   type AgentType,
   type DbServiceProvider,
+  isDbProvider,
   type OxConfig,
   projectConfigDir,
   readConfig,
@@ -1588,10 +1589,7 @@ export async function ensureDockerImageForAgent(
       );
     }
 
-    if (
-      config.dbServiceProvider === 'tiger' ||
-      config.dbServiceProvider === 'ghost'
-    ) {
+    if (isDbProvider(config.dbServiceProvider)) {
       effectiveBase = await ensureDbProviderLayer(
         effectiveBase,
         config.dbServiceProvider,
