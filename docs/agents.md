@@ -64,6 +64,8 @@ Configure via the agent's own settings or through `ox auth`.
 ### Codex
 
 Codex uses OpenAI authentication (API key or ChatGPT OAuth). When prompted, ox guides you through the setup.
+ox's sandbox image installs system `bubblewrap`, so Codex can use `/usr/bin/bwrap`
+without printing its vendored-bubblewrap fallback warning at session startup.
 
 ```bash
 ox auth check codex
