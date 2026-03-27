@@ -52,28 +52,53 @@ export const writeGhostCredentialCache = async (
   creds: string,
 ): Promise<void> => {
   await setOxSecret(OX_GHOST_ACCOUNT, creds);
+  invalidateGhostCredsCache();
 };
 
 /**
  * Capture Ghost credentials from an exited container and cache them in the keyring.
+ *
+ * Ghost CLI stores credentials at ~/.config/ghost/ — we check both
+ * `credentials` (file-based keyring fallback) and `auth.json` (newer format).
  */
 export const captureGhostCredentialsFromContainer = async (
   containerId: string,
 ): Promise<boolean> => {
-  try {
-    const content = await readFileFromContainer(
-      containerId,
-      containerPaths.credentials,
-    );
-    if (content.trim()) {
-      log.debug('Valid Ghost credentials found in container');
-      await writeGhostCredentialCache(content);
-      return true;
+  // Try multiple known credential file paths
+  const candidatePaths = [
+    containerPaths.credentials,
+    join(CONTAINER_HOME, '.config', 'ghost', 'auth.json'),
+  ];
+
+  for (const credPath of candidatePaths) {
+    try {
+      const content = await readFileFromContainer(containerId, credPath);
+      if (content.trim()) {
+        log.debug({ credPath }, 'Valid Ghost credentials found in container');
+        await writeGhostCredentialCache(content);
+        return true;
+      }
+      log.debug({ credPath }, 'Empty Ghost credentials file in container');
+    } catch {
+      log.debug({ credPath }, 'Ghost credentials file not found in container');
     }
-    log.debug('Empty Ghost credentials found in container');
-  } catch {
-    log.debug('No Ghost credentials found in container');
   }
+
+  // Last resort: list the config dir to help debug what Ghost actually wrote
+  try {
+    const lsOutput =
+      await Bun.$`docker exec ${containerId} ls -la ${join(CONTAINER_HOME, '.config', 'ghost')} 2>&1`
+        .quiet()
+        .nothrow()
+        .text();
+    log.debug(
+      { lsOutput: lsOutput.trim() },
+      'Ghost config dir contents in container',
+    );
+  } catch {
+    log.debug('Could not list Ghost config dir in container');
+  }
+
   return false;
 };
 

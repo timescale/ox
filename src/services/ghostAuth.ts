@@ -7,6 +7,7 @@ import { getExistingEnvFilePaths, toEnvFileArgs } from '../utils/envFiles.ts';
 import {
   captureGhostCredentialsFromContainer,
   checkGhostCredentials,
+  invalidateGhostCredsCache,
   resolveGhostDockerImage,
 } from './ghost';
 import { log } from './logger';
@@ -179,10 +180,21 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
     code,
     url,
     waitForCompletion: async () => {
+      log.debug('Ghost auth: waiting for process to exit');
       const exitCode = await proc.exited;
+      log.debug({ exitCode }, 'Ghost auth: process exited');
       await Promise.allSettled([stderrReadLoop, stdoutReadLoop]);
+      log.debug(
+        {
+          exitCode,
+          stdout: stdoutBuffer.trim().slice(0, 200),
+          stderr: stderrBuffer.trim().slice(0, 200),
+        },
+        'Ghost auth: streams drained',
+      );
 
       if (exitCode !== 0) {
+        log.debug({ exitCode }, 'Ghost auth: login failed');
         cleanup();
         return false;
       }
@@ -190,12 +202,16 @@ export async function startContainerGhostAuth(): Promise<GhostAuthProcess | null
       // Capture credentials from the stopped container
       const captured =
         await captureGhostCredentialsFromContainer(containerName);
+      log.debug({ captured }, 'Ghost auth: credential capture result');
       if (!captured) {
         log.debug('Failed to capture Ghost credentials from auth container');
       }
       cleanup();
 
-      return await checkGhostCredentials();
+      invalidateGhostCredsCache();
+      const valid = await checkGhostCredentials();
+      log.debug({ valid }, 'Ghost auth: post-login credential check');
+      return valid;
     },
     cancel: cleanup,
   };
