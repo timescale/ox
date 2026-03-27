@@ -468,6 +468,10 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           interactive: isInteractive,
           envVars: forkResult?.envVars,
           pgpassContent: forkResult?.pgpassContent,
+          dbForkProvider: forkResult
+            ? (currentConfig?.dbServiceProvider ?? undefined)
+            : undefined,
+          dbForkServiceId: forkResult?.service_id,
           mountDir,
           isGitRepo: inGitRepo,
           agentArgs,

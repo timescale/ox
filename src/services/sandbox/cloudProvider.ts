@@ -21,6 +21,7 @@ import {
 } from '../agentCommand.ts';
 import type { AgentType, OxConfig } from '../config.ts';
 import { readConfig } from '../config.ts';
+import { deleteDatabaseFork } from '../db.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
 import { isStrictPermissionFile } from '../dockerFiles.ts';
@@ -826,6 +827,8 @@ export class CloudSandboxProvider implements SandboxProvider {
       region,
       volumeSlug: rootVolume.slug,
       agentMode: options.agentMode,
+      dbForkProvider: options.dbForkProvider,
+      dbForkServiceId: options.dbForkServiceId,
     };
 
     const db = openSessionDb();
@@ -1100,6 +1103,8 @@ export class CloudSandboxProvider implements SandboxProvider {
       volumeSlug: bootVolumeSlug,
       resumedFrom: sessionId,
       agentMode: options.agentMode ?? existing.agentMode,
+      dbForkProvider: existing.dbForkProvider,
+      dbForkServiceId: existing.dbForkServiceId,
     };
     upsertSession(db, newSession);
 
@@ -1237,6 +1242,20 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
+
+    if (session?.dbForkProvider && session.dbForkServiceId) {
+      try {
+        await deleteDatabaseFork(
+          session.dbForkProvider,
+          session.dbForkServiceId,
+        );
+      } catch (err) {
+        log.warn(
+          { err, sessionId, dbForkServiceId: session.dbForkServiceId },
+          'Failed to delete DB fork during cloud session removal',
+        );
+      }
+    }
 
     // Best-effort cleanup of cloud resources.  Always remove the local
     // session record afterwards — cloud resources have TTLs and can be

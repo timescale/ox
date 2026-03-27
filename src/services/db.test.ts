@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { parseConnectionString, parseEnvOutput } from './db';
+import {
+  parseConnectionString,
+  parseEnvOutput,
+  parseGhostPgpassLine,
+} from './db';
 
 describe('parseConnectionString', () => {
   test('parses standard postgresql:// URL', () => {
@@ -172,5 +176,29 @@ KEY=third`;
     expect(result).toEqual({
       KEY: 'third',
     });
+  });
+});
+
+describe('parseGhostPgpassLine', () => {
+  test('parses a Ghost .pgpass line into PG env vars and DATABASE_URL', () => {
+    expect(
+      parseGhostPgpassLine(
+        'doyxetwy0v.l62qyaesnr.tsdb.cloud.timescale.com:33889:tsdb:tsdbadmin:ngtbf680o9m5gkpi',
+      ),
+    ).toEqual({
+      PGHOST: 'doyxetwy0v.l62qyaesnr.tsdb.cloud.timescale.com',
+      PGPORT: '33889',
+      PGDATABASE: 'tsdb',
+      PGUSER: 'tsdbadmin',
+      PGPASSWORD: 'ngtbf680o9m5gkpi',
+      DATABASE_URL:
+        'postgresql://tsdbadmin:ngtbf680o9m5gkpi@doyxetwy0v.l62qyaesnr.tsdb.cloud.timescale.com:33889/tsdb',
+    });
+  });
+
+  test('rejects malformed .pgpass lines', () => {
+    expect(() => parseGhostPgpassLine('host:5432:db:user')).toThrow(
+      'Invalid Ghost .pgpass line',
+    );
   });
 });

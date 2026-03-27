@@ -146,7 +146,26 @@ interface SessionRow {
   extra: string | null;
 }
 
+interface SessionExtra {
+  dbForkProvider?: OxSession['dbForkProvider'];
+  dbForkServiceId?: string;
+}
+
+function parseSessionExtra(extra: string | null): SessionExtra {
+  if (!extra) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(extra) as SessionExtra;
+  } catch {
+    log.warn({ extra }, 'Failed to parse session extra metadata');
+    return {};
+  }
+}
+
 function rowToSession(row: SessionRow): OxSession {
+  const extra = parseSessionExtra(row.extra);
   return {
     id: row.id,
     provider: row.provider as SandboxProviderType,
@@ -176,6 +195,8 @@ function rowToSession(row: SessionRow): OxSession {
     startedAt: row.started_at ?? undefined,
     finishedAt: row.finished_at ?? undefined,
     agentMode: (row.agent_mode as AgentMode) ?? undefined,
+    dbForkProvider: extra.dbForkProvider,
+    dbForkServiceId: extra.dbForkServiceId,
   };
 }
 
@@ -246,7 +267,10 @@ export function upsertSession(db: Database, session: OxSession): void {
     $started_at: session.startedAt ?? null,
     $finished_at: session.finishedAt ?? null,
     $agent_mode: session.agentMode ?? null,
-    $extra: null,
+    $extra: JSON.stringify({
+      dbForkProvider: session.dbForkProvider,
+      dbForkServiceId: session.dbForkServiceId,
+    }),
   });
 }
 

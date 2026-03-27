@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { type AgentType, readConfig } from '../config.ts';
+import { deleteDatabaseFork } from '../db.ts';
 import {
   attachToContainer,
   type OxSession as DockerSession,
@@ -86,6 +87,8 @@ export function mapDockerSession(docker: DockerSession): OxSession {
     execType: docker.execType,
     resumedFrom: docker.resumedFrom,
     mountDir: docker.mountDir,
+    dbForkProvider: docker.dbForkProvider,
+    dbForkServiceId: docker.dbForkServiceId,
     containerName: docker.containerName,
     startedAt: docker.startedAt,
     finishedAt: docker.finishedAt,
@@ -224,6 +227,8 @@ export class DockerSandboxProvider implements SandboxProvider {
       interactive: options.interactive,
       envVars: options.envVars,
       pgpassContent: options.pgpassContent,
+      dbForkProvider: options.dbForkProvider,
+      dbForkServiceId: options.dbForkServiceId,
       mountDir: options.mountDir,
       isGitRepo: options.isGitRepo,
       agentArgs: options.agentArgs,
@@ -362,6 +367,19 @@ export class DockerSandboxProvider implements SandboxProvider {
     // (routes are stored by container name, but sessionId is the container ID)
     const session = await dockerGetSession(sessionId);
     const containerName = session?.containerName ?? sessionId;
+    if (session?.dbForkProvider && session.dbForkServiceId) {
+      try {
+        await deleteDatabaseFork(
+          session.dbForkProvider,
+          session.dbForkServiceId,
+        );
+      } catch (err) {
+        log.warn(
+          { err, sessionId, dbForkServiceId: session.dbForkServiceId },
+          'Failed to delete DB fork during Docker session removal',
+        );
+      }
+    }
     await teardownPortForwarding(containerName, containerName);
     await removeContainer(sessionId);
   }

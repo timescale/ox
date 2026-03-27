@@ -44,6 +44,56 @@ export function parseConnectionString(connStr: string): Record<string, string> {
   };
 }
 
+export function parseGhostPgpassLine(
+  pgpassLine: string,
+): Record<string, string> {
+  const parts = pgpassLine.trim().split(':');
+  if (parts.length !== 5) {
+    throw new Error('Invalid Ghost .pgpass line');
+  }
+
+  const [PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD] = parts;
+  if (
+    !PGHOST ||
+    !PGPORT ||
+    !PGDATABASE ||
+    !PGUSER ||
+    PGPASSWORD === undefined
+  ) {
+    throw new Error('Invalid Ghost .pgpass line');
+  }
+
+  return {
+    PGHOST,
+    PGPORT,
+    PGDATABASE,
+    PGUSER,
+    PGPASSWORD,
+    DATABASE_URL: `postgresql://${encodeURIComponent(PGUSER)}:${encodeURIComponent(PGPASSWORD)}@${PGHOST}:${PGPORT}/${PGDATABASE}`,
+  };
+}
+
+export async function deleteDatabaseFork(
+  provider: DbServiceProvider,
+  serviceId: string,
+): Promise<void> {
+  if (provider === 'ghost') {
+    const proc = await runGhostInDocker({
+      cmdArgs: ['delete', serviceId, '--confirm'],
+      shouldThrow: true,
+      quiet: true,
+    });
+    await proc.exited;
+    return;
+  }
+
+  try {
+    await Bun.$`tiger service delete ${serviceId} --confirm`.quiet();
+  } catch (err) {
+    throw formatShellError(err as ShellError);
+  }
+}
+
 // ============================================================================
 // Tiger Fork
 // ============================================================================
@@ -163,24 +213,7 @@ async function forkDatabaseGhost(
     const forkId: string = forkMetadata.id;
     const forkName: string = forkMetadata.name ?? branchName;
 
-    // Step 2: Get the connection string
-    throwIfAborted(signal);
-    log.info({ forkId }, 'Getting Ghost fork connection string');
-    const connectProc = await runGhostInDocker({
-      cmdArgs: ['connect', forkId],
-      shouldThrow: true,
-      quiet: true,
-      signal,
-    });
-    await connectProc.exited;
-    const connectionString = connectProc.text().trim();
-    log.debug('Ghost connect output received');
-
-    // Step 3: Parse connection string into PG env vars
-    const envVars = parseConnectionString(connectionString);
-    envVars.DATABASE_URL = connectionString;
-
-    // Step 4: Try to capture .pgpass from the fork container
+    // Step 2: Capture .pgpass from the fork container
     let pgpassContent: string | undefined;
     try {
       const { containerId } = forkProc;
@@ -195,6 +228,13 @@ async function forkDatabaseGhost(
         'Could not capture .pgpass from Ghost container (non-critical)',
       );
     }
+
+    if (!pgpassContent) {
+      throw new Error('Ghost fork did not produce .pgpass credentials');
+    }
+
+    // Step 3: Parse PG env vars directly from Ghost .pgpass
+    const envVars = parseGhostPgpassLine(pgpassContent);
 
     return {
       service_id: forkId,

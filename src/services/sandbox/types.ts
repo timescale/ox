@@ -2,7 +2,7 @@
 // Sandbox Provider Types - Provider-agnostic interface and shared types
 // ============================================================================
 
-import type { AgentType } from '../config.ts';
+import type { AgentType, DbServiceProvider } from '../config.ts';
 import type { PullLayer } from '../docker.ts';
 import type { RepoInfo } from '../git.ts';
 import type { RequestSudoFn } from '../portForwarding/sudo.ts';
@@ -46,6 +46,8 @@ export interface OxSession {
   startedAt?: string;
   finishedAt?: string;
   agentMode?: AgentMode;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
   /** Port forwarding URLs for this session (when appPort configured) */
   portUrls?: PortUrl[];
 }
@@ -61,6 +63,8 @@ export interface CreateSandboxOptions {
   interactive: boolean;
   envVars?: Record<string, string>;
   pgpassContent?: string;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
   mountDir?: string; // Docker-only: local dir mount
   isGitRepo?: boolean;
   agentArgs?: string[];

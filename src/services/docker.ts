@@ -153,6 +153,8 @@ export interface OxContainerLabels {
   resumeImage?: string;
   /** How the agent runs in the sandbox (async, interactive, plan) */
   agentMode?: AgentMode;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
 }
 
 /**
@@ -181,6 +183,11 @@ export function buildOxLabels(
   if (input.resumedFrom) result['ox.resumed-from'] = input.resumedFrom;
   if (input.resumeImage) result['ox.resume-image'] = input.resumeImage;
   if (input.agentMode) result['ox.agent-mode'] = input.agentMode;
+  if (input.dbForkProvider)
+    result['ox.db-fork-provider'] = input.dbForkProvider;
+  if (input.dbForkServiceId) {
+    result['ox.db-fork-service-id'] = input.dbForkServiceId;
+  }
   return result;
 }
 
@@ -1619,6 +1626,8 @@ export interface StartContainerOptions {
   interactive: boolean;
   envVars?: Record<string, string>;
   pgpassContent?: string;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
   /** If set, mount this local directory into the container instead of git clone */
   mountDir?: string;
   /** Whether running from a git repository (affects git/gh operations and PR instructions) */
@@ -1656,6 +1665,8 @@ export interface OxSession {
   startedAt?: string;
   finishedAt?: string;
   agentMode?: AgentMode;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
 }
 
 interface DockerInspectResult {
@@ -1734,6 +1745,8 @@ export async function listOxSessions(): Promise<OxSession[]> {
         resumedFrom: labels['ox.resumed-from'],
         interactive: labels['ox.interactive'] === 'true',
         mountDir: labels['ox.mount'],
+        dbForkProvider: labels['ox.db-fork-provider'] as DbServiceProvider,
+        dbForkServiceId: labels['ox.db-fork-service-id'],
         agentMode:
           (labels['ox.agent-mode'] as AgentMode) ||
           (labels['ox.submit-mode'] as AgentMode) ||
@@ -2336,6 +2349,8 @@ export async function getSession(nameOrId: string): Promise<OxSession | null> {
       resumedFrom: labels['ox.resumed-from'],
       interactive: labels['ox.interactive'] === 'true',
       mountDir: labels['ox.mount'],
+      dbForkProvider: labels['ox.db-fork-provider'] as DbServiceProvider,
+      dbForkServiceId: labels['ox.db-fork-service-id'],
       agentMode:
         (labels['ox.agent-mode'] as AgentMode) ||
         (labels['ox.submit-mode'] as AgentMode) ||
@@ -2535,6 +2550,8 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
     mount: absoluteMountDir,
     noGit: !isGitRepo || undefined,
     agentMode,
+    dbForkProvider: options.dbForkProvider,
+    dbForkServiceId: options.dbForkServiceId,
   });
 
   try {
