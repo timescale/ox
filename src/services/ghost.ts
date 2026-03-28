@@ -57,31 +57,23 @@ export const writeGhostCredentialCache = async (
 
 /**
  * Capture Ghost credentials from an exited container and cache them in the keyring.
- *
- * Ghost CLI stores credentials at ~/.config/ghost/ — we check both
- * `credentials` (file-based keyring fallback) and `auth.json` (newer format).
  */
 export const captureGhostCredentialsFromContainer = async (
   containerId: string,
 ): Promise<boolean> => {
-  // Try multiple known credential file paths
-  const candidatePaths = [
-    containerPaths.credentials,
-    join(CONTAINER_HOME, '.config', 'ghost', 'auth.json'),
-  ];
-
-  for (const credPath of candidatePaths) {
-    try {
-      const content = await readFileFromContainer(containerId, credPath);
-      if (content.trim()) {
-        log.debug({ credPath }, 'Valid Ghost credentials found in container');
-        await writeGhostCredentialCache(content);
-        return true;
-      }
-      log.debug({ credPath }, 'Empty Ghost credentials file in container');
-    } catch {
-      log.debug({ credPath }, 'Ghost credentials file not found in container');
+  try {
+    const content = await readFileFromContainer(
+      containerId,
+      containerPaths.credentials,
+    );
+    if (content.trim()) {
+      log.debug('Valid Ghost credentials found in container');
+      await writeGhostCredentialCache(content);
+      return true;
     }
+    log.debug('Empty Ghost credentials file in container');
+  } catch {
+    log.debug('Ghost credentials file not found in container');
   }
 
   // Last resort: list the config dir to help debug what Ghost actually wrote

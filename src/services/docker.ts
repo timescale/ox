@@ -2132,6 +2132,11 @@ export interface ResumeSessionOptions {
   mode: 'interactive' | 'detached' | 'shell';
   prompt?: string;
   model?: string; // Allow overriding model on resume
+  envVars?: Record<string, string>;
+  pgpassContent?: string;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
+  resumeSuffix?: string;
   /** If set, mount this local directory into the container */
   mountDir?: string;
   /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
@@ -2182,7 +2187,7 @@ export async function resumeSession(
 
   const agent = (containerLabels['ox.agent'] as AgentType) || 'opencode';
   const model = options.model ?? containerLabels['ox.model'];
-  const resumeSuffix = nanoid(6).toLowerCase();
+  const resumeSuffix = options.resumeSuffix ?? nanoid(6).toLowerCase();
   const resumeImage = `ox-resume:${container.Id.slice(0, 12)}-${resumeSuffix}`;
 
   try {
@@ -2195,6 +2200,9 @@ export async function resumeSession(
   const envArgs: string[] = [];
   for (const envVar of container.Config.Env ?? []) {
     envArgs.push('-e', envVar);
+  }
+  for (const [key, value] of Object.entries(options.envVars ?? {})) {
+    envArgs.push('-e', `${key}=${value}`);
   }
 
   // Read config for overlay mounts and init script
@@ -2209,8 +2217,8 @@ export async function resumeSession(
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
-  const files = await getCredentialFiles(undefined, undefined, {
-    includeGhostCredentials: containerLabels['ox.db-fork-provider'] === 'ghost',
+  const files = await getCredentialFiles(undefined, options.pgpassContent, {
+    includeGhostCredentials: options.dbForkProvider === 'ghost',
   });
 
   // Resolve mount directory to absolute path if provided
@@ -2265,8 +2273,8 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
     mount: absoluteMountDir,
     resumedFrom: container.Name.replace(/^\//, ''),
     resumeImage,
-    dbForkProvider: containerLabels['ox.db-fork-provider'] as DbServiceProvider,
-    dbForkServiceId: containerLabels['ox.db-fork-service-id'],
+    dbForkProvider: options.dbForkProvider,
+    dbForkServiceId: options.dbForkServiceId,
     agentMode:
       options.agentMode ??
       ((containerLabels['ox.agent-mode'] as AgentMode) ||

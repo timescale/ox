@@ -4,6 +4,7 @@
 
 import type { Database } from 'bun:sqlite';
 import type { Sandbox } from '@deno/sandbox';
+import { nanoid } from 'nanoid';
 import { runCloudSetupScreen } from '../../components/CloudSetup.tsx';
 import { throwIfAborted } from '../../utils/abort.ts';
 import { loadEnvVars } from '../../utils/envFiles.ts';
@@ -21,7 +22,7 @@ import {
 } from '../agentCommand.ts';
 import type { AgentType, OxConfig } from '../config.ts';
 import { isDbProvider, readConfig } from '../config.ts';
-import { deleteDatabaseFork } from '../db.ts';
+import { deleteDatabaseFork, type ForkResult, forkDatabase } from '../db.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
 import { isStrictPermissionFile } from '../dockerFiles.ts';
@@ -350,7 +351,9 @@ async function provisionResume(
   options: ResumeSandboxOptions & {
     agent: AgentType;
     existingModel?: string;
-    existingDbForkProvider?: OxSession['dbForkProvider'];
+    pgpassContent?: string;
+    dbForkProvider?: OxSession['dbForkProvider'];
+    dbForkServiceId?: string;
   },
 ): Promise<void> {
   const { onProgress } = options;
@@ -361,7 +364,11 @@ async function provisionResume(
     // Inject fresh credentials
     onProgress?.('Setting up credentials');
     await logToSandbox(sandbox, 'Setting up credentials...');
-    await injectCredentials(sandbox, undefined, options.existingDbForkProvider);
+    await injectCredentials(
+      sandbox,
+      options.pgpassContent,
+      options.dbForkProvider,
+    );
 
     const config = await readConfig();
     await runCloudLifecycleScripts(
@@ -411,6 +418,17 @@ async function provisionResume(
       `ERROR: Resume provisioning failed — ${message}`,
     );
     await cleanupSandboxResources(sandbox, client, sessionId, volumeSlug);
+    if (options.dbForkProvider && options.dbForkServiceId) {
+      await deleteDatabaseFork(
+        options.dbForkProvider,
+        options.dbForkServiceId,
+      ).catch((cleanupErr) => {
+        log.warn(
+          { cleanupErr, sessionId, dbForkServiceId: options.dbForkServiceId },
+          'Failed to clean up resumed cloud DB fork after provisioning error',
+        );
+      });
+    }
     throw err;
   }
 }
@@ -1012,6 +1030,9 @@ export class CloudSandboxProvider implements SandboxProvider {
       );
     }
     const region = existing.region ?? currentRegion;
+    const resumeSuffix = nanoid(6).toLowerCase();
+    const resumeName = `${existing.name}-resumed-${resumeSuffix}`;
+    let forkResult: ForkResult | null = null;
 
     // 1. Determine the root volume to boot from.
     let bootVolumeSlug: string;
@@ -1036,6 +1057,16 @@ export class CloudSandboxProvider implements SandboxProvider {
       );
     }
 
+    if (existing.dbForkProvider && existing.dbForkServiceId) {
+      onProgress?.('Forking database');
+      forkResult = await forkDatabase(
+        resumeName,
+        existing.dbForkServiceId,
+        undefined,
+        existing.dbForkProvider,
+      );
+    }
+
     // 2. Boot new sandbox
     onProgress?.('Booting sandbox');
     const fileEnvVars = await loadEnvVars({
@@ -1043,6 +1074,10 @@ export class CloudSandboxProvider implements SandboxProvider {
       agent: existing.agent as AgentType,
     });
     log.trace({ keys: Object.keys(fileEnvVars) }, 'Loaded env vars from files');
+    const env: Record<string, string> = {
+      ...fileEnvVars,
+      ...forkResult?.envVars,
+    };
     let sandbox: ResolvedSandbox;
     try {
       sandbox = await client.createSandbox({
@@ -1056,9 +1091,20 @@ export class CloudSandboxProvider implements SandboxProvider {
           'ox.agent': existing.agent,
           'ox.repo': existing.repo,
         },
-        env: fileEnvVars,
+        env,
       });
     } catch (err) {
+      if (existing.dbForkProvider && forkResult?.service_id) {
+        await deleteDatabaseFork(
+          existing.dbForkProvider,
+          forkResult.service_id,
+        ).catch((cleanupErr) => {
+          log.warn(
+            { cleanupErr, sessionId, dbForkServiceId: forkResult?.service_id },
+            'Failed to clean up resumed cloud DB fork after boot error',
+          );
+        });
+      }
       if (createdNewVolume) {
         try {
           await client.deleteVolume(bootVolumeSlug);
@@ -1111,8 +1157,8 @@ export class CloudSandboxProvider implements SandboxProvider {
       volumeSlug: bootVolumeSlug,
       resumedFrom: sessionId,
       agentMode: options.agentMode ?? existing.agentMode,
-      dbForkProvider: existing.dbForkProvider,
-      dbForkServiceId: existing.dbForkServiceId,
+      dbForkProvider: forkResult ? existing.dbForkProvider : undefined,
+      dbForkServiceId: forkResult?.service_id,
     };
     upsertSession(db, newSession);
 
@@ -1121,7 +1167,9 @@ export class CloudSandboxProvider implements SandboxProvider {
       ...options,
       agent: existing.agent as AgentType,
       existingModel: existing.model,
-      existingDbForkProvider: existing.dbForkProvider,
+      pgpassContent: forkResult?.pgpassContent,
+      dbForkProvider: forkResult ? existing.dbForkProvider : undefined,
+      dbForkServiceId: forkResult?.service_id,
     };
 
     if (isInteractive) {
