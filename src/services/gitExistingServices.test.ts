@@ -11,12 +11,12 @@ mock.module('./ghost', () => ({
 }));
 
 describe('getExistingServices', () => {
-  test('lists Ghost database names when provider is ghost', async () => {
+  test('skips Ghost database lookup when provider is ghost', async () => {
     const { getExistingServices } = await import('./git.ts');
 
     const services = await getExistingServices('ghost');
 
-    expect(services).toEqual(['existing-ghost-db']);
-    expect(listGhostDatabases).toHaveBeenCalledTimes(1);
+    expect(services).toEqual([]);
+    expect(listGhostDatabases).not.toHaveBeenCalled();
   });
 });

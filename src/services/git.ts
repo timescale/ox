@@ -8,7 +8,6 @@ import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { runClaudeInDocker } from './claude';
 import { runCodexInDocker } from './codex';
 import { type AgentType, type DbServiceProvider, readConfig } from './config';
-import { listGhostDatabases } from './ghost';
 import { log } from './logger';
 import { runOpencodeInDocker } from './opencode';
 
@@ -115,8 +114,10 @@ export async function getExistingServices(
 ): Promise<string[]> {
   try {
     if (provider === 'ghost') {
-      const dbs = await listGhostDatabases();
-      return dbs.map((db) => db.name);
+      log.debug(
+        'Skipping Ghost DB lookup in getExistingServices to keep branch-name generation fast',
+      );
+      return [];
     }
 
     const result = await Bun.$`tiger svc list -o json`.quiet();

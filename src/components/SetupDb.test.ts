@@ -5,6 +5,7 @@ import {
   applySetupDbProviderSelection,
   buildSetupDbServiceOptions,
   getSetupDbInitialIndex,
+  normalizeSetupDbConfig,
 } from './SetupDb.tsx';
 
 describe('applySetupDbProviderSelection', () => {
@@ -109,5 +110,31 @@ describe('getSetupDbInitialIndex', () => {
         { name: 'Primary', value: 'svc_123', description: '' },
       ]),
     ).toBe(0);
+  });
+});
+
+describe('normalizeSetupDbConfig', () => {
+  test('keeps valid provider and service id', () => {
+    expect(
+      normalizeSetupDbConfig({
+        dbServiceProvider: 'ghost',
+        dbServiceId: 'db_123',
+      }),
+    ).toEqual({
+      dbServiceProvider: 'ghost',
+      dbServiceId: 'db_123',
+    });
+  });
+
+  test('drops invalid provider values from runtime config', () => {
+    expect(
+      normalizeSetupDbConfig({
+        dbServiceProvider: 'invalid',
+        dbServiceId: 'db_123',
+      }),
+    ).toEqual({
+      dbServiceProvider: null,
+      dbServiceId: undefined,
+    });
   });
 });

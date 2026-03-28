@@ -6,6 +6,7 @@ import type { SelectOption } from '@opentui/core';
 import { useEffect, useMemo, useState } from 'react';
 import {
   type DbServiceProvider,
+  isDbProvider,
   projectConfig,
   readConfig,
 } from '../services/config.ts';
@@ -132,6 +133,31 @@ async function persistSetupDbSelection(
   });
 }
 
+export function normalizeSetupDbConfig(
+  config:
+    | {
+        dbServiceProvider?: DbServiceProvider | string | null;
+        dbServiceId?: string | null;
+      }
+    | null
+    | undefined,
+): {
+  dbServiceProvider: DbServiceProvider | null;
+  dbServiceId: string | null | undefined;
+} {
+  const dbServiceProvider = isDbProvider(config?.dbServiceProvider)
+    ? config.dbServiceProvider
+    : null;
+
+  return {
+    dbServiceProvider,
+    dbServiceId:
+      dbServiceProvider !== null
+        ? (config?.dbServiceId ?? undefined)
+        : undefined,
+  };
+}
+
 export function SetupDb({ onComplete }: SetupDbProps) {
   const [step, setStep] = useState<Step>('provider');
   const [ready, setReady] = useState(false);
@@ -151,20 +177,27 @@ export function SetupDb({ onComplete }: SetupDbProps) {
   useEffect(() => {
     let cancelled = false;
 
-    readConfig().then((config) => {
-      if (cancelled) {
-        return;
-      }
+    readConfig()
+      .then((config) => {
+        if (cancelled) {
+          return;
+        }
 
-      setCurrentProvider(config.dbServiceProvider ?? null);
-      setCurrentServiceId(config.dbServiceId ?? undefined);
-      setReady(true);
-    });
+        const normalized = normalizeSetupDbConfig(config);
+        setCurrentProvider(normalized.dbServiceProvider);
+        setCurrentServiceId(normalized.dbServiceId);
+        setReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          onComplete({ type: 'unavailable' });
+        }
+      });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onComplete]);
 
   useEffect(() => {
     if (step !== 'auth' || !currentProvider || ghostAuthProcess) {
