@@ -329,7 +329,14 @@ export async function forkDatabase(
   switch (provider) {
     case 'ghost':
       return forkDatabaseGhost(branchName, serviceId, signal);
-    default:
+    case 'tiger':
+    case undefined:
       return forkDatabaseTiger(branchName, serviceId, signal);
+    default:
+      // null means "explicitly no provider" — callers should guard against
+      // this, but handle it defensively rather than silently forking Tiger.
+      throw new Error(
+        `Cannot fork database: no provider configured (got ${JSON.stringify(provider)})`,
+      );
   }
 }

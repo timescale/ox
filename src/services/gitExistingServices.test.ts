@@ -1,22 +1,24 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-const listGhostDatabases = mock(async () => [{ name: 'existing-ghost-db' }]);
-
+// Mock the ghost module to ensure no Docker-based Ghost calls are made.
+// git.ts short-circuits for Ghost provider, so none of these should be invoked.
 mock.module('./ghost', () => ({
   getGhostConfigFiles: mock(async () => []),
-  listGhostDatabases,
+  listGhostDatabases: mock(async () => {
+    throw new Error('listGhostDatabases should not be called');
+  }),
   runGhostInDocker: mock(async () => {
-    throw new Error('runGhostInDocker should not be called in this test');
+    throw new Error('runGhostInDocker should not be called');
   }),
 }));
 
 describe('getExistingServices', () => {
-  test('skips Ghost database lookup when provider is ghost', async () => {
+  test('returns empty array without calling Ghost when provider is ghost', async () => {
     const { getExistingServices } = await import('./git.ts');
 
     const services = await getExistingServices('ghost');
 
+    // Ghost provider short-circuits to avoid Docker image resolution
     expect(services).toEqual([]);
-    expect(listGhostDatabases).not.toHaveBeenCalled();
   });
 });
