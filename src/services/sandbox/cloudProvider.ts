@@ -4,6 +4,7 @@
 
 import type { Database } from 'bun:sqlite';
 import type { Sandbox } from '@deno/sandbox';
+import { nanoid } from 'nanoid';
 import { runCloudSetupScreen } from '../../components/CloudSetup.tsx';
 import { throwIfAborted } from '../../utils/abort.ts';
 import { loadEnvVars } from '../../utils/envFiles.ts';
@@ -20,9 +21,11 @@ import {
   wrapWithPrompt,
 } from '../agentCommand.ts';
 import type { AgentType, OxConfig } from '../config.ts';
-import { readConfig } from '../config.ts';
+import { isDbProvider, readConfig } from '../config.ts';
+import { deleteDatabaseFork, type ForkResult, forkDatabase } from '../db.ts';
 import { ensureDenoToken, getDenoToken } from '../deno.ts';
 import { getCredentialFiles } from '../docker.ts';
+import { isStrictPermissionFile } from '../dockerFiles.ts';
 import { log } from '../logger.ts';
 import {
   getPortUrls,
@@ -34,6 +37,7 @@ import { CloudConnectionPool } from './cloudConnectionPool.ts';
 import {
   ensureAgentCloudSnapshot,
   ensureCloudSnapshot,
+  ensureDbProviderCloudSnapshot,
   ensureProjectSetupCloudSnapshot,
 } from './cloudSnapshot.ts';
 import { DenoApiClient, denoSlug, type ResolvedSandbox } from './denoApi.ts';
@@ -161,16 +165,25 @@ async function runCloudLifecycleScripts(
  * using the SDK's filesystem API. Resolves the default user's $HOME first
  * so paths are correct for the sandbox environment.
  */
-async function injectCredentials(sandbox: Sandbox): Promise<void> {
+async function injectCredentials(
+  sandbox: Sandbox,
+  pgpassContent?: string,
+  dbForkProvider?: OxSession['dbForkProvider'],
+): Promise<void> {
   const homeResult = await sandboxExec(sandbox, 'echo $HOME', {
     capture: true,
   });
   const home = homeResult.trim();
-  const credFiles = await getCredentialFiles(home);
+  const credFiles = await getCredentialFiles(home, pgpassContent, {
+    includeGhostCredentials: dbForkProvider === 'ghost',
+  });
   for (const file of credFiles) {
     const dir = file.path.substring(0, file.path.lastIndexOf('/'));
     await sandbox.fs.mkdir(dir, { recursive: true });
     await sandbox.fs.writeTextFile(file.path, file.value);
+    if (isStrictPermissionFile(file.path)) {
+      await sandboxExec(sandbox, `chmod 600 ${shellEscape(file.path)}`);
+    }
   }
 }
 
@@ -258,7 +271,11 @@ async function provisionSandbox(
     // Inject credential files
     onProgress?.('Setting up credentials');
     await logToSandbox(sandbox, 'Setting up credentials...');
-    await injectCredentials(sandbox);
+    await injectCredentials(
+      sandbox,
+      options.pgpassContent,
+      options.dbForkProvider,
+    );
 
     // Clone repo and create branch
     if (options.repoInfo && options.isGitRepo !== false) {
@@ -331,7 +348,13 @@ async function provisionResume(
   client: DenoApiClient,
   sessionId: string,
   volumeSlug: string,
-  options: ResumeSandboxOptions & { agent: AgentType; existingModel?: string },
+  options: ResumeSandboxOptions & {
+    agent: AgentType;
+    existingModel?: string;
+    pgpassContent?: string;
+    dbForkProvider?: OxSession['dbForkProvider'];
+    dbForkServiceId?: string;
+  },
 ): Promise<void> {
   const { onProgress } = options;
 
@@ -341,7 +364,11 @@ async function provisionResume(
     // Inject fresh credentials
     onProgress?.('Setting up credentials');
     await logToSandbox(sandbox, 'Setting up credentials...');
-    await injectCredentials(sandbox);
+    await injectCredentials(
+      sandbox,
+      options.pgpassContent,
+      options.dbForkProvider,
+    );
 
     const config = await readConfig();
     await runCloudLifecycleScripts(
@@ -391,6 +418,17 @@ async function provisionResume(
       `ERROR: Resume provisioning failed — ${message}`,
     );
     await cleanupSandboxResources(sandbox, client, sessionId, volumeSlug);
+    if (options.dbForkProvider && options.dbForkServiceId) {
+      await deleteDatabaseFork(
+        options.dbForkProvider,
+        options.dbForkServiceId,
+      ).catch((cleanupErr) => {
+        log.warn(
+          { cleanupErr, sessionId, dbForkServiceId: options.dbForkServiceId },
+          'Failed to clean up resumed cloud DB fork after provisioning error',
+        );
+      });
+    }
     throw err;
   }
 }
@@ -658,7 +696,7 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     // 2. If projectSetupLayer is configured, ensure setup layer snapshot
     let effectiveBaseSlug = baseSlug;
-    let setupHash: string | undefined;
+    let parentHash: string | undefined;
     if (config.projectSetupLayer) {
       effectiveBaseSlug = await ensureProjectSetupCloudSnapshot({
         token,
@@ -669,8 +707,22 @@ export class CloudSandboxProvider implements SandboxProvider {
         onProgress: mapProgress,
         signal: options?.signal,
       });
-      // Extract the setup hash for use in agent slug computation
-      setupHash = effectiveBaseSlug.replace('oxl-', '');
+      parentHash = effectiveBaseSlug.replace('oxl-', '');
+    }
+
+    if (isDbProvider(config.dbServiceProvider)) {
+      effectiveBaseSlug = await ensureDbProviderCloudSnapshot({
+        token,
+        region,
+        provider: config.dbServiceProvider,
+        baseSnapshotSlug: effectiveBaseSlug,
+        parentHash,
+        config,
+        force: options?.force,
+        onProgress: mapProgress,
+        signal: options?.signal,
+      });
+      parentHash = effectiveBaseSlug.replace('oxd-', '');
     }
 
     // 3. If agent specified, ensure agent overlay snapshot exists
@@ -680,7 +732,7 @@ export class CloudSandboxProvider implements SandboxProvider {
         region,
         agent: options.agent,
         baseSnapshotSlug: effectiveBaseSlug,
-        setupHash,
+        parentHash,
         config,
         force: options?.force,
         onProgress: mapProgress,
@@ -801,6 +853,8 @@ export class CloudSandboxProvider implements SandboxProvider {
       region,
       volumeSlug: rootVolume.slug,
       agentMode: options.agentMode,
+      dbForkProvider: options.dbForkProvider,
+      dbForkServiceId: options.dbForkServiceId,
     };
 
     const db = openSessionDb();
@@ -976,6 +1030,9 @@ export class CloudSandboxProvider implements SandboxProvider {
       );
     }
     const region = existing.region ?? currentRegion;
+    const resumeSuffix = nanoid(6).toLowerCase();
+    const resumeName = `${existing.name}-resumed-${resumeSuffix}`;
+    let forkResult: ForkResult | null = null;
 
     // 1. Determine the root volume to boot from.
     let bootVolumeSlug: string;
@@ -1000,6 +1057,16 @@ export class CloudSandboxProvider implements SandboxProvider {
       );
     }
 
+    if (existing.dbForkProvider && existing.dbForkServiceId) {
+      onProgress?.('Forking database');
+      forkResult = await forkDatabase(
+        resumeName,
+        existing.dbForkServiceId,
+        undefined,
+        existing.dbForkProvider,
+      );
+    }
+
     // 2. Boot new sandbox
     onProgress?.('Booting sandbox');
     const fileEnvVars = await loadEnvVars({
@@ -1007,6 +1074,10 @@ export class CloudSandboxProvider implements SandboxProvider {
       agent: existing.agent as AgentType,
     });
     log.trace({ keys: Object.keys(fileEnvVars) }, 'Loaded env vars from files');
+    const env: Record<string, string> = {
+      ...fileEnvVars,
+      ...forkResult?.envVars,
+    };
     let sandbox: ResolvedSandbox;
     try {
       sandbox = await client.createSandbox({
@@ -1020,9 +1091,20 @@ export class CloudSandboxProvider implements SandboxProvider {
           'ox.agent': existing.agent,
           'ox.repo': existing.repo,
         },
-        env: fileEnvVars,
+        env,
       });
     } catch (err) {
+      if (existing.dbForkProvider && forkResult?.service_id) {
+        await deleteDatabaseFork(
+          existing.dbForkProvider,
+          forkResult.service_id,
+        ).catch((cleanupErr) => {
+          log.warn(
+            { cleanupErr, sessionId, dbForkServiceId: forkResult?.service_id },
+            'Failed to clean up resumed cloud DB fork after boot error',
+          );
+        });
+      }
       if (createdNewVolume) {
         try {
           await client.deleteVolume(bootVolumeSlug);
@@ -1075,6 +1157,8 @@ export class CloudSandboxProvider implements SandboxProvider {
       volumeSlug: bootVolumeSlug,
       resumedFrom: sessionId,
       agentMode: options.agentMode ?? existing.agentMode,
+      dbForkProvider: forkResult ? existing.dbForkProvider : undefined,
+      dbForkServiceId: forkResult?.service_id,
     };
     upsertSession(db, newSession);
 
@@ -1083,6 +1167,9 @@ export class CloudSandboxProvider implements SandboxProvider {
       ...options,
       agent: existing.agent as AgentType,
       existingModel: existing.model,
+      pgpassContent: forkResult?.pgpassContent,
+      dbForkProvider: forkResult ? existing.dbForkProvider : undefined,
+      dbForkServiceId: forkResult?.service_id,
     };
 
     if (isInteractive) {
@@ -1212,6 +1299,20 @@ export class CloudSandboxProvider implements SandboxProvider {
 
     const db = openSessionDb();
     const session = dbGetSession(db, sessionId);
+
+    if (session?.dbForkProvider && session.dbForkServiceId) {
+      try {
+        await deleteDatabaseFork(
+          session.dbForkProvider,
+          session.dbForkServiceId,
+        );
+      } catch (err) {
+        log.warn(
+          { err, sessionId, dbForkServiceId: session.dbForkServiceId },
+          'Failed to delete DB fork during cloud session removal',
+        );
+      }
+    }
 
     // Best-effort cleanup of cloud resources.  Always remove the local
     // session record afterwards — cloud resources have TTLs and can be

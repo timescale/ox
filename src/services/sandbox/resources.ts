@@ -9,13 +9,14 @@
 import BASE_DOCKERFILE from '../../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
-import { type AgentType, readConfig } from '../config.ts';
+import { type AgentType, isDbProvider, readConfig } from '../config.ts';
 import { getDenoToken } from '../deno.ts';
 import {
   computeDockerfileHash,
   type DockerImageInfo,
   extractLayerHash,
   getAgentOverlayTag,
+  getDbProviderTag,
   getDockerSandboxSetupTag,
   getGhcrAgentTag,
   getGhcrBaseTag,
@@ -28,6 +29,7 @@ import { log } from '../logger.ts';
 import {
   getAgentSnapshotSlug,
   getBaseSnapshotSlug,
+  getDbProviderSnapshotSlug,
   getProjectSetupSnapshotSlug,
 } from './cloudSnapshot.ts';
 import {
@@ -81,6 +83,7 @@ export interface SandboxResource {
 
 interface SnapshotClassificationContext {
   currentBaseSlug: string;
+  currentDbProviderSlugs: Set<string>;
   currentAgentSlugs: Set<string>;
   /** Slug of the current project setup snapshot, if configured */
   currentSetupSlug: string | null;
@@ -120,10 +123,18 @@ interface ImageClassificationContext {
 // ============================================================================
 
 /** Known Ox snapshot slug prefixes. */
-const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'oxl-', 'ox-', 'oxn-'];
+const OX_SNAPSHOT_PREFIXES = ['ox-base-', 'oxl-', 'oxd-', 'ox-', 'oxn-'];
 
 /** Known Ox volume slug prefixes. */
-const OX_VOLUME_PREFIXES = ['oxb-', 'oxlb-', 'oxa-', 'oxe-', 'oxs-', 'oxr-'];
+const OX_VOLUME_PREFIXES = [
+  'oxb-',
+  'oxlb-',
+  'oxdb-',
+  'oxa-',
+  'oxe-',
+  'oxs-',
+  'oxr-',
+];
 
 /**
  * Classify a cloud snapshot as current/active/old/orphaned.
@@ -131,7 +142,8 @@ const OX_VOLUME_PREFIXES = ['oxb-', 'oxlb-', 'oxa-', 'oxe-', 'oxs-', 'oxr-'];
  *
  * Rules:
  * - `ox-base-*` → "Base Snapshot": `current` if matches getBaseSnapshotSlug(), else `old`
- * - `ox-*` (not `ox-base-*`) → "Agent Snapshot": `current` if in currentAgentSlugs, else `old`
+ * - `oxd-*` → "DB Provider Snapshot": `current` if in currentDbProviderSlugs, else `unknown`
+ * - `ox-*` (not `ox-base-*`) → "Agent Snapshot": `current` if in currentAgentSlugs, else `unknown`
  * - `oxn-*` → "Session Snapshot": `active` if linked to non-deleted session,
  *   `old` if linked to deleted session, `orphaned` if no session reference
  * - Other prefixes → null (not an Ox resource, skip)
@@ -174,6 +186,16 @@ export function classifyCloudSnapshot(
       category: 'Project Setup Snapshot',
       // Non-matching setup snapshots may belong to a different project config.
       status: snapshot.slug === ctx.currentSetupSlug ? 'current' : 'unknown',
+    };
+  }
+
+  if (snapshot.slug.startsWith('oxd-')) {
+    return {
+      ...base,
+      category: 'DB Provider Snapshot',
+      status: ctx.currentDbProviderSlugs.has(snapshot.slug)
+        ? 'current'
+        : 'unknown',
     };
   }
 
@@ -246,6 +268,7 @@ function volumeStatusFromChildSnapshots(
  * - `oxb-*` → "Build Volume": `current` if it is the source volume of the
  *   current base snapshot or has current child snapshots, `old` if only old
  *   snapshots remain, `orphaned` if no snapshots depend on it
+ * - `oxdb-*` → "DB Provider Build Volume": status derived from child snapshots
  * - `oxa-*` → "Agent Build Volume": status derived from child snapshots
  *   (`current` if any child snapshot is current, `old` if all are old,
  *   `orphaned` if no child snapshots exist)
@@ -313,6 +336,14 @@ export function classifyCloudVolume(
     };
   }
 
+  if (volume.slug.startsWith('oxdb-')) {
+    return {
+      ...base,
+      category: 'DB Provider Build Volume',
+      status: volumeStatusFromChildSnapshots(childSnapshots),
+    };
+  }
+
   // Shell volumes — always orphaned
   if (volume.slug.startsWith('oxe-')) {
     return {
@@ -357,6 +388,7 @@ export function classifyCloudVolume(
  * - `ox-sandbox:md5-*` → "Local Build" (base): `current` if hash matches, else `old`
  * - `ox-sandbox:dkr-*` → "Local Build" (docker setup): `current` if tag matches, `unknown` if parent current, else `old`
  * - `ox-sandbox:psl-*` → "Local Build" (project setup): `current` if tag matches, `unknown` if parent current, else `old`
+ * - `ox-sandbox:db-*`  → "Local Build" (db provider): `current` if tag matches, `unknown` if parent current, else `old`
  * - `ox-sandbox:a-*`   → "Local Build" (agent overlay): `current` if tag matches, `unknown` if parent current, else `old`
  * - `ghcr.io/timescale/ox/sandbox-*` → "GHCR Image": `current` if tag is current, else `old`
  * - `ox-resume:*` → "Resume Image": `active` if container exists with matching image, else `orphaned`
@@ -398,6 +430,7 @@ export function classifyDockerImage(
     if (
       tag.startsWith('dkr-') ||
       tag.startsWith('psl-') ||
+      tag.startsWith('db-') ||
       tag.startsWith('a-')
     ) {
       // Exact match → current
@@ -462,12 +495,16 @@ export function classifyDockerImage(
  * Tag formats:
  *   dkr-{parent6}-{hash12}          → parent6
  *   psl-{parent6}-{hash12}          → parent6
+ *   db-{provider}-{parent6}-{hash12} → parent6
  *   a-{agent}-{parent6}-{hash12}    → parent6
  */
 function extractParentPrefix(tag: string): string | undefined {
   // dkr-PPPPPP-HHHHHHHHHHHH or psl-PPPPPP-HHHHHHHHHHHH
   if (tag.startsWith('dkr-') || tag.startsWith('psl-')) {
     return tag.split('-')[1];
+  }
+  if (tag.startsWith('db-')) {
+    return tag.split('-')[2];
   }
   // a-{agent}-PPPPPP-HHHHHHHHHHHH
   if (tag.startsWith('a-')) {
@@ -593,23 +630,38 @@ async function discoverCloudResources(
   const config = await readConfig();
   const currentBaseSlug = getBaseSnapshotSlug(config);
   const AGENTS: AgentType[] = ['claude', 'opencode', 'codex'];
+  const currentDbProviderSlugs = new Set<string>();
   const currentAgentSlugs = new Set(
     AGENTS.map((a) => getAgentSnapshotSlug(a, undefined, config)),
   );
 
   // Compute current setup slug (if projectSetupLayer is configured)
   let currentSetupSlug: string | null = null;
+  let effectiveParentHash: string | undefined;
   if (config.projectSetupLayer) {
     const baseHash = currentBaseSlug.replace('ox-base-', '');
     currentSetupSlug = getProjectSetupSnapshotSlug(
       baseHash,
       config.projectSetupLayer,
     );
+    effectiveParentHash = currentSetupSlug.replace('oxl-', '');
 
     // Agent overlays built on setup layer are also current
-    const setupHash = currentSetupSlug.replace('oxl-', '');
     for (const agent of AGENTS) {
-      currentAgentSlugs.add(getAgentSnapshotSlug(agent, setupHash));
+      currentAgentSlugs.add(getAgentSnapshotSlug(agent, effectiveParentHash));
+    }
+  }
+
+  if (isDbProvider(config.dbServiceProvider)) {
+    const dbProviderSlug = getDbProviderSnapshotSlug(
+      config.dbServiceProvider,
+      effectiveParentHash,
+      config,
+    );
+    currentDbProviderSlugs.add(dbProviderSlug);
+    effectiveParentHash = dbProviderSlug.replace('oxd-', '');
+    for (const agent of AGENTS) {
+      currentAgentSlugs.add(getAgentSnapshotSlug(agent, effectiveParentHash));
     }
   }
 
@@ -634,6 +686,7 @@ async function discoverCloudResources(
   for (const snapshot of snapshots) {
     const classified = classifyCloudSnapshot(snapshot, {
       currentBaseSlug,
+      currentDbProviderSlugs,
       currentAgentSlugs,
       currentSetupSlug,
       sessionsBySnapshotSlug: lookups.sessionsBySnapshotSlug,
@@ -737,6 +790,17 @@ async function discoverDockerResources(): Promise<SandboxResource[]> {
     currentSetupLayerTags.add(tagPart);
     currentAncestorPrefixes.add(extractLayerHash(setupTag).slice(0, 6));
     effectiveBase = setupTag;
+  }
+
+  if (isDbProvider(config.dbServiceProvider)) {
+    const dbProviderTag = getDbProviderTag(
+      effectiveBase,
+      config.dbServiceProvider,
+    );
+    const tagPart = dbProviderTag.split(':')[1] ?? dbProviderTag;
+    currentSetupLayerTags.add(tagPart);
+    currentAncestorPrefixes.add(extractLayerHash(dbProviderTag).slice(0, 6));
+    effectiveBase = dbProviderTag;
   }
 
   // Agent overlays on the effective base are current

@@ -2,11 +2,15 @@
 // Docker Sandbox Provider - Adapts existing Docker functions to SandboxProvider
 // ============================================================================
 
-import { type AgentType, readConfig } from '../config.ts';
+import { nanoid } from 'nanoid';
+import { type AgentType, isDbProvider, readConfig } from '../config.ts';
+import { deleteDatabaseFork, forkDatabase } from '../db.ts';
+import type { ResumeSessionOptions } from '../docker.ts';
 import {
   attachToContainer,
   type OxSession as DockerSession,
   getSession as dockerGetSession,
+  ensureDbProviderLayer,
   ensureDockerImage,
   ensureDockerImageForAgent,
   ensureDockerSandbox,
@@ -85,6 +89,8 @@ export function mapDockerSession(docker: DockerSession): OxSession {
     execType: docker.execType,
     resumedFrom: docker.resumedFrom,
     mountDir: docker.mountDir,
+    dbForkProvider: docker.dbForkProvider,
+    dbForkServiceId: docker.dbForkServiceId,
     containerName: docker.containerName,
     startedAt: docker.startedAt,
     finishedAt: docker.finishedAt,
@@ -160,12 +166,33 @@ export class DockerSandboxProvider implements SandboxProvider {
 
     // Chain through project setup layer if configured
     const config = await readConfig();
+    let effectiveBaseImage = baseImage;
     if (config.projectSetupLayer) {
-      return ensureProjectSetupLayer(baseImage, config.projectSetupLayer, {
-        onProgress: options?.onProgress,
-        force: options?.force,
-        signal: options?.signal,
-      });
+      effectiveBaseImage = await ensureProjectSetupLayer(
+        effectiveBaseImage,
+        config.projectSetupLayer,
+        {
+          onProgress: options?.onProgress,
+          force: options?.force,
+          signal: options?.signal,
+        },
+      );
+    }
+
+    if (isDbProvider(config.dbServiceProvider)) {
+      effectiveBaseImage = await ensureDbProviderLayer(
+        effectiveBaseImage,
+        config.dbServiceProvider,
+        {
+          onProgress: options?.onProgress,
+          force: options?.force,
+          signal: options?.signal,
+        },
+      );
+    }
+
+    if (effectiveBaseImage !== baseImage) {
+      return effectiveBaseImage;
     }
 
     return baseImage;
@@ -198,6 +225,9 @@ export class DockerSandboxProvider implements SandboxProvider {
       model: options.model,
       interactive: options.interactive,
       envVars: options.envVars,
+      pgpassContent: options.pgpassContent,
+      dbForkProvider: options.dbForkProvider,
+      dbForkServiceId: options.dbForkServiceId,
       mountDir: options.mountDir,
       isGitRepo: options.isGitRepo,
       agentArgs: options.agentArgs,
@@ -262,13 +292,71 @@ export class DockerSandboxProvider implements SandboxProvider {
   ): Promise<OxSession> {
     log.debug({ sessionId }, 'Resuming Docker sandbox');
     const { onProgress, requestSudo } = options;
+    const existing = await dockerGetSession(sessionId);
+    if (!existing) {
+      throw new Error('Failed to find Docker session to resume');
+    }
+
+    const resumeSuffix = nanoid(6).toLowerCase();
+    const resumeName = `${existing.name}-resumed-${resumeSuffix}`;
+    let forkServiceId: string | undefined;
+    let resumeOptions: ResumeSessionOptions = {
+      ...options,
+      resumeSuffix,
+      dbForkProvider: undefined,
+      dbForkServiceId: undefined,
+    };
+
+    if (existing.dbForkProvider && existing.dbForkServiceId) {
+      onProgress?.('Forking database');
+      const forkResult = await forkDatabase(
+        resumeName,
+        existing.dbForkServiceId,
+        undefined,
+        existing.dbForkProvider,
+      );
+      forkServiceId = forkResult.service_id;
+      resumeOptions = {
+        ...resumeOptions,
+        envVars: forkResult.envVars,
+        pgpassContent: forkResult.pgpassContent,
+        dbForkProvider: existing.dbForkProvider,
+        dbForkServiceId: forkResult.service_id,
+      };
+    }
+
     onProgress?.('Resuming container');
-    const containerName = await resumeSession(sessionId, options);
+    let containerName: string;
+    try {
+      containerName = await resumeSession(sessionId, resumeOptions);
+    } catch (err) {
+      if (existing.dbForkProvider && forkServiceId) {
+        await deleteDatabaseFork(existing.dbForkProvider, forkServiceId).catch(
+          (cleanupErr) => {
+            log.warn(
+              { cleanupErr, forkServiceId, sessionId },
+              'Failed to clean up resumed Docker fork after resume error',
+            );
+          },
+        );
+      }
+      throw err;
+    }
 
     // Fetch the full session info for the resumed container
     onProgress?.('Loading session');
     const session = await dockerGetSession(containerName);
     if (!session) {
+      if (existing.dbForkProvider && forkServiceId) {
+        await deleteDatabaseFork(existing.dbForkProvider, forkServiceId).catch(
+          (cleanupErr) => {
+            log.warn(
+              { cleanupErr, forkServiceId, sessionId },
+              'Failed to clean up resumed Docker fork after session lookup error',
+            );
+          },
+        );
+      }
       throw new Error('Failed to find resumed Docker session');
     }
     log.debug(
@@ -336,6 +424,19 @@ export class DockerSandboxProvider implements SandboxProvider {
     // (routes are stored by container name, but sessionId is the container ID)
     const session = await dockerGetSession(sessionId);
     const containerName = session?.containerName ?? sessionId;
+    if (session?.dbForkProvider && session.dbForkServiceId) {
+      try {
+        await deleteDatabaseFork(
+          session.dbForkProvider,
+          session.dbForkServiceId,
+        );
+      } catch (err) {
+        log.warn(
+          { err, sessionId, dbForkServiceId: session.dbForkServiceId },
+          'Failed to delete DB fork during Docker session removal',
+        );
+      }
+    }
     await teardownPortForwarding(containerName, containerName);
     await removeContainer(sessionId);
   }

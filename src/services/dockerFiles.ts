@@ -4,12 +4,24 @@ import { log } from './logger';
 
 export const CONTAINER_HOME = '/home/ox';
 
+export function isStrictPermissionFile(containerPath: string): boolean {
+  return containerPath.endsWith('/.pgpass') || containerPath === '.pgpass';
+}
+
+export function buildWriteFileCommand(containerPath: string): string {
+  const escaped = $.escape(containerPath);
+  const base = `mkdir -p $(dirname ${escaped}) && cat > ${escaped}`;
+  if (isStrictPermissionFile(containerPath)) {
+    return `${base} && chmod 600 ${escaped}`;
+  }
+  return base;
+}
+
 export async function writeFileToContainer(
   containerId: string,
   containerPath: string,
   content: string,
 ): Promise<void> {
-  const escaped = $.escape(containerPath);
   const proc = spawn(
     [
       'docker',
@@ -18,7 +30,7 @@ export async function writeFileToContainer(
       containerId,
       'sh',
       '-c',
-      `mkdir -p $(dirname ${escaped}) && cat > ${escaped}`,
+      buildWriteFileCommand(containerPath),
     ],
     { stdin: new Blob([content]), stderr: 'pipe', stdout: 'pipe' },
   );

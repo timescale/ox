@@ -7,7 +7,7 @@ import { AbortError, raceAbort, throwIfAborted } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import { runClaudeInDocker } from './claude';
 import { runCodexInDocker } from './codex';
-import type { AgentType } from './config';
+import { type AgentType, type DbServiceProvider, readConfig } from './config';
 import { log } from './logger';
 import { runOpencodeInDocker } from './opencode';
 
@@ -109,8 +109,17 @@ async function getExistingBranches(): Promise<string[]> {
   }
 }
 
-async function getExistingServices(): Promise<string[]> {
+export async function getExistingServices(
+  provider?: DbServiceProvider | null,
+): Promise<string[]> {
   try {
+    if (provider === 'ghost') {
+      log.debug(
+        'Skipping Ghost DB lookup in getExistingServices to keep branch-name generation fast',
+      );
+      return [];
+    }
+
     const result = await Bun.$`tiger svc list -o json`.quiet();
     const services = JSON.parse(result.stdout.toString());
     return services.map((svc: { name: string }) => svc.name);
@@ -156,13 +165,15 @@ export async function generateBranchName({
   signal,
 }: GenerateBranchNameOptions): Promise<string> {
   throwIfAborted(signal);
+  const config = await readConfig();
+
   // Gather all existing names to avoid conflicts
   const [existingBranches, existingServices, existingContainers] =
     await raceAbort(
       signal,
       Promise.all([
         getExistingBranches(),
-        getExistingServices(),
+        getExistingServices(config.dbServiceProvider),
         getExistingContainers(),
       ]),
     );

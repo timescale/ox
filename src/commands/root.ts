@@ -5,6 +5,7 @@
 import { YAML } from 'bun';
 import { type Command, Option } from 'commander';
 import { ensureGhAuth } from '../components/GhAuth.tsx';
+import { ensureGhostAuth } from '../components/GhostAuth.tsx';
 import { ensureClaudeAuth } from '../services/claude';
 import { ensureCodexAuth } from '../services/codex';
 import { type AgentType, projectConfig, readConfig } from '../services/config';
@@ -123,10 +124,18 @@ export async function branchAction(
   const config = await readConfig();
 
   // Step 4: Determine effective values from options or config
-  const effectiveServiceId = options.serviceId ?? config.tigerServiceId;
+  const effectiveServiceId = options.serviceId ?? config.dbServiceId;
   const effectiveAgent: AgentType = options.agent ?? config.agent ?? 'opencode';
   const effectiveModel: string | undefined =
     options.model ?? config.agentModels?.[effectiveAgent] ?? config.model;
+
+  if (
+    options.dbFork &&
+    effectiveServiceId &&
+    config.dbServiceProvider === 'ghost'
+  ) {
+    await ensureGhostAuth();
+  }
 
   // Step 4b: Ensure sandbox image (including agent overlay) is ready
   printErr('Ensuring sandbox image...');
@@ -163,7 +172,12 @@ export async function branchAction(
   } else {
     log.info('Forking database (this may take a few minutes)...');
     printErr('Forking database (this may take a few minutes)...');
-    forkResult = await forkDatabase(branchName, effectiveServiceId);
+    forkResult = await forkDatabase(
+      branchName,
+      effectiveServiceId,
+      undefined,
+      config.dbServiceProvider,
+    );
     log.info({ name: forkResult.name }, 'Database fork created');
     printErr(`  Database fork created: ${forkResult.name}`);
   }
@@ -239,6 +253,7 @@ export async function branchAction(
     model: effectiveModel,
     interactive: isInteractiveAgent,
     envVars: forkResult?.envVars,
+    pgpassContent: forkResult?.pgpassContent,
     mountDir,
     isGitRepo,
     agentMode: effectiveAgentMode,
@@ -408,7 +423,7 @@ export function withBranchOptions<T extends Command>(cmd: T): T {
   return cmd
     .option(
       '-s, --service-id <id>',
-      'Database service ID to fork (defaults to .ox config or tiger default)',
+      'Database service/instance ID to fork (defaults to configured DB provider)',
     )
     .option('--no-db-fork', 'Skip the database fork step')
     .option(

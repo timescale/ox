@@ -105,6 +105,18 @@ describe('mapDockerSession', () => {
     expect(session.startedAt).toBe('2025-06-01T12:00:01Z');
     expect(session.finishedAt).toBe('2025-06-01T12:05:00Z');
   });
+
+  test('preserves db fork metadata', () => {
+    const docker = makeDockerSession({
+      dbForkProvider: 'ghost',
+      dbForkServiceId: 'fork-123',
+    });
+
+    const session = mapDockerSession(docker);
+
+    expect(session.dbForkProvider).toBe('ghost');
+    expect(session.dbForkServiceId).toBe('fork-123');
+  });
 });
 
 describe('mapDockerStats', () => {

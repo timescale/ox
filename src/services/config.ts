@@ -12,15 +12,27 @@ import envPaths from 'env-paths';
 
 export type AgentType = 'claude' | 'opencode' | 'codex';
 
+export type DbServiceProvider = 'tiger' | 'ghost';
+
+/** Type guard: true when the value is a known database provider. */
+export function isDbProvider(value: unknown): value is DbServiceProvider {
+  return value === 'tiger' || value === 'ghost';
+}
+
 /**
  * Ox configuration - all keys are valid at both user and project level.
  * User config provides defaults, project config can override any value.
  */
 export interface OxConfig {
-  // Tiger service ID to use as the default parent for database forks
+  // Database service provider: 'tiger' or 'ghost'
+  // null = explicitly "none" (no DB provider)
+  // undefined = not set
+  dbServiceProvider?: DbServiceProvider | null;
+
+  // Database service/instance ID to use as the default parent for forks
   // null = explicitly "none" (skip DB fork by default)
   // undefined = not set
-  tigerServiceId?: string | null;
+  dbServiceId?: string | null;
 
   // Default agent to use (claude or opencode)
   agent?: AgentType;
@@ -142,7 +154,8 @@ export type ConfigValueType =
 
 /** Type metadata for each config key, used for validation and parsing in CLI */
 export const CONFIG_KEYS: Record<keyof OxConfig, ConfigValueType> = {
-  tigerServiceId: 'string|null',
+  dbServiceProvider: 'string|null',
+  dbServiceId: 'string|null',
   agent: 'string',
   model: 'string',
   themeName: 'string',
@@ -299,7 +312,9 @@ function createConfigStore<T extends object>(
       return {} as T;
     }
 
-    return parsed as T;
+    const migrated = { ...(parsed as Record<string, unknown>) };
+    migrateConfig(migrated);
+    return migrated as T;
   };
 
   const readValue = async <K extends keyof T>(
@@ -386,6 +401,28 @@ export const userConfig = createConfigStore<OxConfig>({
 // ============================================================================
 
 /**
+ * Migrate legacy config keys in-place.
+ * - tigerServiceId → dbServiceId + dbServiceProvider: 'tiger'
+ */
+export function migrateConfig(config: Record<string, unknown>): void {
+  if ('tigerServiceId' in config) {
+    if (!('dbServiceId' in config)) {
+      config.dbServiceId = config.tigerServiceId;
+    }
+    // If we have a non-null dbServiceId (migrated or pre-existing) but no
+    // provider, default to 'tiger' since the legacy key was Tiger-specific.
+    if (
+      config.dbServiceId != null &&
+      config.dbServiceId !== undefined &&
+      !('dbServiceProvider' in config)
+    ) {
+      config.dbServiceProvider = 'tiger';
+    }
+    delete config.tigerServiceId;
+  }
+}
+
+/**
  * Read the effective/merged config.
  *
  * Config values are merged with project config taking precedence over user config.
@@ -400,10 +437,12 @@ export async function readConfig(): Promise<OxConfig> {
     projectConfig.read(),
   ]);
 
-  return {
+  const merged: Record<string, unknown> = {
     ...user,
     ...project,
   };
+
+  return merged as OxConfig;
 }
 
 /**

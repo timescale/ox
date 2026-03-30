@@ -77,7 +77,8 @@ export interface SessionsResult {
     | 'shell'
     | 'connect-shell'
     | 'needs-agent-auth'
-    | 'needs-gh-auth';
+    | 'needs-gh-auth'
+    | 'needs-ghost-auth';
   sessionId?: string;
   // For attach/exec-shell: the session to return to after detaching
   session?: OxSession;
@@ -105,6 +106,14 @@ export interface SessionsResult {
     isGitRepo?: boolean;
   };
   ghAuthInfo?: {
+    agent: AgentType;
+    model: string;
+    prompt: string;
+    mode?: AgentMode;
+    mountDir?: string;
+    isGitRepo?: boolean;
+  };
+  ghostAuthInfo?: {
     agent: AgentType;
     model: string;
     prompt: string;
@@ -195,6 +204,9 @@ interface RouterState {
   connectShell: (shellSession: ShellSession) => void;
   needsAgentAuth: (authInfo: NonNullable<SessionsResult['authInfo']>) => void;
   needsGhAuth: (ghAuthInfo: NonNullable<SessionsResult['ghAuthInfo']>) => void;
+  needsGhostAuth: (
+    ghostAuthInfo: NonNullable<SessionsResult['ghostAuthInfo']>,
+  ) => void;
 }
 
 export const useRouterStore = create<RouterState>()((set, get) => ({
@@ -314,5 +326,9 @@ export const useRouterStore = create<RouterState>()((set, get) => ({
 
   needsGhAuth: (ghAuthInfo) => {
     get()._onComplete?.({ type: 'needs-gh-auth', ghAuthInfo });
+  },
+
+  needsGhostAuth: (ghostAuthInfo) => {
+    get()._onComplete?.({ type: 'needs-ghost-auth', ghostAuthInfo });
   },
 }));

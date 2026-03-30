@@ -22,6 +22,7 @@ import { forkDatabase } from '../services/db.ts';
 import { getDenoToken } from '../services/deno.ts';
 import { ensureDockerImage } from '../services/docker.ts';
 import { checkGhCredentials } from '../services/gh.ts';
+import { checkGhostCredentials } from '../services/ghost.ts';
 import { generateBranchName } from '../services/git.ts';
 import { log } from '../services/logger.ts';
 import type { RequestSudoFn } from '../services/portForwarding/sudo.ts';
@@ -127,6 +128,66 @@ export interface SessionWorkflowState {
     initialView: 'prompt' | 'list' | 'starting' | 'detail' | 'resources',
     initialPrompt?: string,
   ) => void;
+}
+
+export function getSetupDbCompletionMessage(
+  result: Extract<SetupDbResult, { type: 'completed' }>,
+): string {
+  if (result.dbServiceProvider === null) {
+    return 'Database provider set to (None).';
+  }
+
+  if (result.dbServiceId === null) {
+    return `Database provider set to ${result.dbServiceProvider} (no service selected).`;
+  }
+
+  return `Database provider set to ${result.dbServiceProvider} - ${result.dbServiceId}.`;
+}
+
+export async function attemptDatabaseFork({
+  isPlan,
+  dbFork,
+  branchName,
+  effectiveServiceId,
+  dbServiceProvider,
+  signal,
+  setStep,
+  showToast,
+  fork = forkDatabase,
+}: {
+  isPlan: boolean;
+  dbFork: boolean;
+  branchName: string;
+  effectiveServiceId?: string | null;
+  dbServiceProvider?: OxConfig['dbServiceProvider'];
+  signal?: AbortSignal;
+  setStep: (step: string) => void;
+  showToast: (message: string, type: 'success' | 'error' | 'info') => void;
+  fork?: typeof forkDatabase;
+}): Promise<ForkResult | null> {
+  if (isPlan || !dbFork || !effectiveServiceId) {
+    return null;
+  }
+
+  setStep('Forking database');
+  try {
+    return await fork(
+      branchName,
+      effectiveServiceId,
+      signal,
+      dbServiceProvider,
+    );
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw err;
+    }
+    log.error({ err }, 'Database fork failed; continuing without a fork');
+    showToast(
+      `Database fork failed: ${err instanceof Error ? err.message : String(err)}. Continuing without a forked database.`,
+      'error',
+    );
+    return null;
+  }
 }
 
 // ============================================================================
@@ -390,18 +451,46 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           dbFork: doFork,
           config: currentConfig,
         } = get();
-        const effectiveServiceId = svcId ?? currentConfig?.tigerServiceId;
-        let forkResult: ForkResult | null = null;
-        if (!isPlan && doFork && effectiveServiceId) {
-          updateView((v) =>
-            v.type === 'starting' ? { ...v, step: 'Forking database' } : v,
-          );
-          forkResult = await forkDatabase(
-            branchName,
-            effectiveServiceId,
-            signal,
-          );
+        const effectiveServiceId = svcId ?? currentConfig?.dbServiceId;
+
+        if (
+          !isPlan &&
+          doFork &&
+          effectiveServiceId &&
+          currentConfig?.dbServiceProvider === 'ghost'
+        ) {
+          const cachedGhostAuth = useReadinessStore.getState().ghostAuth;
+          const hasGhostAuth =
+            cachedGhostAuth === 'ready'
+              ? true
+              : cachedGhostAuth === 'invalid'
+                ? false
+                : await checkGhostCredentials(signal);
+          if (!hasGhostAuth) {
+            useRouterStore.getState().needsGhostAuth({
+              agent,
+              model,
+              prompt,
+              mode,
+              mountDir,
+              isGitRepo: inGitRepo,
+            });
+            return;
+          }
         }
+
+        const forkResult = await attemptDatabaseFork({
+          isPlan,
+          dbFork: doFork,
+          branchName,
+          effectiveServiceId,
+          dbServiceProvider: currentConfig?.dbServiceProvider,
+          signal,
+          setStep: (step) =>
+            updateView((v) => (v.type === 'starting' ? { ...v, step } : v)),
+          showToast: (message, type) =>
+            useToastStore.getState().show(message, type),
+        });
 
         // Only check GitHub credentials if in a git repo
         // Use cached result from readiness store if available
@@ -452,6 +541,11 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
           model,
           interactive: isInteractive,
           envVars: forkResult?.envVars,
+          pgpassContent: forkResult?.pgpassContent,
+          dbForkProvider: forkResult
+            ? (currentConfig?.dbServiceProvider ?? undefined)
+            : undefined,
+          dbForkServiceId: forkResult?.service_id,
           mountDir,
           isGitRepo: inGitRepo,
           agentArgs,
@@ -795,7 +889,7 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         useToastStore
           .getState()
           .show(
-            'Tiger CLI is not installed — cannot configure database service.',
+            'Tiger CLI is not available — cannot configure the Tiger database provider.',
             'error',
           );
         useRouterStore.getState().goToPrompt(resumeSession);
@@ -808,11 +902,9 @@ export const useSessionWorkflowStore = create<SessionWorkflowState>()(
         set({ config: mergedConfig });
       });
 
-      const label =
-        result.tigerServiceId === null
-          ? 'Database service set to (None).'
-          : `Database service set to ${result.tigerServiceId}.`;
-      useToastStore.getState().show(label, 'success');
+      useToastStore
+        .getState()
+        .show(getSetupDbCompletionMessage(result), 'success');
       useRouterStore.getState().goToPrompt(resumeSession);
     },
 

@@ -95,6 +95,7 @@ describe('classifyCloudSnapshot', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
@@ -118,6 +119,7 @@ describe('classifyCloudSnapshot', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
@@ -141,6 +143,7 @@ describe('classifyCloudSnapshot', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map([['oxn-my-session-abc123', session]]),
@@ -165,6 +168,7 @@ describe('classifyCloudSnapshot', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
@@ -187,6 +191,7 @@ describe('classifyCloudSnapshot', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
@@ -209,6 +214,7 @@ describe('classifyCloudSnapshot', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
@@ -229,6 +235,7 @@ describe('classifyCloudSnapshot', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
@@ -248,6 +255,7 @@ describe('classifyCloudSnapshot', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
@@ -266,6 +274,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = classifyCloudSnapshot(snapshot, {
       currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+      currentDbProviderSlugs: new Set(),
       currentAgentSlugs: new Set(),
       currentSetupSlug: null,
       sessionsBySnapshotSlug: new Map(),
@@ -282,6 +291,7 @@ describe('classifyCloudSnapshot', () => {
 
     const result = classifyCloudSnapshot(snapshot, {
       currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+      currentDbProviderSlugs: new Set(),
       currentAgentSlugs: new Set(),
       currentSetupSlug: null,
       sessionsBySnapshotSlug: new Map(),
@@ -548,6 +558,7 @@ describe('classifyCloudVolume', () => {
     const result = assertResource(
       classifyCloudSnapshot(snapshot, {
         currentBaseSlug: 'ox-base-a1b2c3d4e5f6',
+        currentDbProviderSlugs: new Set(),
         currentAgentSlugs: new Set(['ox-a1b2c3-claude-2-1-71']),
         currentSetupSlug: null,
         sessionsBySnapshotSlug: new Map(),
@@ -1288,6 +1299,7 @@ describe('groupResourcesByKind', () => {
 describe('classifyCloudSnapshot — project setup layer', () => {
   const baseCtx = {
     currentBaseSlug: 'ox-base-abc123def456',
+    currentDbProviderSlugs: new Set<string>(),
     currentAgentSlugs: new Set<string>(),
     currentSetupSlug: 'oxl-setup123abc',
     sessionsBySnapshotSlug: new Map(),

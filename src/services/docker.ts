@@ -13,6 +13,9 @@ import INSTALL_CLAUDE from '../../sandbox/agents/install-claude.sh' with {
 import INSTALL_CODEX from '../../sandbox/agents/install-codex.sh' with {
   type: 'text',
 };
+import INSTALL_GHOST from '../../sandbox/agents/install-ghost.sh' with {
+  type: 'text',
+};
 import INSTALL_OPENCODE from '../../sandbox/agents/install-opencode.sh' with {
   type: 'text',
 };
@@ -49,12 +52,15 @@ import { getClaudeConfigFiles, hasValidClaudeFileCredentials } from './claude';
 import { getCodexConfigFiles, hasValidCodexFileCredentials } from './codex';
 import {
   type AgentType,
+  type DbServiceProvider,
+  isDbProvider,
   type OxConfig,
   projectConfigDir,
   readConfig,
 } from './config';
 import { CONTAINER_HOME, writeFileToContainer } from './dockerFiles';
 import { getGhConfigFiles } from './gh';
+import { getGhostConfigFiles } from './ghost';
 import type { RepoInfo } from './git';
 import { log } from './logger';
 import {
@@ -66,23 +72,56 @@ import type { AgentMode, AttachOptions } from './sandbox/types';
 
 export const getCredentialFiles = async (
   homeDir = CONTAINER_HOME,
+  pgpassContent?: string,
+  options?: { includeGhostCredentials?: boolean },
 ): Promise<VirtualFile[]> => {
-  const [claudeFiles, opencodeFiles, codexFiles, ghFiles] = await Promise.all([
-    getClaudeConfigFiles(),
-    getOpencodeConfigFiles(),
-    getCodexConfigFiles(),
-    getGhConfigFiles(),
-  ]);
-  const files = [...claudeFiles, ...opencodeFiles, ...codexFiles, ...ghFiles];
+  const includeGhostCredentials = options?.includeGhostCredentials ?? false;
+  const [claudeFiles, opencodeFiles, codexFiles, ghFiles, ghostFiles] =
+    await Promise.all([
+      getClaudeConfigFiles(),
+      getOpencodeConfigFiles(),
+      getCodexConfigFiles(),
+      getGhConfigFiles(),
+      includeGhostCredentials ? getGhostConfigFiles() : Promise.resolve([]),
+    ]);
+  const files = [
+    ...claudeFiles,
+    ...opencodeFiles,
+    ...codexFiles,
+    ...ghFiles,
+    ...ghostFiles,
+  ];
   // Rewrite paths if a different home directory was requested
   if (homeDir !== CONTAINER_HOME) {
-    return files.map((f) => ({
-      ...f,
-      path: f.path.replace(CONTAINER_HOME, homeDir),
-    }));
+    return appendOptionalPgpassFile(
+      files.map((f) => ({
+        ...f,
+        path: f.path.replace(CONTAINER_HOME, homeDir),
+      })),
+      homeDir,
+      pgpassContent,
+    );
   }
-  return files;
+  return appendOptionalPgpassFile(files, homeDir, pgpassContent);
 };
+
+export function appendOptionalPgpassFile(
+  files: VirtualFile[],
+  homeDir = CONTAINER_HOME,
+  pgpassContent?: string,
+): VirtualFile[] {
+  if (!pgpassContent) {
+    return files;
+  }
+
+  return [
+    ...files,
+    {
+      path: `${homeDir}/.pgpass`,
+      value: pgpassContent,
+    },
+  ];
+}
 
 // ============================================================================
 // Container Labels
@@ -117,6 +156,8 @@ export interface OxContainerLabels {
   resumeImage?: string;
   /** How the agent runs in the sandbox (async, interactive, plan) */
   agentMode?: AgentMode;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
 }
 
 /**
@@ -145,6 +186,11 @@ export function buildOxLabels(
   if (input.resumedFrom) result['ox.resumed-from'] = input.resumedFrom;
   if (input.resumeImage) result['ox.resume-image'] = input.resumeImage;
   if (input.agentMode) result['ox.agent-mode'] = input.agentMode;
+  if (input.dbForkProvider)
+    result['ox.db-fork-provider'] = input.dbForkProvider;
+  if (input.dbForkServiceId) {
+    result['ox.db-fork-service-id'] = input.dbForkServiceId;
+  }
   return result;
 }
 
@@ -323,6 +369,7 @@ export function extractTagHash(imageRef: string): string {
   if (tagPart.startsWith('md5-')) return tagPart.slice(4);
   if (tagPart.startsWith('dkr-')) return tagPart.slice(4);
   if (tagPart.startsWith('psl-')) return tagPart.slice(4);
+  if (tagPart.startsWith('db-')) return tagPart.slice(3);
   if (tagPart.startsWith('a-')) return tagPart.slice(2);
   return tagPart;
 }
@@ -570,11 +617,15 @@ async function ensureRootScriptLayer(
 // ============================================================================
 
 /** Map of agent type to embedded install script content */
-const AGENT_INSTALL_SCRIPTS: Record<string, string> = {
+const AGENT_INSTALL_SCRIPTS: Record<AgentType, string> = {
   claude: INSTALL_CLAUDE,
   opencode: INSTALL_OPENCODE,
   codex: INSTALL_CODEX,
+};
+
+const DB_PROVIDER_INSTALL_SCRIPTS: Record<DbServiceProvider, string> = {
   tiger: INSTALL_TIGER,
+  ghost: INSTALL_GHOST,
 };
 
 /** Get the pinned version for an agent from sandbox/versions.json */
@@ -590,7 +641,7 @@ export function getAgentVersion(agent: AgentType): string {
 }
 
 /** Get the embedded install script content for an agent */
-export function getAgentInstallScript(agent: AgentType | 'tiger'): string {
+export function getAgentInstallScript(agent: AgentType): string {
   const script = AGENT_INSTALL_SCRIPTS[agent];
   if (!script) {
     throw new Error(`No install script for agent: ${agent}`);
@@ -598,9 +649,19 @@ export function getAgentInstallScript(agent: AgentType | 'tiger'): string {
   return script;
 }
 
+export function getDbProviderInstallScript(
+  provider: DbServiceProvider,
+): string {
+  const script = DB_PROVIDER_INSTALL_SCRIPTS[provider];
+  if (!script) {
+    throw new Error(`No install script for db provider: ${provider}`);
+  }
+  return script;
+}
+
 /**
  * Compute a content hash for the agent overlay layer.
- * Combines the parent hash, agent name, version, and install scripts
+ * Combines the parent hash, agent name, version, and install script
  * so the layer rebuilds when any of these change.
  */
 export function computeAgentOverlayHash(
@@ -612,7 +673,17 @@ export function computeAgentOverlayHash(
   hasher.update(agent);
   hasher.update(getAgentVersion(agent));
   hasher.update(getAgentInstallScript(agent));
-  hasher.update(getAgentInstallScript('tiger'));
+  return hasher.digest('hex').slice(0, 12);
+}
+
+export function computeDbProviderHash(
+  parentHash: string,
+  provider: DbServiceProvider,
+): string {
+  const hasher = new Bun.CryptoHasher('md5');
+  hasher.update(parentHash);
+  hasher.update(provider);
+  hasher.update(getDbProviderInstallScript(provider));
   return hasher.digest('hex').slice(0, 12);
 }
 
@@ -628,6 +699,16 @@ export function getAgentOverlayTag(
   const parentLayerHash = extractLayerHash(baseImage);
   const layerHash = computeAgentOverlayHash(parentHash, agent);
   return `${DOCKER_IMAGE_NAME}:a-${agent}-${parentLayerHash.slice(0, 6)}-${layerHash}`;
+}
+
+export function getDbProviderTag(
+  baseImage: string,
+  provider: DbServiceProvider,
+): string {
+  const parentHash = extractTagHash(baseImage);
+  const parentLayerHash = extractLayerHash(baseImage);
+  const layerHash = computeDbProviderHash(parentHash, provider);
+  return `${DOCKER_IMAGE_NAME}:db-${provider}-${parentLayerHash.slice(0, 6)}-${layerHash}`;
 }
 
 /**
@@ -753,28 +834,19 @@ export async function ensureAgentOverlay(
 
     // 2. Write install scripts into the container
     const agentScript = getAgentInstallScript(agent);
-    const tigerScript = getAgentInstallScript('tiger');
     await writeFileToContainer(
       containerName,
       '/tmp/install-agent.sh',
       agentScript,
     );
     throwIfAborted(options?.signal);
-    await writeFileToContainer(
-      containerName,
-      '/tmp/install-tiger.sh',
-      tigerScript,
-    );
-    throwIfAborted(options?.signal);
 
-    // 3. Execute install scripts as the ox user
+    // 3. Execute install script as the ox user
     await $`docker exec ${containerName} bash /tmp/install-agent.sh ${version}`.quiet();
-    throwIfAborted(options?.signal);
-    await $`docker exec ${containerName} bash /tmp/install-tiger.sh`.quiet();
     throwIfAborted(options?.signal);
 
     // 4. Clean up temp files and commit
-    await $`docker exec ${containerName} rm -f /tmp/install-agent.sh /tmp/install-tiger.sh`.quiet();
+    await $`docker exec ${containerName} rm -f /tmp/install-agent.sh`.quiet();
     throwIfAborted(options?.signal);
     await $`docker commit ${containerName} ${overlayTag}`.quiet();
     invalidateImageExistsCache(overlayTag);
@@ -789,6 +861,78 @@ export async function ensureAgentOverlay(
     log.error({ err, overlayTag, agent }, 'Failed to build agent overlay');
     throw new Error(
       `Failed to build ${agent} overlay image: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    if (keepContainer) {
+      useBackgroundTaskStore
+        .getState()
+        .enqueue(`Removing build container ${containerName}`, async () => {
+          await $`docker rm -f ${containerName}`.quiet().nothrow();
+        });
+    } else {
+      await $`docker rm -f ${containerName}`.quiet().nothrow();
+    }
+  }
+}
+
+export async function ensureDbProviderLayer(
+  baseImage: string,
+  provider: DbServiceProvider,
+  options?: {
+    onProgress?: (progress: ImageBuildProgress) => void;
+    force?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<string> {
+  throwIfAborted(options?.signal);
+  const layerTag = getDbProviderTag(baseImage, provider);
+
+  if (!options?.force && (await imageExists(layerTag))) {
+    log.debug(`${provider} db provider layer image already exists`);
+    return layerTag;
+  }
+
+  log.info(
+    { layerTag, baseImage, provider },
+    'Building db provider layer image locally',
+  );
+  options?.onProgress?.({
+    type: 'building',
+    message: `Installing ${provider} db provider`,
+  });
+
+  const containerName = `ox-db-${provider}-${nanoid(6).toLowerCase()}`;
+  let keepContainer = false;
+
+  try {
+    await $`docker run -d --name ${containerName} ${baseImage} sleep infinity`.quiet();
+    throwIfAborted(options?.signal);
+
+    const dbScript = getDbProviderInstallScript(provider);
+    await writeFileToContainer(containerName, '/tmp/install-db.sh', dbScript);
+    throwIfAborted(options?.signal);
+
+    await $`docker exec ${containerName} bash /tmp/install-db.sh`.quiet();
+    throwIfAborted(options?.signal);
+
+    await $`docker exec ${containerName} rm -f /tmp/install-db.sh`.quiet();
+    throwIfAborted(options?.signal);
+    await $`docker commit ${containerName} ${layerTag}`.quiet();
+    invalidateImageExistsCache(layerTag);
+
+    log.info(
+      { layerTag, provider },
+      'DB provider layer image built successfully',
+    );
+    return layerTag;
+  } catch (err) {
+    if (isAbortError(err)) {
+      keepContainer = true;
+      throw err;
+    }
+    log.error({ err, layerTag, provider }, 'Failed to build db provider layer');
+    throw new Error(
+      `Failed to build ${provider} db provider layer: ${err instanceof Error ? err.message : String(err)}`,
     );
   } finally {
     if (keepContainer) {
@@ -1445,6 +1589,14 @@ export async function ensureDockerImageForAgent(
       );
     }
 
+    if (isDbProvider(config.dbServiceProvider)) {
+      effectiveBase = await ensureDbProviderLayer(
+        effectiveBase,
+        config.dbServiceProvider,
+        coalesced,
+      );
+    }
+
     return ensureAgentOverlay(effectiveBase, agent, coalesced);
   })();
 
@@ -1473,6 +1625,9 @@ export interface StartContainerOptions {
   model?: string;
   interactive: boolean;
   envVars?: Record<string, string>;
+  pgpassContent?: string;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
   /** If set, mount this local directory into the container instead of git clone */
   mountDir?: string;
   /** Whether running from a git repository (affects git/gh operations and PR instructions) */
@@ -1510,6 +1665,8 @@ export interface OxSession {
   startedAt?: string;
   finishedAt?: string;
   agentMode?: AgentMode;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
 }
 
 interface DockerInspectResult {
@@ -1588,6 +1745,8 @@ export async function listOxSessions(): Promise<OxSession[]> {
         resumedFrom: labels['ox.resumed-from'],
         interactive: labels['ox.interactive'] === 'true',
         mountDir: labels['ox.mount'],
+        dbForkProvider: labels['ox.db-fork-provider'] as DbServiceProvider,
+        dbForkServiceId: labels['ox.db-fork-service-id'],
         agentMode:
           (labels['ox.agent-mode'] as AgentMode) ||
           (labels['ox.submit-mode'] as AgentMode) ||
@@ -1973,6 +2132,11 @@ export interface ResumeSessionOptions {
   mode: 'interactive' | 'detached' | 'shell';
   prompt?: string;
   model?: string; // Allow overriding model on resume
+  envVars?: Record<string, string>;
+  pgpassContent?: string;
+  dbForkProvider?: DbServiceProvider;
+  dbForkServiceId?: string;
+  resumeSuffix?: string;
   /** If set, mount this local directory into the container */
   mountDir?: string;
   /** Extra arguments to append to the agent command (e.g., ['--agent', 'plan']) */
@@ -2023,7 +2187,7 @@ export async function resumeSession(
 
   const agent = (containerLabels['ox.agent'] as AgentType) || 'opencode';
   const model = options.model ?? containerLabels['ox.model'];
-  const resumeSuffix = nanoid(6).toLowerCase();
+  const resumeSuffix = options.resumeSuffix ?? nanoid(6).toLowerCase();
   const resumeImage = `ox-resume:${container.Id.slice(0, 12)}-${resumeSuffix}`;
 
   try {
@@ -2036,6 +2200,9 @@ export async function resumeSession(
   const envArgs: string[] = [];
   for (const envVar of container.Config.Env ?? []) {
     envArgs.push('-e', envVar);
+  }
+  for (const [key, value] of Object.entries(options.envVars ?? {})) {
+    envArgs.push('-e', `${key}=${value}`);
   }
 
   // Read config for overlay mounts and init script
@@ -2050,7 +2217,9 @@ export async function resumeSession(
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
-  const files = await getCredentialFiles();
+  const files = await getCredentialFiles(undefined, options.pgpassContent, {
+    includeGhostCredentials: options.dbForkProvider === 'ghost',
+  });
 
   // Resolve mount directory to absolute path if provided
   const absoluteMountDir = options.mountDir
@@ -2104,6 +2273,8 @@ ${escapePrompt(buildAgentCommand({ agent, mode: mode === 'detached' ? 'detached'
     mount: absoluteMountDir,
     resumedFrom: container.Name.replace(/^\//, ''),
     resumeImage,
+    dbForkProvider: options.dbForkProvider,
+    dbForkServiceId: options.dbForkServiceId,
     agentMode:
       options.agentMode ??
       ((containerLabels['ox.agent-mode'] as AgentMode) ||
@@ -2190,6 +2361,8 @@ export async function getSession(nameOrId: string): Promise<OxSession | null> {
       resumedFrom: labels['ox.resumed-from'],
       interactive: labels['ox.interactive'] === 'true',
       mountDir: labels['ox.mount'],
+      dbForkProvider: labels['ox.db-fork-provider'] as DbServiceProvider,
+      dbForkServiceId: labels['ox.db-fork-service-id'],
       agentMode:
         (labels['ox.agent-mode'] as AgentMode) ||
         (labels['ox.submit-mode'] as AgentMode) ||
@@ -2229,6 +2402,8 @@ export async function startContainer(
     agentMode,
     dockerImage,
     signal,
+    pgpassContent,
+    dbForkProvider,
   } = options;
 
   const containerName = `ox-${branchName}`;
@@ -2293,7 +2468,9 @@ export async function startContainer(
 
   // Build volume mounts (mountDir, overlay mounts, etc.)
   const volumes: string[] = [];
-  const files = await getCredentialFiles();
+  const files = await getCredentialFiles(CONTAINER_HOME, pgpassContent, {
+    includeGhostCredentials: dbForkProvider === 'ghost',
+  });
 
   // Resolve mount directory to absolute path if provided
   const absoluteMountDir = mountDir ? resolve(mountDir) : undefined;
@@ -2388,6 +2565,8 @@ ${escapePrompt(agentCommand, agent, fullPrompt, interactive)}
     mount: absoluteMountDir,
     noGit: !isGitRepo || undefined,
     agentMode,
+    dbForkProvider: options.dbForkProvider,
+    dbForkServiceId: options.dbForkServiceId,
   });
 
   try {

@@ -277,6 +277,17 @@ export function PromptScreen() {
     useReadinessStore.getState().prebuildAgentImage(agent, sandboxProvider);
   }, [imageReady, agent, sandboxProvider]);
 
+  // Check Ghost credentials in the background when the base image is ready
+  // and the project uses Ghost as DB provider. This ensures the auth result
+  // is cached before the user submits their prompt.
+  const dbServiceProvider = useSessionWorkflowStore(
+    (s) => s.config?.dbServiceProvider,
+  );
+  useEffect(() => {
+    if (!imageReady || dbServiceProvider !== 'ghost') return;
+    useReadinessStore.getState().checkGhostAuth();
+  }, [imageReady, dbServiceProvider]);
+
   // Handle agent switch with model matching (disabled when resuming).
   // The store's setAgent already saves the current model and restores
   // the new agent's persisted model.  We only need the equivalent-model
@@ -554,7 +565,7 @@ export function PromptScreen() {
       },
       {
         name: 'setup-db',
-        description: 'Configure the Tiger database service for this project',
+        description: 'Configure the database service for this project',
         onSelect: () => {
           setShowSlashCommands(false);
           setSlashQuery('');

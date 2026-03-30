@@ -12,6 +12,7 @@ import { completionCommand } from './commands/completion';
 import { configCommand } from './commands/config';
 import { feedbackCommand } from './commands/feedback';
 import { ghCommand } from './commands/gh';
+import { ghostCommand } from './commands/ghost';
 import { logsCommand } from './commands/logs';
 import { opencodeCommand } from './commands/opencode';
 import { resourcesCommand } from './commands/resources.tsx';
@@ -53,6 +54,7 @@ export function createProgram(): Command {
   prog.addCommand(configCommand);
   prog.addCommand(feedbackCommand);
   prog.addCommand(ghCommand);
+  prog.addCommand(ghostCommand);
   prog.addCommand(logsCommand);
   prog.addCommand(opencodeCommand);
   prog.addCommand(resourcesCommand);

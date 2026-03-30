@@ -121,6 +121,22 @@ describe('sessionDb', () => {
     expect(result?.finishedAt).toBeUndefined();
     expect(result?.execType).toBeUndefined();
     expect(result?.resumedFrom).toBeUndefined();
+    expect(result?.dbForkProvider).toBeUndefined();
+    expect(result?.dbForkServiceId).toBeUndefined();
+  });
+
+  test('db fork metadata round-trips through the extra field', () => {
+    const db = createTestDb();
+    const session = makeSession({
+      dbForkProvider: 'ghost',
+      dbForkServiceId: 'fork-123',
+    });
+
+    upsertSession(db, session);
+    const result = getSession(db, session.id);
+
+    expect(result?.dbForkProvider).toBe('ghost');
+    expect(result?.dbForkServiceId).toBe('fork-123');
   });
 
   // ==========================================================================

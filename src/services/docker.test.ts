@@ -3,9 +3,11 @@ import BASE_DOCKERFILE from '../../sandbox/base.Dockerfile' with {
   type: 'text',
 };
 import {
+  appendOptionalPgpassFile,
   buildDockerSandboxRootInitScript,
   buildOxLabels,
   computeAgentOverlayHash,
+  computeDbProviderHash,
   computeDockerfileHash,
   computeProjectSetupHash,
   extractLayerHash,
@@ -13,11 +15,29 @@ import {
   formatCpuPercent,
   formatMemUsage,
   getAgentOverlayTag,
+  getDbProviderTag,
   getDockerSandboxSetupTag,
   getProjectSetupTag,
   resolveDockerSandboxPrivilege,
   resolveSandboxImage,
 } from './docker';
+
+describe('appendOptionalPgpassFile', () => {
+  test('appends a .pgpass virtual file when content is provided', () => {
+    expect(
+      appendOptionalPgpassFile([], '/sandbox/home', 'pgpass-line'),
+    ).toEqual([{ path: '/sandbox/home/.pgpass', value: 'pgpass-line' }]);
+  });
+
+  test('leaves files unchanged when no .pgpass content is provided', () => {
+    expect(
+      appendOptionalPgpassFile(
+        [{ path: '/sandbox/home/.claude.json', value: 'claude-creds' }],
+        '/sandbox/home',
+      ),
+    ).toEqual([{ path: '/sandbox/home/.claude.json', value: 'claude-creds' }]);
+  });
+});
 
 describe('formatCpuPercent', () => {
   test('formats values under 10 with one decimal place', () => {
@@ -142,6 +162,18 @@ describe('buildOxLabels', () => {
     expect(labels['ox.resumed-from']).toBe('ox-old-session');
     expect(labels['ox.resume-image']).toBe('ox-resume:abc123');
   });
+
+  test('includes db fork labels when provided', () => {
+    const labels = buildOxLabels({
+      name: 'test',
+      branch: 'main',
+      agent: 'opencode',
+      dbForkProvider: 'ghost',
+      dbForkServiceId: 'fork-123',
+    });
+    expect(labels['ox.db-fork-provider']).toBe('ghost');
+    expect(labels['ox.db-fork-service-id']).toBe('fork-123');
+  });
 });
 
 describe('extractTagHash', () => {
@@ -173,6 +205,12 @@ describe('extractTagHash', () => {
     );
   });
 
+  test('extracts hash from db- provider tag', () => {
+    expect(extractTagHash('ox-sandbox:db-ghost-abc123-def456789012')).toBe(
+      'ghost-abc123-def456789012',
+    );
+  });
+
   test('handles tag-only input', () => {
     expect(extractTagHash('md5-abc123def456')).toBe('abc123def456');
   });
@@ -199,6 +237,12 @@ describe('extractLayerHash', () => {
 
   test('extracts layer hash from a- agent tag', () => {
     expect(extractLayerHash('ox-sandbox:a-claude-aaaaaa-bbbbbbbbbbbb')).toBe(
+      'bbbbbbbbbbbb',
+    );
+  });
+
+  test('extracts layer hash from db- provider tag', () => {
+    expect(extractLayerHash('ox-sandbox:db-ghost-aaaaaa-bbbbbbbbbbbb')).toBe(
       'bbbbbbbbbbbb',
     );
   });
@@ -319,6 +363,37 @@ describe('getAgentOverlayTag', () => {
     );
     // parent layer hash is 'def456789012', first 6 chars = 'def456'
     expect(tag).toMatch(/^ox-sandbox:a-claude-def456-[a-f0-9]{12}$/);
+  });
+});
+
+describe('computeDbProviderHash', () => {
+  test('produces 12-char hex string', () => {
+    const hash = computeDbProviderHash('basehash1234', 'ghost');
+    expect(hash).toMatch(/^[a-f0-9]{12}$/);
+  });
+
+  test('changes when parent hash changes', () => {
+    const h1 = computeDbProviderHash('parent-a', 'ghost');
+    const h2 = computeDbProviderHash('parent-b', 'ghost');
+    expect(h1).not.toBe(h2);
+  });
+
+  test('changes when provider changes', () => {
+    const h1 = computeDbProviderHash('same-parent', 'ghost');
+    const h2 = computeDbProviderHash('same-parent', 'tiger');
+    expect(h1).not.toBe(h2);
+  });
+});
+
+describe('getDbProviderTag', () => {
+  test('returns db- prefixed tag with provider, parent6, and hash12', () => {
+    const tag = getDbProviderTag('ox-sandbox:md5-abc123def456', 'ghost');
+    expect(tag).toMatch(/^ox-sandbox:db-ghost-abc123-[a-f0-9]{12}$/);
+  });
+
+  test('parent6 reflects setup layer hash when built on layered base', () => {
+    const tag = getDbProviderTag('ox-sandbox:psl-abc123-def456789012', 'tiger');
+    expect(tag).toMatch(/^ox-sandbox:db-tiger-def456-[a-f0-9]{12}$/);
   });
 });
 

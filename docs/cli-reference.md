@@ -22,7 +22,7 @@ ox -i "Implement dashboard"           # interactive TUI
 | `-M, --agent-mode <mode>` | Agent mode: `async`, `interactive`, or `plan` |
 | `-f, --follow` | Stream agent output and exit when done |
 | `-i, --interactive` | Launch the full TUI |
-| `-s, --service-id <id>` | Tiger database service ID |
+| `-s, --service-id <id>` | Database service or instance ID |
 | `--no-db-fork` | Skip database fork |
 | `--mount [dir]` | Mount local directory instead of git clone |
 | `-r, --provider <type>` | Sandbox provider: `docker` or `cloud` |
@@ -222,7 +222,7 @@ ox config set --global themeName dracula
 Remove a configuration value.
 
 ```bash
-ox config unset tigerServiceId
+ox config unset dbServiceId
 ox config unset --global model
 ```
 
@@ -341,6 +341,22 @@ Run the GitHub CLI inside a sandbox:
 ox gh pr list
 ox gh issue create --title "Bug report"
 ```
+
+### `ox ghost [args...]`
+
+Run the Ghost CLI inside Docker with your Ghost credentials synced in:
+
+```bash
+ox ghost version
+ox ghost list --json
+ox ghost login --headless
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--mount [dir]` | Mount local directory into container (defaults to cwd) |
 
 ---
 
