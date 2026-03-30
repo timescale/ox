@@ -6,7 +6,7 @@ import { Command } from 'commander';
 import { sendFeedback } from '../services/feedback';
 
 export async function feedbackAction(message: string): Promise<void> {
-  if (!message || !message.trim()) {
+  if (!message?.trim()) {
     console.error('Error: Please provide a feedback message.');
     process.exit(1);
   }

@@ -3,13 +3,14 @@
 // ============================================================================
 
 import type { SelectOption } from '@opentui/core';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   type DbServiceProvider,
   isDbProvider,
   projectConfig,
   readConfig,
 } from '../services/config.ts';
+import { dbProviderOptions } from '../services/db.ts';
 import {
   checkGhostCredentials,
   type GhostDatabase,
@@ -24,7 +25,6 @@ import {
   listServices,
   type TigerService,
 } from '../services/tiger.ts';
-
 import { GhAuth } from './GhAuth.tsx';
 import { Loading } from './Loading.tsx';
 import { Selector } from './Selector.tsx';
@@ -384,27 +384,6 @@ export function SetupDb({ onComplete }: SetupDbProps) {
     });
   };
 
-  const providerOptions: SelectOption[] = useMemo(
-    () => [
-      {
-        name: 'Tiger',
-        description: 'Timescale Tiger database service',
-        value: 'tiger',
-      },
-      {
-        name: 'Ghost',
-        description: 'Ghost database service (ghost.build)',
-        value: 'ghost',
-      },
-      {
-        name: '(None)',
-        description: 'No database provider - skip database forks',
-        value: '__null__',
-      },
-    ],
-    [],
-  );
-
   const providerInitialIndex =
     currentProvider === 'tiger' ? 0 : currentProvider === 'ghost' ? 1 : 2;
 
@@ -422,7 +401,7 @@ export function SetupDb({ onComplete }: SetupDbProps) {
         key="setup-db-provider"
         title="Database Provider"
         description="Choose the default database provider for forks."
-        options={providerOptions}
+        options={dbProviderOptions}
         initialIndex={providerInitialIndex}
         onSelect={handleProviderSelect}
         onCancel={handleCancel}

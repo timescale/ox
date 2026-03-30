@@ -33,6 +33,7 @@ import {
   readConfig,
   userConfig,
 } from '../services/config';
+import { dbProviderOptions } from '../services/db';
 import { applyHostGhCreds, checkGhCredentials } from '../services/gh';
 import { type GhAuthProcess, startContainerGhAuth } from '../services/ghAuth';
 import {
@@ -625,24 +626,6 @@ export function ConfigWizard({
 
   // ---- Step: Database Provider Selection ----
   if (step === 'db-provider') {
-    const providerOptions: SelectOption[] = [
-      {
-        name: 'Tiger',
-        description: 'Timescale Tiger database service',
-        value: 'tiger',
-      },
-      {
-        name: 'Ghost',
-        description: 'Ghost database service (ghost.build)',
-        value: 'ghost',
-      },
-      {
-        name: '(None)',
-        description: 'No database provider - skip database forks',
-        value: '__none__',
-      },
-    ];
-
     const initialIndex =
       config?.dbServiceProvider === 'tiger'
         ? 0
@@ -655,12 +638,12 @@ export function ConfigWizard({
         key="db-provider"
         title={`Step ${stepNumber('db-provider')}/${steps.length}: Database Provider`}
         description="Choose the default database provider for forks."
-        options={providerOptions}
+        options={dbProviderOptions}
         initialIndex={initialIndex}
         showBack
         onSelect={(value) => {
           const selectedProvider =
-            value === '__none__' ? null : (value as DbServiceProvider);
+            value === '__null__' ? null : (value as DbServiceProvider);
 
           ghostAuthProcess?.cancel();
           setGhostAuthProcess(null);

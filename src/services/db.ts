@@ -2,6 +2,7 @@
 // Database Fork Service
 // ============================================================================
 
+import type { SelectOption } from '@opentui/core';
 import { raceAbort, throwIfAborted } from '../utils/abort.ts';
 import { formatShellError, type ShellError } from '../utils/shell.ts';
 import type { DbServiceProvider } from './config';
@@ -20,7 +21,7 @@ export function parseEnvOutput(output: string): Record<string, string> {
   const envVars: Record<string, string> = {};
   for (const line of output.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || !trimmed.includes('=')) continue;
+    if (!trimmed.includes('=')) continue;
     const eqIndex = trimmed.indexOf('=');
     const key = trimmed.substring(0, eqIndex);
     const value = trimmed.substring(eqIndex + 1);
@@ -340,3 +341,21 @@ export async function forkDatabase(
       );
   }
 }
+
+export const dbProviderOptions: SelectOption[] = [
+  {
+    name: 'Ghost',
+    description: 'ghost.build database service',
+    value: 'ghost',
+  },
+  {
+    name: 'Tiger Data',
+    description: 'Tiger Cloud database service',
+    value: 'tiger',
+  },
+  {
+    name: '(None)',
+    description: 'No database provider - skip database forks',
+    value: '__null__',
+  },
+];
